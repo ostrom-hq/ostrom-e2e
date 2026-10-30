@@ -16,6 +16,11 @@ export interface Caller {
    * to be an allowed origin (the console's), besides its CSRF token.
    */
   readonly origin?: string;
+  /**
+   * The organization a request acts in, sent as `Ostrom-Org` (id or slug, ostrom-server#64): the "current org" routes
+   * without `{org}` in their path (rules, sessions, workflows, spending, activity, gates…) resolve it from this header.
+   */
+  readonly org?: string;
 }
 
 export interface RouteCase {
@@ -47,6 +52,7 @@ export function headersOf(caller: Caller, method: string, json: boolean): Record
   if (caller.csrf && method !== 'GET' && method !== 'HEAD') h['x-csrf-token'] = caller.csrf;
   if (caller.from) h['x-forwarded-for'] = caller.from;
   if (caller.origin) h['origin'] = caller.origin;
+  if (caller.org) h['ostrom-org'] = caller.org;
   return h;
 }
 

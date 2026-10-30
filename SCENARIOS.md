@@ -3224,6 +3224,362 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Priorité : jalon
 - Statut : codé : `scenarios/isolation.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48 ; toujours rouge au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947)
 
+## PARC : Parcours client contre le vrai serveur (`demo/PARCOURS.md`)
+
+Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre le vrai serveur. Les tests sondent les routes exactes dont ils ont besoin et restent sautés, avec les routes manquantes dans leur titre, jusqu'à ce qu'elles soient sur main : le banc allume chaque étape à la fusion de sa PR serveur. Les routes « de l'org courante » sans `{org}` reçoivent l'en-tête `Ostrom-Org` (ostrom-server#64, décision 1 de `.coord/VAGUE-PRODUIT.md`) ; les routes d'une org suivent la forme servie `/api/v1/orgs/{org}/…`. Les écrans (web, app) sont hors du banc : chaque scénario prouve la route que l'écran lit, et la commande CLI quand elle existe.
+
+Étapes déjà couvertes par une autre famille, contre le vrai serveur (pas de doublon) :
+
+| Étape | Scénarios |
+|---|---|
+| 1.1 Connexion par lien e-mail | E2E-AUTH-001 |
+| 1.2 Connexion GitHub | E2E-AUTH-002 |
+| 1.3 Première connexion, création du compte | E2E-AUTH-001, E2E-AUTH-002 (le compte naît à la première connexion) |
+| 2.1 Onboarding guidé | aucune route serveur ; `ostrom init` en attente (famille HARNESS) |
+| 2.11 Révocation et déconnexion | E2E-AUTH-004 (complété par E2E-PARC-010 et 011) |
+| 5.1 `ostrom login` (appareil) | E2E-LOGIN-001, E2E-AUTH-003 |
+| 5.3 Action protégée, la porte s'ouvre (boucle CLI) | E2E-GATE-001 (complété par E2E-PARC-013 et 027) |
+| 5.4 Le second membre dit oui (step-up) | E2E-YES-001, E2E-AUTH-007 |
+| 5.6 Auto-approbation refusée | E2E-YES-003 |
+| 5.8 Isolation entre deux orgs | E2E-ISO-001, E2E-ISO-002 |
+| 6.5 Facturation : plan, checkout, portail | E2E-BILL-005, E2E-BILL-006, E2E-BILL-007 |
+
+Étapes de ce chapitre : 2.2 → PARC-001 ; 2.3 → 002 ; 2.4 → 003 ; 2.5 → 004 ; 2.6 → 005 ; 2.7 → 006 ; 2.8 → 007 ; 2.9 → 008 ; 2.10 → 009 ; 2.11 → 010, 011 ; 3.1 → 012 ; 3.2 → 013 ; 3.3 → 014, 015 ; 3.4 → 016, 017 ; 3.5 → 018, 019 ; 3.6 → 020 ; 4.1 → 021, 022 ; 4.2 → 023 ; 4.3 → 024 ; 5.2 → 025, 026, 017 ; 5.3 → 027 ; 5.5 → 028 ; 5.7 → 029, 030 ; 6.1 → 031 ; 6.2 → 032 ; 6.3 → 033 ; 6.4 → 034, 019 ; 6.6 → 035 ; 6.7 → 036, 037.
+
+### E2E-PARC-001 — 2.2 Créer l'organisation et la relire, propriétaire
+
+- Étapes : Une personne neuve, connectée par lien e-mail, fait `POST /api/v1/orgs` `{name}`, puis `GET /api/v1/orgs/{id}` ; le même `POST` sans identifiant.
+- Attendu : 201 `{id, slug, name, role: owner}` ; la relecture rend le même id, slug et nom ; sans identifiant, 401 avec l'enveloppe d'erreur.
+- Surfaces : serveur (pas d'écran de création d'org ; Écrans hors du banc : le scénario prouve la route que l'écran lit.)
+- Source : `demo/PARCOURS.md` 2.2
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-002 — 2.3 Plusieurs adhésions : la liste des orgs et l'org courante par `Ostrom-Org`
+
+- Étapes : A a son org, B l'invite dans la sienne, A accepte ; A lit `GET /api/v1/me/organizations` ; A appelle une route de l'org courante (`GET /api/v1/budgets`) avec l'en-tête `Ostrom-Org` d'une org C où il n'est pas.
+- Attendu : `{items: [{id, slug, name, avatarUrl, role}]}` avec les deux orgs, `owner` pour la sienne et `member` pour celle de B ; C ne voit pas l'org de A dans sa liste ; l'en-tête d'une org étrangère est refusé (400, 403 ou 404) sans rien de C ; sans identifiant, 401.
+- Surfaces : serveur (le sélecteur de web#28 lit cette route)
+- Source : `demo/PARCOURS.md` 2.3
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#64, `GET /api/v1/me/organizations` et l'en-tête `Ostrom-Org`)
+
+### E2E-PARC-003 — 2.4 Lire l'organisation par id et par slug ; une autre org n'en voit rien
+
+- Étapes : Le propriétaire lit `GET /api/v1/orgs/{id}` puis `GET /api/v1/orgs/{slug}` ; le propriétaire d'une autre org lit le même id ; puis sans identifiant.
+- Attendu : `{id, slug, name, role: owner, createdAt}`, le même par le slug ; l'autre org reçoit un refus sans le nom de l'org ; 401 sans identifiant. La forme `/orgs/{org}` est la référence (décision 1 de VAGUE-PRODUIT) : la console s'y aligne, `GET /org` n'est pas recréé.
+- Surfaces : serveur (Écrans hors du banc : le scénario prouve la route que l'écran lit.)
+- Source : `demo/PARCOURS.md` 2.4
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-004 — 2.5 Connecter GitHub : installation de l'App, rappel forgé refusé, dépôts de l'org
+
+- Étapes : Le propriétaire suit `GET /api/v1/github/app/install/start` (sans suivre la redirection) ; appelle `/install/callback` avec un `state` jamais émis ; lit `GET /api/v1/repos` ; `GET /api/v1/github/app/manifest/start` sans identifiant.
+- Attendu : Redirection 302/303/307 vers GitHub (`installations/new` ou `apps/…`) avec un `state` ; le rappel forgé est refusé (4xx), rien d'installé ; `{items: []}` pour une org sans installation ; manifeste et dépôts : 401 sans identifiant.
+- Surfaces : serveur, faux GitHub (pas d'écran ; Écrans hors du banc : le scénario prouve la route que l'écran lit.)
+- Source : `demo/PARCOURS.md` 2.5
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#44 (brouillon) pour l'installation ; `GET /repos` et le manifeste : aucune PR, forme du contrat `openapi.yaml`)
+
+### E2E-PARC-005 — 2.6 Inviter l'équipe, voir le membre, changer son rôle
+
+- Étapes : Le propriétaire invite une adresse (`POST /api/v1/orgs/{org}/members/invites`), la lit dans `GET …/invitations` ; l'invité accepte ; le propriétaire lit `GET …/members`, passe le membre `admin` (`PATCH …/members/{login}`) et relit ; le membre tente de se faire `owner` ; une autre org lit les membres.
+- Attendu : L'invitation en attente porte l'adresse ; le membre apparaît par son login ; `PATCH` rend `{role: admin}` et la relecture aussi ; l'auto-promotion en `owner` est refusée (400, 403, 409 ou 422) ; l'autre org ne voit pas le login. `ostrom invite` (en attente côté CLI) n'est pas couvert.
+- Surfaces : serveur (Écrans hors du banc : le scénario prouve la route que l'écran lit.)
+- Source : `demo/PARCOURS.md` 2.6
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-006 — 2.7 L'invitation se prévisualise avant d'être acceptée, une seule fois
+
+- Étapes : Le propriétaire invite une adresse en `admin` ; `POST /api/v1/invitations/preview` `{token}` (jeton lu dans le mail, sans identifiant) ; l'invité accepte, puis rejoue l'acceptation ; un jeton forgé est prévisualisé.
+- Attendu : `{orgName, orgSlug, role: admin, email, expiresAt}` ; la seconde acceptation est refusée ; le jeton forgé rend 400, 404 ou 410.
+- Surfaces : serveur, boîte mail du banc (pas d'écran d'acceptation ; Écrans hors du banc : le scénario prouve la route que l'écran lit.)
+- Source : `demo/PARCOURS.md` 2.7
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-007 — 2.8 Compte de modèle partagé : ajout, édition, pause, retrait ; le relais du modèle
+
+- Étapes : Le propriétaire ajoute un compte `claude` (`POST /api/v1/accounts`, jetons factices), le relit dans la liste, le renomme et le met en pause (`PATCH`), le supprime ; une autre org lit la liste ; `GET /api/v1/inference/v1/models` avec la session puis sans identifiant.
+- Attendu : 201 `{id, provider: claude, label, mine: true}` ; le jeton d'accès ne revient jamais (ni à la création ni dans la liste) ; `PATCH` rend `{label, paused: true}` ; l'autre org ne voit pas l'id ; supprimé, il disparaît de la liste ; le relais liste les modèles (`object: list`) ou refuse la session (401/403), et rend 401 sans identifiant. Groupes (`/groups`, planned) hors du scénario.
+- Surfaces : serveur (Écrans hors du banc : le scénario prouve la route que l'écran lit.)
+- Source : `demo/PARCOURS.md` 2.8
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-008 — 2.9 Serveur MCP : déclaration, édition, retrait ; appels et usage
+
+- Étapes : Le propriétaire déclare un serveur `http` (`POST /api/v1/mcp/servers`), le liste, le modifie (`PUT /mcp/servers/{name}`, désactivé), lit `GET /mcp/calls` et `GET /mcp/usage`, le supprime ; une autre org liste les serveurs.
+- Attendu : 201 `{name, transport: http, enabled: true}` ; `PUT` rend la nouvelle URL et `enabled: false` ; `{items: []}` pour les appels d'une org neuve ; l'usage est un objet ; l'autre org ne voit pas le nom ; supprimé, il disparaît ; 401 sans identifiant. Assignations et politiques : couvertes par la famille MCP.
+- Surfaces : serveur (`ostrom mcp` n'est que de la plomberie : non couvert)
+- Source : `demo/PARCOURS.md` 2.9
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-009 — 2.10 Secret : écrit, tourné, supprimé ; la valeur n'est jamais relue
+
+- Étapes : Le propriétaire écrit un secret (`POST /api/v1/secrets`), le tourne (`PUT /secrets/{name}`), liste, le supprime ; une autre org liste.
+- Attendu : `{name, version: 1}` puis `version: 2` ; aucune réponse ne contient l'une ou l'autre valeur, aucun élément de la liste n'a de champ `value` ; l'autre org ne voit pas le nom ; supprimé, il disparaît ; 401 sans identifiant.
+- Surfaces : serveur (Écrans hors du banc : le scénario prouve la route que l'écran lit.)
+- Source : `demo/PARCOURS.md` 2.10
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-010 — 2.11 Jeton de console : créé une fois avec son secret, listé, tourné, révoqué
+
+- Étapes : Le propriétaire crée un jeton `profile:read` (`POST /api/v1/tokens`), le lit dans `GET /tokens`, l'utilise sur `GET /api/v1/auth/me`, le tourne (`POST /tokens/{id}/rotate`), utilise le nouveau, révoque le nouveau.
+- Attendu : `{token: {name, scopes}, secret}` une seule fois, le secret absent de la liste ; l'ancien secret rend 401 après la rotation (même transaction), le nouveau 200 ; révoqué (204), il rend 401 et quitte la liste. La révocation par déconnexion « partout » reste à E2E-AUTH-004.
+- Surfaces : serveur (pas d'écran de réglages ; Écrans hors du banc : le scénario prouve la route que l'écran lit.)
+- Source : `demo/PARCOURS.md` 2.11
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-011 — 2.11 Clés de service, appareils et sessions du navigateur
+
+- Étapes : Le propriétaire crée une clé de service (`POST /api/v1/service-keys`), liste les clés, les appareils (`GET /devices`) et ses sessions (`GET /auth/sessions`) ; une autre org liste les clés.
+- Attendu : 201 `{id, name, scopes, createdAt, secret}`, le secret absent de la liste ; aucun appareil pour une personne sans `ostrom login` ; au moins la session courante ; l'autre org ne voit pas la clé ; 401 sans identifiant sur les trois listes.
+- Surfaces : serveur (Écrans hors du banc : le scénario prouve la route que l'écran lit.)
+- Source : `demo/PARCOURS.md` 2.11
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`/service-keys`, `/devices`, `/auth/sessions` planned) ; forme du contrat `openapi.yaml`)
+
+### E2E-PARC-012 — 3.1 Règles : liste vide, état de l'analyse, édition et acceptation en masse
+
+- Étapes : Une org neuve lit `GET /api/v1/rules` et `GET /analysis/state`, demande `POST /analysis/start` sans dépôt ; si `POST /rules` est servi, une règle est créée, éditée (`PATCH /rules/{id}`), acceptée par `POST /rules/bulk` ; une autre org tente le même `bulk` ; `PATCH` d'un id inconnu.
+- Attendu : `{items: []}` ; l'état porte `repos`, `rules`, `workflows` ; le démarrage sans dépôt est refusé (400, 409 ou 422) ou accepté (202), jamais une erreur ; `bulk` rend `{updated: 1}` et le statut `accepted` ; l'autre org ne voit pas la règle et n'en met à jour aucune ; 404 pour l'id inconnu ; 401 sans identifiant.
+- Surfaces : serveur (l'écran `/rules` lit ces routes)
+- Source : `demo/PARCOURS.md` 3.1
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`/rules`, `/rules/{id}`, `/rules/bulk`, `/analysis/*` planned) ; forme du contrat `openapi.yaml`)
+
+### E2E-PARC-013 — 3.2 Catalogue des portes de l'org et sa forme signée
+
+- Étapes : Le propriétaire lit `GET /api/v1/gates/catalog` puis `GET /api/v1/gates/catalog/signed`.
+- Attendu : 200 avec un objet ; la forme signée porte sa signature (`sig`, `signature` ou `kid`) ; 401 sans identifiant. Création d'un harnais (`ostrom harness add`, en attente) : famille HARNESS.
+- Surfaces : serveur (le hook lit le catalogue signé)
+- Source : `demo/PARCOURS.md` 3.2
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#43)
+
+### E2E-PARC-014 — 3.3 Qui approuve quoi : le graphe des approbateurs
+
+- Étapes : Le propriétaire lit `GET /api/v1/gates/approvers`.
+- Attendu : `{approvers: [], unanswered: [], ungated: []}` (tableaux) ; 401 sans identifiant.
+- Surfaces : serveur (l'écran `/approvers` lit cette route)
+- Source : `demo/PARCOURS.md` 3.3
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#45 (empilée sur #43))
+
+### E2E-PARC-015 — 3.3 Politique d'auto-approbation : lue et réglée par un admin, refusée à un membre
+
+- Étapes : Le propriétaire lit `GET /api/v1/gates/policy`, met l'autre valeur (`PUT`), relit ; un membre invité tente le `PUT` ; une valeur inconnue.
+- Attendu : `{selfApproval}` rendu puis relu à l'identique ; 403 pour le membre ; 400 pour la valeur inconnue. Hypothèse : les valeurs `never` et `allowed` (le contrat ne donne pas d'énumération).
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 3.3
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`GET`/`PUT /gates/policy` planned) ; forme du contrat `openapi.yaml`)
+
+### E2E-PARC-016 — 3.4 Politique des modèles et réglages d'inférence
+
+- Étapes : Le propriétaire règle `PUT /api/v1/policy/models` `{allowed, default, byMember}` et `PUT /inference/settings` `{useSharedAccounts: false}`, relit les deux ; une autre org relit les siens.
+- Attendu : Les deux relectures rendent ce qui a été réglé ; l'autre org garde `useSharedAccounts: true` et n'a pas les modèles de A ; 401 sans identifiant.
+- Surfaces : serveur (pas d'écran ; `ostrom policy` en attente, non couvert)
+- Source : `demo/PARCOURS.md` 3.4
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-017 — 3.4 Politique des agents que lit `ostrom claude`
+
+- Étapes : Le propriétaire lit `GET /api/v1/policy/agents?agent=claude`.
+- Attendu : `{allowed: bool}`, avec `reason` quand c'est non ; 401 sans identifiant.
+- Surfaces : serveur (lu par la CLI au lancement)
+- Source : `demo/PARCOURS.md` 3.4 et 5.2
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`GET /policy/agents` planned) ; forme du contrat `openapi.yaml`)
+
+### E2E-PARC-018 — 3.5 Budget de l'org : réglé, listé avec sa période, lu comme budget du membre
+
+- Étapes : Le propriétaire règle `PUT /api/v1/budgets` `{scope: org, usdPerMonth: 42, hardStop: true}`, lit `GET /budgets` et `GET /budgets/me` ; une autre org lit ses budgets ; trois formes refusées.
+- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; budget par jour, budget sans arrêt et portée inconnue : 400.
+- Surfaces : serveur (l'écran `/spend` lit ces routes)
+- Source : `demo/PARCOURS.md` 3.5
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-019 — 3.5 et 6.4 Dépenses de la semaine et du mois contre le budget
+
+- Étapes : Le propriétaire lit `GET /api/v1/spending?period=week` puis `month`, puis une période inconnue.
+- Attendu : `{period, from, to, totalUsd: 0, byAgent, byRepo, byPerson, daily}` (tableaux), `from` avant `to` ; 400 pour la période inconnue ; 401 sans identifiant.
+- Surfaces : serveur (l'écran Spend et l'app lisent cette route)
+- Source : `demo/PARCOURS.md` 3.5 et 6.4
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#72)
+
+### E2E-PARC-020 — 3.6 Journal des décisions
+
+- Étapes : Une org neuve lit `GET /api/v1/decisions`.
+- Attendu : `{items: []}` ; 401 sans identifiant.
+- Surfaces : serveur (l'écran `/decisions` lit cette route)
+- Source : `demo/PARCOURS.md` 3.6
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`GET /decisions` planned) ; forme du contrat `openapi.yaml`)
+
+### E2E-PARC-021 — 4.1 Workflow : créé, édité avec sa version, listé, supprimé ; le paquet courant
+
+- Étapes : Le propriétaire crée un workflow (`POST /api/v1/workflows` `{workflow}`), l'édite avec `expectedVersion`, rejoue la même version, liste, lit `GET /packages/current`, supprime ; une autre org liste.
+- Attendu : La création et l'édition rendent le workflow (nouveau nom) ; la version périmée rend 409 ; l'autre org ne voit pas l'id ; le paquet courant rend 200 ou 404 (aucun paquet compilé), jamais une erreur ; supprimé, il disparaît ; 401 sans identifiant. Hypothèse : le corps de #43 (`SaveWorkflowRequest {workflow, expectedVersion}`), le workflow suivant le schéma `Workflow` du contrat.
+- Surfaces : serveur (`ostrom harness` en attente, non couvert)
+- Source : `demo/PARCOURS.md` 4.1
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#43)
+
+### E2E-PARC-022 — 4.1 Exécution d'un workflow, listée sous son workflow et parmi les exécutions
+
+- Étapes : Le propriétaire crée un workflow, lance `POST /api/v1/workflows/{id}/runs` `{inputs: {}}`, lit `GET /workflows/{id}/runs` et `GET /runs` ; une autre org lit `/runs`.
+- Attendu : 201 `{id, workflowId, workflowName, status, startedBy, source, startedAt}` ; l'exécution est dans les deux listes ; l'autre org ne la voit pas.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 4.1
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`/workflows/{id}/runs`, `/runs` planned) ; forme du contrat `openapi.yaml`)
+
+### E2E-PARC-023 — 4.2 Automatisation : créée, éditée, activée, désactivée, essai à blanc, secret tourné, supprimée
+
+- Étapes : Le propriétaire crée une automatisation cron (`POST /api/v1/automations`), l'édite (`PUT`, version 1), l'active puis la désactive, lance un essai à blanc (`POST /{id}/run` `{dryRun: true}`), lit ses exécutions ; crée une automatisation webhook et tourne son secret ; une autre org liste ; suppression.
+- Attendu : 201, `enabled: false` et `version: 1` à la création ; `PUT` rend `version: 2` ; activée, elle a un `nextRunAt` ; l'essai à blanc rend une exécution de l'automatisation ; le webhook a une `webhookUrl`, le secret tourné diffère du premier et l'ancien a un `previousSecretValidUntil` ; l'autre org ne voit pas l'id ; supprimée, 404.
+- Surfaces : serveur (pas d'écran de création ; Écrans hors du banc : le scénario prouve la route que l'écran lit.)
+- Source : `demo/PARCOURS.md` 4.2
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-024 — 4.3 Attente : posée, lue, répondue une fois ; une autre annulée
+
+- Étapes : Le propriétaire pose une attente (`POST /api/v1/waits` `{question}`), la lit, y répond (`yes` avec une note), répond une seconde fois, répond par une action absente sur une autre, en annule une troisième ; une autre org lit la première.
+- Attendu : 201 `{status: open, question}` ; après la réponse, `status: resolved` et `answer: {action: yes, values: {note}}` ; la seconde réponse est refusée (4xx) ; l'action absente rend 400 ; l'annulée lit `cancelled` ; l'autre org n'en lit rien. `ostrom wait` : famille CLOUD.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 4.3
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-025 — 5.2 Lancement : jeton d'agent, session tenue en vie, vue, close, rouverte
+
+- Étapes : Le propriétaire fait `POST /api/v1/launches` `{agent: claude, repo}` ; avec le jeton d'agent, `alive`, `seen`, `end`, `reopen` sur la session ouverte ; une autre org liste les sessions ; sans identifiant.
+- Attendu : 201 `{launchId, agentToken, expiresAt}` ; la session apparaît dans `GET /sessions` ; `end` rend `{session, receipt}` ; `reopen` rend `reopened: true` ; l'autre org ne voit pas la session ; 401 sans identifiant. La boucle complète par la vraie CLI reste à E2E-CLAUDE-001.
+- Surfaces : serveur (la CLI `ostrom claude` s'arrête sur « launch not created » sans cette route)
+- Source : `demo/PARCOURS.md` 5.2
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR pour `POST /launches` ; `/sessions` : ostrom-server#26 et #43)
+
+### E2E-PARC-026 — 5.2 Reçu de workflow d'une session
+
+- Étapes : Après un lancement, la session demande `POST /api/v1/sessions/{id}/workflow-receipt` `{digest, agent}`.
+- Attendu : 200 `{receipt, verification}`, le reçu portant le digest ; ou, sans paquet de ce digest, un refus (400, 404, 409, 422), jamais un reçu de rien ; 401 sans identifiant.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 5.2
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`POST /sessions/{id}/workflow-receipt` planned), et `POST /launches`)
+
+### E2E-PARC-027 — 5.3 Contrôles de workflow et notifications d'une session
+
+- Étapes : Une org neuve lit `GET /api/v1/checks` et `GET /notifications`, puis rapporte un contrôle et une notification pour un digest sans paquet.
+- Attendu : Listes vides ; les rapports ne cassent rien (pas de 5xx) ; un contrôle accepté (201) porte `nodeId`, `scriptId` et reste invisible à une autre org ; 401 sans identifiant.
+- Surfaces : serveur (le hook `ostrom hook` les rapporte)
+- Source : `demo/PARCOURS.md` 5.3
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`/checks`, `/notifications` planned) ; forme du contrat `openapi.yaml`)
+
+### E2E-PARC-028 — 5.5 `reserve`, `consume` et `release` refusent une porte inconnue et l'absence d'identifiant
+
+- Étapes : Le propriétaire appelle les trois verbes sur un id de porte au hasard, puis sans identifiant.
+- Attendu : 400, 403 ou 404 avec l'enveloppe d'erreur ; 401 sans identifiant. Le passage réel de l'action reste à E2E-GATE-001.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 5.5
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-029 — 5.7 Reçus d'une org neuve : liste vide, clés publiques, reçu inconnu
+
+- Étapes : Une org neuve lit `GET /api/v1/receipts`, `GET /receipts/keys`, puis un reçu inconnu et sa vérification.
+- Attendu : `{items: []}` ; `{keys: [{kid, alg, publicKeyPem}]}` avec au moins une clé ; 404 pour le reçu et sa vérification ; 401 sans identifiant. `ostrom receipts` et `verify` : famille RECEIPT.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 5.7
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-030 — 5.7 Paquet de preuve d'un reçu
+
+- Étapes : Une org lit `GET /api/v1/receipts/{id}/bundle` d'un reçu inconnu, puis de son premier reçu s'il y en a un ; une autre org lit le même paquet.
+- Attendu : 404 pour l'inconnu ; `{format, receipt, chain, package, keys, exportedAt}` pour le sien ; rien pour l'autre org ; 401 sans identifiant.
+- Surfaces : serveur (le téléchargement de la console échoue sans cette route)
+- Source : `demo/PARCOURS.md` 5.7
+- Priorité : jalon
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`GET /receipts/{id}/bundle` planned) ; forme du contrat `openapi.yaml`)
+
+### E2E-PARC-031 — 6.1 Sessions en cours d'une org neuve
+
+- Étapes : Une org neuve lit `GET /api/v1/sessions` et une session inconnue.
+- Attendu : `{items: []}` ; 404 ; 401 sans identifiant. `ostrom logs` (en attente) non couvert.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 6.1
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#26 (et #43))
+
+### E2E-PARC-032 — 6.2 Sessions cloud et runners de l'appelant
+
+- Étapes : Une org neuve lit `GET /api/v1/cloud/sessions`, `GET /runners` et une session cloud inconnue.
+- Attendu : `{items: []}` ; chaque runner porte `id`, `name`, `status`, `labels` ; 404 pour l'inconnue ; 401 sans identifiant. Le lancement cloud (Kubernetes seulement) : famille CLOUD.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 6.2
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#72 pour `GET /runners`)
+
+### E2E-PARC-033 — 6.3 Fil d'activité de l'org
+
+- Étapes : Une org lit `GET /api/v1/activity`, puis avec `repo` d'un dépôt absent ; une autre org lit le sien.
+- Attendu : Chaque élément porte `id`, `at`, `kind`, `summary`, `actor {kind, name}`, du plus récent au plus ancien ; vide pour le dépôt absent ; l'autre org n'y voit rien de A ; 401 sans identifiant.
+- Surfaces : serveur (l'onglet Activity de l'app lit cette route ; pas d'écran web)
+- Source : `demo/PARCOURS.md` 6.3
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#72)
+
+### E2E-PARC-034 — 6.4 Usage d'une org neuve
+
+- Étapes : Une org neuve lit `GET /api/v1/usage`, `/usage/summary` et `/usage/events`.
+- Attendu : 200 et un objet sur les trois ; `{events: []}` ; 401 sans identifiant. `/usage/live` est un flux : hors du scénario.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 6.4
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-035 — 6.6 Import TeamCode : refus
+
+- Étapes : `POST /api/v1/import/teamcode` sans identifiant, avec un corps mal formé par le propriétaire, puis par un membre invité.
+- Attendu : 401 ; 400 ou 422 ; 403 (propriétaire ou admin seulement). L'import réel demande une base TeamCode factice : famille TC.
+- Surfaces : serveur (`ostrom import teamcode` sur main, non couvert ici)
+- Source : `demo/PARCOURS.md` 6.6
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-036 — 6.7 App mobile : connexion PKCE, file des oui, vue d'une demande, préférences
+
+- Étapes : `POST /api/v1/auth/mobile/token` avec un code jamais émis ; le propriétaire lit `GET /approvals/queue`, une vue inconnue (`/approvals/{id}/view`), règle et relit `PUT /me/notifications`.
+- Attendu : Le code forgé est refusé (400 ou 401) sans jeton ; la file porte `pending`, `recent`, `you` ; 404 pour la vue inconnue ; les préférences relues sont celles réglées ; 401 sans identifiant sur la file.
+- Surfaces : serveur (l'app ne peut pas se connecter au vrai serveur sans ces routes ; Maestro hors du scénario)
+- Source : `demo/PARCOURS.md` 6.7
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`/auth/mobile/token`, `/approvals/queue`, `/approvals/{id}/view`, `/me/notifications` planned) ; forme du contrat `openapi.yaml`)
+
+### E2E-PARC-037 — 6.7 Appareil de notification : enregistré, jeton jamais relu, retiré
+
+- Étapes : Le propriétaire enregistre un appareil (`POST /api/v1/push-devices`), une autre org tente de le supprimer, le propriétaire le supprime.
+- Attendu : 201 `{id, provider, platform, locale, createdAt}` sans le jeton push ; refus pour l'autre org ; suppression acceptée ; 401 sans identifiant.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 6.7
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#47)
+
+
 ## Récapitulatif
 
 | Famille | Intitulé | Scénarios | dont jalon | P1 | P2 |
