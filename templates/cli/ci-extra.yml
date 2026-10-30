@@ -1,45 +1,41 @@
-# Extra job for ostrom-cli's .github/workflows/ci.yml, next to the `linux` job of the CONVENTIONS
-# template (ostrom-core/docs/conventions/.github/workflows/build.yml). Job name = required check on main.
-jobs:
-  # THIS commit's native `ostrom` against the real server (ostrom-server main) and PostgreSQL, driving the fake
-  # agent of the bench (OSTROM_CLAUDE_BIN / OSTROM_CODEX_BIN), plus the hook start-up budget.
-  e2e:
-    name: e2e
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    services:
-      postgres:
-        image: postgres:18
-        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: This CLI, built
-        id: cli
-        uses: ostrom-hq/ostrom-e2e/.github/actions/cli@main
-        with:
-          path: .
-      - name: Real Ostrom server from main
-        id: server
-        uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
-        with:
-          deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
-          database-url: postgresql://localhost:5432/ostrom
-          required: "false" # flip to "true" once ostrom-server meets the contract (QA does it)
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ostrom-hq/ostrom-e2e
-          ssh-key: ${{ secrets.DEPLOY_KEY_E2E }}
-          path: .ostrom/e2e
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with: { package_json_file: .ostrom/e2e/package.json }
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version-file: .ostrom/e2e/.nvmrc }
-      - name: Bench scenarios
-        working-directory: .ostrom/e2e
-        env:
-          OSTROM_E2E_CLI_BIN: ${{ steps.cli.outputs.bin }}
-          OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.url || '' }}
-        run: pnpm install --frozen-lockfile && pnpm e2e
+# Fragment, not a workflow: what ostrom-cli's single `ci` job (CONVENTIONS template, JOURNAL 03:10) adds after its own
+# detekt + jvmTest + koverVerify (100 %) + linuxX64Test steps. One runner for everything on a pull request.
+# 1. Add this service to the `ci` job:
+services:
+  postgres:
+    image: postgres:18
+    env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+    ports: ["5432:5432"]
+    options: >-
+      --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+# 2. Append these steps after the tests (the job has already checked out this repository):
+steps:
+  # THIS commit's native `ostrom` against the real server (ostrom-server main) and PostgreSQL, driving the fake agent
+  # of the bench (OSTROM_CLAUDE_BIN / OSTROM_CODEX_BIN), plus the hook start-up budget.
+  - name: This CLI, built
+    id: cli
+    uses: ostrom-hq/ostrom-e2e/.github/actions/cli@main
+    with:
+      path: .
+  - name: Real Ostrom server from main
+    id: server
+    uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
+    with:
+      deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
+      database-url: postgresql://localhost:5432/ostrom
+      required: "false" # QA flips it to "true" once ostrom-server meets the contract
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    with:
+      repository: ostrom-hq/ostrom-e2e
+      ssh-key: ${{ secrets.DEPLOY_KEY_E2E }}
+      path: .ostrom/e2e
+  - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+    with: { package_json_file: .ostrom/e2e/package.json }
+  - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+    with: { node-version-file: .ostrom/e2e/.nvmrc, cache: pnpm, cache-dependency-path: .ostrom/e2e/pnpm-lock.yaml }
+  - name: Bench scenarios (e2e)
+    working-directory: .ostrom/e2e
+    env:
+      OSTROM_E2E_CLI_BIN: ${{ steps.cli.outputs.bin }}
+      OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.url || '' }}
+    run: pnpm install --frozen-lockfile && pnpm e2e

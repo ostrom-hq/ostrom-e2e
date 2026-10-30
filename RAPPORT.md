@@ -8,11 +8,11 @@ ni suppression, historique linéaire.
 
 | Dépôt | Socle fusionné | Couverture mesurée (lignes / branches) | Unitaires | Intégration | E2E | Charge | Checks obligatoires | Protection de `main` | Dernier run vert |
 |---|---|---|---|---|---|---|---|---|---|
-| ostrom-core | oui (#1, #3, #5) | pas encore mesurée : Kover arrive avec ostrom-core#8 (`chore/conventions`) | 26 | — | — | — | `native` (puis `linux`, `contract`) | posée | — |
-| ostrom-cli | non (ostrom-cli#1 en CI) | 100 % imposé dans le socle (`coverage`), pas encore sur `main` | 0 sur `main` | — | — | — | PR seule (puis `coverage`, `native-tests`, `e2e`) | posée | — |
-| ostrom-server | non (ostrom-server#1 en CI) | `ops/stripe` : 100 % (job `stripe-provision`) ; Kover arrive avec le socle | — | 28 (stripe-mock) | — | — | PR seule (puis `build`, `coverage`, `native-tests`, `e2e`, `load-smoke`) | posée | — |
-| ostrom-web | oui (#1) | 100 % imposé (Vitest, job `check`) | 21 | — | 3 (Playwright) | — | `check`, `e2e` | posée | — |
-| ostrom-app | oui (#4) | 100 % imposé (Jest, job `Typecheck, lint, test`) | 51 | 15 (MSW) | — (Maestro à brancher) | — | `Typecheck, lint, test` (puis `e2e-android`) | posée | — |
+| ostrom-core | oui (#1, #3, #5) | pas encore mesurée : Kover arrive avec ostrom-core#8 (`chore/conventions`) | 26 | — | — | — | `native` (puis `ci`) | posée | — |
+| ostrom-cli | non (ostrom-cli#1 en CI) | 100 % imposé dans le socle (`coverage`), pas encore sur `main` | 0 sur `main` | — | — | — | PR seule (puis `ci`) | posée | — |
+| ostrom-server | non (ostrom-server#1 en CI) | `ops/stripe` : 100 % (job `stripe-provision`) ; Kover arrive avec le socle | — | 28 (stripe-mock) | — | — | PR seule (puis `ci`) | posée | — |
+| ostrom-web | oui (#1) | 100 % imposé (Vitest, job `check`) | 21 | — | 3 (Playwright) | — | `check`, `e2e` (puis `ci`) | posée | — |
+| ostrom-app | oui (#4) | 100 % imposé (Jest, job `ci`) | 51 | 15 (MSW) | — (Maestro à brancher) | — | `ci` (Jest 100 %, puis Maestro) | posée | — |
 | ostrom-e2e | oui (#1, #2) | 100 % / 100 % imposé (job `ci`) | 30 | — | 2 (banc) + 4 parcours du jalon codés | 3 scripts k6 | `ci` | posée | — |
 
 ## Scénarios end-to-end (SCENARIOS.md)
@@ -79,3 +79,5 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
   codés (`scenarios/jalon.e2e.ts` : LOGIN-001, CLAUDE-001, CLAUDE-003, GATE-001 avec YES-001, YES-003, YESCLI-002,
   RECEIPT-001), lancés dès que serveur et CLI les servent (`OSTROM_E2E_JALON=1`) ; k6 aligné sur le contrat `/api/v1` ;
   le banc tourne en un seul job `ci`.
+- 30/10 03:20 — Règles de CI de l'organisation (JOURNAL 03:10) : un seul job `ci` par PR, pas de CI sur un
+  brouillon, `concurrency` annulant sauf sur `main`, caches ; check obligatoire `ci` partout. Gabarits mis à jour.

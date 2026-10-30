@@ -1,84 +1,55 @@
-# Extra jobs for ostrom-server's .github/workflows/ci.yml, next to the `linux` job of the CONVENTIONS
-# template (ostrom-core/docs/conventions/.github/workflows/build.yml). Job names = required checks on main.
-jobs:
+# Fragment, not a workflow: what ostrom-server's single `ci` job (CONVENTIONS template, JOURNAL 03:10) adds after its
+# own detekt + jvmTest + koverVerify (100 %) + linuxX64Test steps. One runner for everything on a pull request.
+# 1. Add this service to the `ci` job:
+services:
+  postgres:
+    image: postgres:18
+    env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+    ports: ["5432:5432"]
+    options: >-
+      --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+# 2. Append these steps after the tests (the job has already checked out this repository):
+steps:
   # The full-stack bench (ostrom-e2e) against THIS commit of the server, with the `ostrom` CLI from main.
-  e2e:
-    name: e2e
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    services:
-      postgres:
-        image: postgres:18
-        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: This server, built and started
-        id: server
-        uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
-        with:
-          path: .
-          database-url: postgresql://localhost:5432/ostrom
-      - name: ostrom CLI from main
-        id: cli
-        uses: ostrom-hq/ostrom-e2e/.github/actions/cli@main
-        with:
-          deploy-key: ${{ secrets.DEPLOY_KEY_CLI }}
-          required: "false" # flip to "true" once ostrom-cli meets the contract (QA does it)
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ostrom-hq/ostrom-e2e
-          ssh-key: ${{ secrets.DEPLOY_KEY_E2E }}
-          path: .ostrom/e2e
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with: { package_json_file: .ostrom/e2e/package.json }
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version-file: .ostrom/e2e/.nvmrc }
-      - name: Bench scenarios
-        working-directory: .ostrom/e2e
-        env:
-          OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.url }}
-          OSTROM_E2E_CLI_BIN: ${{ steps.cli.outputs.available == 'true' && steps.cli.outputs.bin || '' }}
-        run: pnpm install --frozen-lockfile && pnpm e2e
-
-  # Short k6 run on every PR (about 70 s) + the 100-simultaneous-yes race. Thresholds (p95/p99) fail the job.
-  load-smoke:
-    name: load-smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    services:
-      postgres:
-        image: postgres:18
-        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: This server, built and started
-        id: server
-        uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
-        with:
-          path: .
-          database-url: postgresql://localhost:5432/ostrom
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ostrom-hq/ostrom-e2e
-          ssh-key: ${{ secrets.DEPLOY_KEY_E2E }}
-          path: .ostrom/e2e
-      - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
-      - name: k6 smoke (p95/p99 thresholds)
-        env:
-          OSTROM_URL: ${{ steps.server.outputs.url }}
-          OSTROM_LOAD_SCENARIOS: ${{ vars.OSTROM_LOAD_GATES == 'true' && 'health,asks,gates' || 'health' }}
-        run: k6 run --summary-export smoke-summary.json .ostrom/e2e/load/smoke.js
-      - name: k6 race (exactly one yes wins out of 100)
-        # Org variable OSTROM_LOAD_GATES, set to true by QA once the gate routes and the two tokens are on main.
-        if: vars.OSTROM_LOAD_GATES == 'true'
-        env: { OSTROM_URL: "${{ steps.server.outputs.url }}" }
-        run: k6 run --summary-export race-summary.json .ostrom/e2e/load/race.js
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with: { name: k6-smoke, path: "*-summary.json", if-no-files-found: ignore }
+  - name: This server, built and started
+    id: server
+    uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
+    with:
+      path: .
+      database-url: postgresql://localhost:5432/ostrom
+  - name: ostrom CLI from main
+    id: cli
+    uses: ostrom-hq/ostrom-e2e/.github/actions/cli@main
+    with:
+      deploy-key: ${{ secrets.DEPLOY_KEY_CLI }}
+      required: "false" # QA flips it to "true" once ostrom-cli meets the contract
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    with:
+      repository: ostrom-hq/ostrom-e2e
+      ssh-key: ${{ secrets.DEPLOY_KEY_E2E }}
+      path: .ostrom/e2e
+  - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+    with: { package_json_file: .ostrom/e2e/package.json }
+  - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+    with: { node-version-file: .ostrom/e2e/.nvmrc, cache: pnpm, cache-dependency-path: .ostrom/e2e/pnpm-lock.yaml }
+  - name: Bench scenarios (e2e)
+    working-directory: .ostrom/e2e
+    env:
+      OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.url }}
+      OSTROM_E2E_CLI_BIN: ${{ steps.cli.outputs.available == 'true' && steps.cli.outputs.bin || '' }}
+    run: pnpm install --frozen-lockfile && pnpm e2e
+  # Short k6 run (about 70 s) + the 100-simultaneous-yes race, on the same running server. Thresholds fail the job.
+  - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
+  - name: k6 smoke (p95/p99 thresholds)
+    env:
+      OSTROM_URL: ${{ steps.server.outputs.url }}
+      OSTROM_LOAD_SCENARIOS: ${{ vars.OSTROM_LOAD_GATES == 'true' && 'health,asks,gates' || 'health' }}
+    run: k6 run --summary-export smoke-summary.json .ostrom/e2e/load/smoke.js
+  - name: k6 race (exactly one yes wins out of 100)
+    # Org variable OSTROM_LOAD_GATES, set to true by QA once the gate routes and the two tokens are on main.
+    if: vars.OSTROM_LOAD_GATES == 'true'
+    env: { OSTROM_URL: "${{ steps.server.outputs.url }}" }
+    run: k6 run --summary-export race-summary.json .ostrom/e2e/load/race.js
+  - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+    if: always()
+    with: { name: k6-smoke, path: "*-summary.json", if-no-files-found: ignore }

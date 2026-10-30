@@ -4,29 +4,53 @@ Règle de Lyes (30/10/2026) : tout est testé de A à Z, dès le premier jour �
 PostgreSQL, vrai HTTP), end-to-end dans la CI, charge ; **100 % des lignes et des branches**, imposé par la CI ;
 une PR ne fusionne que si tous ses checks sont verts. Ces gabarits sont la façon de l'imposer dans chaque dépôt.
 
+## Règles de CI de l'organisation (JOURNAL 03:10, les runners sont rares)
+
+1. Sur une pull request, **un seul job `ci`** : types, lint, tests, couverture 100 %, e2e et k6 courts, dans cet ordre
+   (le moins cher d'abord). Jobs séparés, matrices, macOS, Windows, arm64, images, publication : seulement sur `main`
+   et les tags (`if: github.event_name != 'pull_request'`).
+2. Une PR en brouillon ne lance pas de CI : `types: [opened, synchronize, reopened, ready_for_review]` et, sur chaque
+   job de PR, `if: github.event_name != 'pull_request' || !github.event.pull_request.draft`. Passer la PR en « ready »
+   quand on veut la CI.
+3. `concurrency: { group: ${{ github.workflow }}-${{ github.ref }}, cancel-in-progress: ${{ github.ref != 'refs/heads/main' }} }`.
+4. Caches : `setup-node` avec `cache: pnpm` (ou `npm`), `gradle/actions/setup-gradle`, `~/.konan` par `actions/cache`.
+5. On pousse une fois quand le travail est prêt, pas commit par commit : chaque push relance la CI.
+
+En-tête à copier :
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+    tags: ["v*"]
+  merge_group:
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+jobs:
+  ci:
+    name: ci
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+```
+
 | Fichier | Pour | Ce qu'il fait |
 |---|---|---|
-| `ostrom-core/docs/conventions/` (CONVENTIONS, fait foi) | core, cli, server | Plugin `ostrom.kmp` : cible `jvm()` réservée aux tests (Kover ne mesure pas le natif ; jamais publiée), Kover, règle 100 % lignes + branches ; workflow `build.yml`, job `linux` = detekt + `jvmTest` + `koverVerify` + `linuxX64Test`, PostgreSQL en service. Toute exclusion de couverture est dans le plugin ou annotée, avec sa ligne de justification. |
-| `server/ci-extra.yml` | server | Jobs `e2e` (banc complet contre CE commit du serveur) et `load-smoke` (k6 : `load/smoke.js` seuils p95/p99 + `load/race.js` 100 oui simultanés → un seul gagne). |
-| `cli/ci-extra.yml` | cli | Job `e2e` : CE binaire natif contre le vrai serveur, faux agent du banc. |
-| `web/vitest-coverage.snippet.ts`, `web/ci.yml` | web | Seuils Vitest 100 % (lignes, branches, fonctions, instructions) ; jobs `lint`, `coverage`, `e2e` (Playwright contre le vrai serveur + PostgreSQL). |
-| `app/jest-coverage.snippet.js`, `app/ci.yml` | app | Seuils Jest 100 % ; jobs `lint`, `coverage`, `e2e-android` (Maestro sur émulateur Android, KVM sur runner Linux). |
+| `ostrom-core/docs/conventions/` (CONVENTIONS, fait foi) | core, cli, server | Plugin `ostrom.kmp` : cible `jvm()` réservée aux tests (Kover ne mesure pas le natif ; jamais publiée), Kover, règle 100 % lignes + branches ; job `ci` = detekt + `jvmTest` + `koverVerify` + `linuxX64Test`, PostgreSQL en service. Toute exclusion de couverture est dans le plugin ou annotée, avec sa ligne de justification. |
+| `server/ci-extra.yml` | server | Fragment à ajouter au job `ci` : banc complet contre CE commit du serveur, puis k6 (`load/smoke.js` seuils p95/p99 + `load/race.js` 100 oui simultanés → un seul gagne) sur le même serveur. |
+| `cli/ci-extra.yml` | cli | Fragment à ajouter au job `ci` : CE binaire natif contre le vrai serveur, faux agent du banc. |
+| `web/vitest-coverage.snippet.ts`, `web/ci.yml` | web | Seuils Vitest 100 % ; un job `ci` (types, lint, Vitest 100 %, Playwright contre le vrai serveur + PostgreSQL). |
+| `app/jest-coverage.snippet.js`, `app/ci.yml` | app | Seuils Jest 100 % ; un job `ci` (types, lint, Jest 100 %, Maestro sur émulateur Android, KVM sur runner Linux). |
 
 ## Noms des checks (obligatoires sur `main`)
 
-La protection de branche exige ces noms exacts (nom du job, `name:`). Ne pas les renommer sans prévenir QA.
+**`ci` dans chaque dépôt** (core, cli, server, web, app, e2e, site, helm). La protection l'exige sous ce nom exact ;
+ne pas le renommer sans prévenir QA. Un dépôt passe à `ci` dès que ce job est sur sa `main`.
 
-| Dépôt | Checks obligatoires |
-|---|---|
-| ostrom-core | `linux` |
-| ostrom-cli | `linux`, `e2e` |
-| ostrom-server | `linux`, `e2e`, `load-smoke` |
-| ostrom-web | `lint`, `coverage`, `e2e` |
-| ostrom-app | le job Jest à seuils 100 %, `e2e-android` |
-| ostrom-e2e | `ci` (un seul job : runners rares) |
-
-Protection (posée par QA, admins compris) : PR obligatoire, checks ci-dessus obligatoires, branche à jour avec
-`main` avant fusion, pas de force-push ni de suppression de `main`.
+Protection (posée par QA, admins compris) : PR obligatoire, `ci` obligatoire, branche à jour avec `main` avant
+fusion, pas de force-push ni de suppression de `main`.
 
 ## Contrat du banc full-stack
 

@@ -2,13 +2,16 @@
 name: CI
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+    tags: ["v*"]
   merge_group:
   workflow_dispatch:
+# One run per workflow and ref; a new push cancels the previous run, except on main (every main commit is checked).
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 permissions:
   contents: read
 
@@ -17,6 +20,8 @@ jobs:
   # Order: cheap checks first (types, lint of the workflows, k6 parse, unit tests at 100 %), then the full stack.
   ci:
     name: ci
+    # A draft pull request runs no CI: mark it ready when you want it (JOURNAL 03:10).
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 60
     services:
