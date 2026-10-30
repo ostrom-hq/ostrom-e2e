@@ -1,18 +1,19 @@
 # Tableau de bord des tests d'Ostrom
 
 Tenu par l'agent QA. Règle (Lyes, 30/10/2026) : unitaires, intégration, end-to-end et charge, 100 % des lignes et
-des branches imposé par la CI, checks obligatoires sur `main`. Mis à jour le 30/10/2026 à 02:00.
+des branches imposé par la CI, checks obligatoires sur `main`. Mis à jour le 30/10/2026 à 02:45. « posée » = PR obligatoire, à jour avec `main`, admins compris, ni force-push
+ni suppression, historique linéaire.
 
 ## Par dépôt
 
 | Dépôt | Socle fusionné | Couverture mesurée (lignes / branches) | Unitaires | Intégration | E2E | Charge | Checks obligatoires | Protection de `main` | Dernier run vert |
 |---|---|---|---|---|---|---|---|---|---|
-| ostrom-core | non | — | — | — | — | — | `coverage`, `native-tests` | à poser | — |
-| ostrom-cli | non | — | — | — | — | — | `coverage`, `native-tests`, `e2e` | à poser | — |
-| ostrom-server | non | — | — | — | — | — | `coverage`, `native-tests`, `e2e`, `load-smoke` | à poser | — |
-| ostrom-web | non | — | — | — | — | — | `lint`, `coverage`, `e2e` | à poser | — |
-| ostrom-app | non | — | — | — | — | — | `lint`, `coverage`, `e2e-android` | à poser | — |
-| ostrom-e2e | en cours | 100 % / 100 % (local) | 22 | — | 2 (banc) | 3 scripts k6 | `ci` | à poser | — |
+| ostrom-core | oui (#1, #3, #5) | pas encore mesurée : Kover arrive avec ostrom-core#8 (`chore/conventions`) | 26 | — | — | — | `native` (puis `linux`, `contract`) | posée | — |
+| ostrom-cli | non (ostrom-cli#1 en CI) | 100 % imposé dans le socle (`coverage`), pas encore sur `main` | 0 sur `main` | — | — | — | PR seule (puis `coverage`, `native-tests`, `e2e`) | posée | — |
+| ostrom-server | non (ostrom-server#1 en CI) | `ops/stripe` : 100 % (job `stripe-provision`) ; Kover arrive avec le socle | — | 28 (stripe-mock) | — | — | PR seule (puis `build`, `coverage`, `native-tests`, `e2e`, `load-smoke`) | posée | — |
+| ostrom-web | oui (#1) | 100 % imposé (Vitest, job `check`) | 21 | — | 3 (Playwright) | — | `check`, `e2e` | posée | — |
+| ostrom-app | oui (#4) | 100 % imposé (Jest, job `Typecheck, lint, test`) | 51 | 15 (MSW) | — (Maestro à brancher) | — | `Typecheck, lint, test` (puis `e2e-android`) | posée | — |
+| ostrom-e2e | oui (#1, #2) | 100 % / 100 % imposé (job `ci`) | 30 | — | 2 (banc) + 4 parcours du jalon codés | 3 scripts k6 | `ci` | posée | — |
 
 ## Scénarios end-to-end (SCENARIOS.md)
 
@@ -65,12 +66,16 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 
 | Script | Quand | Seuils | Dernier résultat |
 |---|---|---|---|
-| `load/smoke.js` | chaque PR serveur | p95/p99 : health 50/100 ms, check 50/150 ms, porte et oui 150/400 ms ; erreurs < 1 % | bloqué : pas encore de serveur |
-| `load/race.js` | chaque PR serveur + nuit | 100 oui simultanés : 1 × 200, 99 × 409 | bloqué : pas encore de serveur |
-| `load/soak.js` | nuit | 20 min à 500 check/s + 50 portes/s, rampe 2 000/s p99 < 500 ms | bloqué : pas encore de serveur |
+| `load/smoke.js` | chaque PR serveur | p95/p99 : `/health` 50/100 ms, question de hook `POST /api/v1/gates` 50/150 ms, push sur main + oui 150/400 ms ; erreurs < 1 % | bloqué : pas encore de serveur |
+| `load/race.js` | chaque PR serveur + nuit | 100 oui simultanés sur une demande : 1 × 200, 99 × 409, rien d'autre | bloqué : pas encore de serveur |
+| `load/soak.js` | nuit | 20 min à 500 questions/s + 50 portes/s, rampe 2 000/s p99 < 500 ms | bloqué : pas encore de serveur |
 
 ## Journal
 
 - 30/10 02:00 — ostrom-e2e#1 : banc, gabarits et catalogue (302 scénarios, 34 du jalon) ; clés de déploiement en lecture
   seule et secrets d'org posés ; actions composites ouvertes aux dépôts de l'org.
 - 30/10 02:15 — 14 contournements de l'audit de la porte ajoutés (BYPASS-020 à 033 : A1, A2, A3, A7b, A9, A10, A12 à A20, A24), dont 6 au jalon ; actions épinglées par SHA (CONVENTIONS § 11) ; pour Kotlin, le gabarit de CONVENTIONS (job `linux`) fait foi.
+- 30/10 02:45 — faux GitHub local (`src/fake-github.ts`), bacs à sable git sans réseau (`src/git.ts`), parcours du jalon
+  codés (`scenarios/jalon.e2e.ts` : LOGIN-001, CLAUDE-001, CLAUDE-003, GATE-001 avec YES-001, YES-003, YESCLI-002,
+  RECEIPT-001), lancés dès que serveur et CLI les servent (`OSTROM_E2E_JALON=1`) ; k6 aligné sur le contrat `/api/v1` ;
+  le banc tourne en un seul job `ci`.
