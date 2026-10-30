@@ -24,7 +24,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ["[0-9]*"]
   merge_group:
   workflow_dispatch:
 concurrency:
