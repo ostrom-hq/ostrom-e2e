@@ -1,0 +1,11 @@
+# zizmor configuration (https://docs.zizmor.sh/configuration/).
+# Temporary: the composite actions (.github/actions/*/action.yml) predate the open source checks and expand
+# inputs inside run: blocks. Pass each input through env: (INPUT_PATH: ${{ inputs.path }}, then "$INPUT_PATH") and
+# remove this exception in the same pull request.
+rules:
+  template-injection:
+    ignore:
+      - action.yml
+  github-env:
+    ignore:
+      - action.yml
