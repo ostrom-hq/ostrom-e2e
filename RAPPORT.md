@@ -12,7 +12,7 @@ des branches imposé par la CI, checks obligatoires sur `main`. Mis à jour le 3
 | ostrom-server | non | — | — | — | — | — | `coverage`, `native-tests`, `e2e`, `load-smoke` | à poser | — |
 | ostrom-web | non | — | — | — | — | — | `lint`, `coverage`, `e2e` | à poser | — |
 | ostrom-app | non | — | — | — | — | — | `lint`, `coverage`, `e2e-android` | à poser | — |
-| ostrom-e2e | en cours | 100 % / 100 % (local) | 22 | — | 2 (banc) | 3 scripts k6 | `lint`, `coverage`, `e2e` | à poser | — |
+| ostrom-e2e | en cours | 100 % / 100 % (local) | 22 | — | 2 (banc) | 3 scripts k6 | `ci` | à poser | — |
 
 ## Scénarios end-to-end (SCENARIOS.md)
 

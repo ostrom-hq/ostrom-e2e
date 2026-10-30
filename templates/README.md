@@ -23,7 +23,7 @@ La protection de branche exige ces noms exacts (nom du job, `name:`). Ne pas les
 | ostrom-server | `linux`, `e2e`, `load-smoke` |
 | ostrom-web | `lint`, `coverage`, `e2e` |
 | ostrom-app | le job Jest à seuils 100 %, `e2e-android` |
-| ostrom-e2e | `lint`, `coverage`, `e2e` |
+| ostrom-e2e | `ci` (un seul job : runners rares) |
 
 Protection (posée par QA, admins compris) : PR obligatoire, checks ci-dessus obligatoires, branche à jour avec
 `main` avant fusion, pas de force-push ni de suppression de `main`.
