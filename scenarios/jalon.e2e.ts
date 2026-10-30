@@ -21,8 +21,7 @@ describe.skipIf(!READY)('jalon: ostrom claude, gate on push, yes bound to the SH
     await github.start();
     dev = person('dev-a', github);
     rev = person('rev-b', github);
-    person('rev-c', github);
-    // The organisation, its repository acme/api and the gate « push to main, approvers rev-b and rev-c » are created
+    // The organisation, its repository acme/api and the gate « push to main, approvers rev-b and rev-c (rev-c never logs in: two approvers, one active) » are created
     // through the real surfaces (login of the first member, invite, harness add + enforce): CLI.md § 3.1 and § 3.2.
     expect(login(dev, github).code).toBe(0);
     expect(dev.ostrom(['invite', '@rev-b', '@rev-c']).code).toBe(0);
@@ -43,7 +42,6 @@ describe.skipIf(!READY)('jalon: ostrom claude, gate on push, yes bound to the SH
 
   it('E2E-CLAUDE-001 — ostrom claude launches the agent under the session package, writing nothing in the repo or ~/.claude', () => {
     const sb = sandbox('api');
-    git(sb.work, 'remote', 'set-url', '--push', 'origin', sb.origin);
     const before = git(sb.work, 'status', '--porcelain', '--ignored');
     const { run, log } = dev.claude(sb.work, { steps: [{ event: 'SessionStart', source: 'startup' }, { event: 'tool', tool: 'Bash', input: { command: 'ls' }, run: true }, { event: 'SessionEnd' }] });
     expect(run.code, run.stderr).toBe(0);
