@@ -119,12 +119,11 @@ jobs:
           2a3ae008c8786431115502644e77ab398fdebfb721a5d1195ed3089cde3299df  $RUNNER_TEMP/ingress-nginx.yaml
           3c7f57cdbee0f57fb0259a150e8f6d6cb4f29d72d1aa5dce8803151dd6d4c2a1  $RUNNER_TEMP/metrics-server.yaml
           EOF
+          # kind's kubelets serve self-signed certificates: added before applying, so that one ReplicaSet ever exists.
+          sed -i 's|^\( *\)- --metric-resolution=15s$|&\n\1- --kubelet-insecure-tls|' "$RUNNER_TEMP/metrics-server.yaml"
+          grep -q -- '- --kubelet-insecure-tls' "$RUNNER_TEMP/metrics-server.yaml"
           kubectl apply -f "$RUNNER_TEMP/ingress-nginx.yaml"
           kubectl apply -f "$RUNNER_TEMP/metrics-server.yaml"
-          # kind's kubelets serve self-signed certificates.
-          kubectl -n kube-system patch deployment metrics-server --type json -p '[
-            {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"},
-            {"op":"replace","path":"/spec/template/spec/containers/0/args/4","value":"--metric-resolution=10s"}]'
           kubectl -n ingress-nginx wait --for=condition=ready pod -l app.kubernetes.io/component=controller --timeout=300s
           kubectl -n kube-system rollout status deployment/metrics-server --timeout=300s
       - name: Load the server image into kind
@@ -306,6 +305,9 @@ jobs:
             kubectl logs -n "$NS" "$p" --all-containers --prefix --previous --tail=100 2>/dev/null || true
           done
           kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller --tail=100 || true
+          kubectl -n kube-system get pods -o wide || true
+          kubectl -n kube-system describe pods -l k8s-app=metrics-server | tail -40 || true
+          kubectl -n kube-system logs -l k8s-app=metrics-server --tail=60 || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
