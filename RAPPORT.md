@@ -10,10 +10,10 @@ ni suppression, historique linéaire.
 |---|---|---|---|---|---|---|---|---|---|
 | ostrom-core | oui (#1, #3, #5) | pas encore mesurée : Kover arrive avec ostrom-core#8 (`chore/conventions`) | 26 | — | — | — | `native` (puis `ci`) | posée | — |
 | ostrom-cli | non (ostrom-cli#1 en CI) | 100 % imposé dans le socle (`coverage`), pas encore sur `main` | 0 sur `main` | — | — | — | PR seule (puis `ci`) | posée | — |
-| ostrom-server | non (ostrom-server#1 en CI) | `ops/stripe` : 100 % (job `stripe-provision`) ; Kover arrive avec le socle | — | 28 (stripe-mock) | — | — | PR seule (puis `ci`) | posée | — |
+| ostrom-server | oui (#1, 4fe38dd) | Kover 100 % lignes et branches par module (job `ci`, `koverVerify`) ; `ops/stripe` 100 % | jvmTest + linuxX64Test | PostgreSQL 17 dans `ci` | image distroless testée par le banc (SRV-001 à 004) | k6 `health,instance` sur l'image (banc) | `ci` | posée (`ci`, non stricte) | [40996470171](https://github.com/ostrom-hq/ostrom-server/actions/runs/40996470171) |
 | ostrom-web | oui (#1) | 100 % imposé (Vitest, job `check`) | 21 | — | 3 (Playwright) | — | `check`, `e2e` (puis `ci`) | posée | — |
 | ostrom-app | oui (#4) | 100 % imposé (Jest, job `ci`) | 51 | 15 (MSW) | — (Maestro à brancher) | — | `ci` (Jest 100 %, puis Maestro) | posée | — |
-| ostrom-e2e | oui (#1, #2) | 100 % / 100 % imposé (job `ci`) | 30 | — | 2 (banc) + 4 parcours du jalon codés | 3 scripts k6 | `ci` | posée | — |
+| ostrom-e2e | oui (#1, #2) | 100 % / 100 % imposé (job `ci`) | 30 | — | 2 (banc) + 4 parcours du jalon codés + 4 SRV sur l'image serveur | 3 scripts k6, smoke dans `ci` | `ci` | posée | — |
 | ostrom-site | oui | 100 % imposé (docs-tools, `node --test`, job `ci`) | 60 | — | blocs de code testés (`--strict`) | — | `ci` | posée | — |
 | ostrom-helm | oui (#1) | — (chart : helm-unittest, kubeconform, ct install sur kind) | helm-unittest | ct install | Docker Compose de bout en bout | — | `ci` | posée | — |
 
@@ -59,17 +59,34 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | HARNESS | 8 | 0 | 0 | 0 | 0 | 8 |
 | DIST | 4 | 0 | 0 | 0 | 0 | 4 |
 | TC | 2 | 0 | 0 | 0 | 0 | 2 |
-| LOAD | 10 | 0 | 0 | 3 | 0 | 7 |
+| LOAD | 11 | 0 | 0 | 4 | 0 | 7 |
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
 | OBS | 3 | 0 | 0 | 0 | 0 | 3 |
-| **Total** | 319 | 40 | 0 | 14 | 0 | 305 |
+| SRV | 4 | 2 | 0 | 4 | 0 | 0 |
+| **Total** | 324 | 42 | 0 | 19 | 0 | 305 |
 <!-- scenarios:end -->
+
+### Scénarios lancés en CI, un par un
+
+État dans le job `ci` d'ostrom-e2e, contre l'image du serveur de `main` (son `Dockerfile`, binaire natif `linuxX64`) et
+PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquant` dit ce qui n'est pas encore servi.
+
+| Scénario | Sujet | État | Preuve ou cause |
+|---|---|---|---|
+| SRV-001 | `/health`, `/api/v1/health` | codé | premier run sur l'image : PR « server image » du banc |
+| SRV-002 | `/api/v1/instance`, clé Ed25519, `/keys` | codé | idem |
+| SRV-003 | erreurs 404/405 en `{"error":{type,message}}` | codé | idem |
+| SRV-004 | `X-Request-Id` gardé ou remplacé | codé | idem |
+| LOAD-011 | k6 `health,instance`, p95 < 50 ms, p99 < 100 ms | codé | idem |
+| LOGIN-001, CLAUDE-001/003, GATE-001, YES-001/003, YESCLI-002, RECEIPT-001 | jalon | manquant | ostrom-cli#1 (login, `ostrom claude`) ; portes, oui et reçus côté serveur (GATES) |
+| BYPASS-001/005/024 | contournements | manquant | idem (porte servie par le serveur, hooks par la CLI) |
+| LOAD-002/003/006 | portes, oui, course | manquant | routes `/api/v1/gates` et `/approvals` pas encore servies |
 
 ## Charge
 
 | Script | Quand | Seuils | Dernier résultat |
 |---|---|---|---|
-| `load/smoke.js` | chaque PR serveur | p95/p99 : `/health` 50/100 ms, question de hook `POST /api/v1/gates` 50/150 ms, push sur main + oui 150/400 ms ; erreurs < 1 % | bloqué : pas encore de serveur |
+| `load/smoke.js` | chaque PR et `main` du banc (`health,instance` sur l'image serveur) ; chaque PR serveur | p95/p99 : `/health` et `/api/v1/instance` 50/100 ms à 50 req/s, question de hook `POST /api/v1/gates` 50/150 ms, push sur main + oui 150/400 ms ; erreurs < 1 %, checks > 99 % | `health,instance` : premier run sur l'image en cours ; portes : pas encore servies |
 | `load/race.js` | chaque PR serveur + nuit | 100 oui simultanés sur une demande : 1 × 200, 99 × 409, rien d'autre | bloqué : pas encore de serveur |
 | `load/soak.js` | nuit | 20 min à 500 questions/s + 50 portes/s, rampe 2 000/s p99 < 500 ms | bloqué : pas encore de serveur |
 
@@ -86,3 +103,6 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
   brouillon, `concurrency` annulant sauf sur `main`, caches ; check obligatoire `ci` partout. Gabarits mis à jour.
 - 30/10 04:30 — Règles de CI appliquées et fusionnées : e2e#6, app#11, site#10, helm#4, server#22 ; checks
   obligatoires `ci` sur e2e, app, site, helm. Famille OBS ajoutée (3 scénarios, demande OBS 04:20).
+- 30/10 05:20 — ostrom-server#1 fusionné (4fe38dd) : protection de `main` d'ostrom-server sur `ci` (non stricte). Le banc
+  lance l'image distroless du serveur de `main` (action `server`, `image: "true"`, conteneur `ostrom-e2e-server`) :
+  famille SRV (santé, instance, erreurs, `X-Request-Id`) et fumée k6 `health,instance` (LOAD-011) dans le job `ci`.
