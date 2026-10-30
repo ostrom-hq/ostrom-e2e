@@ -9,3 +9,7 @@ rules:
   cache-poisoning:
     ignore:
       - ci.yml
+  # The composite action cli/action.yml (QA) appends a runner-temp directory to GITHUB_PATH.
+  github-env:
+    ignore:
+      - action.yml
