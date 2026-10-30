@@ -17,6 +17,13 @@ inputs:
     description: Ref of ostrom-server to build (ignored when `path` is given).
     required: false
     default: main
+  core-key:
+    description: >
+      Read-only deploy key of ostrom-core (org secret DEPLOY_KEY_CORE). When the sources pin ostrom-core in
+      `gradle/ostrom-core.ref`, core is checked out at that commit and built with them (`ostrom.core.local`): a
+      GITHUB_TOKEN never reads another repository's Maven packages (JOURNAL 05:50).
+    required: false
+    default: ""
   path:
     description: Path of an ostrom-server checkout already on the runner (ostrom-server's own CI).
     required: false
@@ -105,6 +112,35 @@ runs:
       with:
         path: ${{ runner.temp }}/ostrom-bin/ostrom-server
         key: ostrom-server-linuxX64-${{ steps.src.outputs.sha }}
+    - name: ostrom-core version (gradle/ostrom-core.ref)
+      id: core
+      if: inputs.core-key != '' && steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        DIR: ${{ steps.src.outputs.dir }}
+      run: |
+        if [ -f "$DIR/gradle/ostrom-core.ref" ]; then echo "ref=$(tr -d '[:space:]' < "$DIR/gradle/ostrom-core.ref")" >> "$GITHUB_OUTPUT"; fi
+    - name: Checkout ostrom-core at that commit
+      if: steps.core.outputs.ref != ''
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: ostrom-hq/ostrom-core
+        ref: ${{ steps.core.outputs.ref }}
+        ssh-key: ${{ inputs.core-key }}
+        path: .ostrom/core-server
+        persist-credentials: false
+    - name: Build ostrom-core with the sources (ostrom.core.local)
+      if: steps.core.outputs.ref != ''
+      shell: bash
+      env:
+        DIR: ${{ steps.src.outputs.dir }}
+      run: |
+        # settings.gradle.kts includes ../ostrom-core next to the sources; the server and the CLI may pin different
+        # commits, so each build puts its own there.
+        rm -rf "$DIR/../ostrom-core"
+        mv .ostrom/core-server "$DIR/../ostrom-core"
+        mkdir -p ~/.gradle
+        grep -qx 'ostrom.core.local=true' ~/.gradle/gradle.properties 2>/dev/null || echo "ostrom.core.local=true" >> ~/.gradle/gradle.properties
     - name: Set up Java (build only)
       if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
       uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0

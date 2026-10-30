@@ -61,6 +61,27 @@ describe('FakeGitHub', () => {
     expect((await call('POST', '/login/oauth/access_token', { json: { device_code: code } })).json['access_token']).toBe('gho_dev-a');
   });
 
+  it('runs the web OAuth flow: a one-time code for the prepared login, with its verified address', async () => {
+    const code = gh.oauthCode('rev-c', 'rev-c@e2e.ostrom.test');
+    const done = await call('POST', '/login/oauth/access_token', { form: { code, client_id: 'c', code_verifier: 'v' } });
+    expect(done.json).toMatchObject({ access_token: 'gho_rev-c' });
+    expect((await call('POST', '/login/oauth/access_token', { form: { code } })).json).toEqual({ error: 'bad_verification_code' });
+    const t = `Bearer ${String(done.json['access_token'])}`;
+    expect((await call('GET', '/user', { token: t })).json['login']).toBe('rev-c');
+    expect((await fetch(`${url}/user/emails`, { headers: { authorization: t } }).then((r) => r.json()))).toEqual([{ email: 'rev-c@e2e.ostrom.test', primary: true, verified: true }]);
+    expect((await fetch(`${url}/user/emails`, { headers: { authorization: `token ${gh.user('noaddr')}` } }).then((r) => r.json()))).toEqual([]);
+    expect(gh.oauthCode('rev-c', 'rev-c@e2e.ostrom.test')).not.toBe(code);
+  });
+
+  it('listens on the port it is given', async () => {
+    const fixed = new FakeGitHub();
+    const free = new FakeGitHub();
+    const port = Number(new URL(await free.start()).port);
+    await free.stop();
+    expect(await fixed.start(port)).toBe(`http://127.0.0.1:${port}`);
+    await fixed.stop();
+  });
+
   it('serves pull requests, compare and check runs, and records every request', async () => {
     const t = `token ${gh.user('app')}`;
     gh.pull('acme/api', { number: 3, headSha: 'abc', baseRef: 'main', headRef: 'feat' });

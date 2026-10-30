@@ -2872,6 +2872,62 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Statut : bloqué : ostrom-server + ostrom-cli
 
 
+## AUTH : Identité côté serveur (lien e-mail, GitHub, appareil, jetons, déconnexion)
+
+### E2E-AUTH-001 — Connexion par lien e-mail, une seule fois
+
+- Étapes : `POST /api/v1/auth/email` (adresse propre à la personne, `X-Forwarded-For` d'une adresse à elle), le lien est lu dans `OSTROM_MAIL_DIR`, `POST /api/v1/auth/email/verify` ; puis le même lien une seconde fois, et un jeton inventé.
+- Attendu : 200 `{redirect, csrfToken}`, cookie de session `HttpOnly`, `SameSite`, `Path=/` ; `GET /api/v1/auth/me` rend l'adresse ; le lien réutilisé et le jeton inventé : 4xx, aucun cookie de session.
+- Surfaces : serveur (image), identité
+- Source : ostrom-server#10 (`SignInRoutes.kt`) ; contrat 0.1.140 `requestMagicLink`, `verifyMagicLink`
+- Priorité : jalon
+- Statut : codé : `scenarios/identity.e2e.ts`
+
+### E2E-AUTH-002 — Connexion GitHub (faux GitHub), PKCE et `state` liés au navigateur
+
+- Étapes : le serveur est lancé avec `OSTROM_GITHUB_WEB_URL`/`OSTROM_GITHUB_API_URL` sur le faux GitHub du banc (port 4610) et un client OAuth factice ; `GET /api/v1/auth/github/start`, le faux GitHub rend un code ; `GET …/callback?code&state` avec le cookie de `state` ; puis un `state` d'un autre navigateur, un code déjà utilisé, un refus sur GitHub.
+- Attendu : 302 vers `/login/oauth/authorize` (client, `S256`, `user:email`, `state`) ; l'échange porte `client_secret` et `code_verifier` ; 302 vers la console + session, `GET /auth/me` = le login GitHub et son adresse vérifiée ; les trois refus : 302 vers `/login?error=…`, aucune session.
+- Surfaces : serveur (image), identité, faux GitHub (`src/fake-github.ts`)
+- Source : ostrom-server#10 (`OAuthProviders.kt`, `SignInRoutes.kt`)
+- Priorité : jalon
+- Statut : codé : `scenarios/identity.e2e.ts`
+
+### E2E-AUTH-003 — Connexion d'appareil (RFC 8628) : un jeton CLI, une fois
+
+- Étapes : `POST /api/v1/auth/device` ; poll (`pending`) ; la personne connectée voit la demande (`GET /api/v1/auth/device?userCode`) et l'accepte (`POST …/device/answer`) ; poll après l'intervalle ; poll encore ; une seconde demande refusée.
+- Attendu : `approved` avec un jeton dont les portées n'ont ni `gates:answer` ni `user:*`, `GET /auth/me` avec lui = la même personne ; le code ne donne jamais un second jeton ; la demande refusée rend `denied` sans jeton.
+- Surfaces : serveur (image), identité
+- Source : ostrom-server#10 (`IdentityRoutes.kt`, `DeviceUseCases.kt`, `CLI_SCOPES`)
+- Priorité : jalon
+- Statut : codé : `scenarios/identity.e2e.ts`
+
+### E2E-AUTH-004 — Révocation : jeton supprimé ou tourné, déconnexion, « partout »
+
+- Étapes : jeton personnel créé, utilisé, listé, supprimé ; un second tourné ; `POST /api/v1/auth/logout` ; deux sessions de la même personne puis `POST /api/v1/auth/logout/everywhere`.
+- Attendu : la liste ne montre jamais le secret ; à l'appel suivant, 401 `unauthorized` pour le jeton supprimé, l'ancien secret tourné, la session déconnectée et les deux sessions après « partout » ; le nouveau secret marche.
+- Surfaces : serveur (image), identité
+- Source : ostrom-server#10 (`TokenUseCases.kt`, `IdentityRoutes.kt`)
+- Priorité : jalon
+- Statut : codé : `scenarios/identity.e2e.ts`
+
+### E2E-AUTH-005 — Sans identifiant, pas d'accès ; CSRF ; portées interdites
+
+- Étapes : chaque route d'identité et de demande, sans identifiant, avec un faux jeton, avec un faux cookie ; une écriture avec le seul cookie de session (sans `X-CSRF-Token`) ; un jeton personnel sur une route réservée au navigateur ; un jeton demandé avec `gates:answer`, `user:*` ou `agent:session`.
+- Attendu : 401 `unauthorized` avec `WWW-Authenticate: Bearer` ; l'écriture sans CSRF refusée (401/403), rien de créé ; 403 `forbidden` pour le jeton sur `GET /api/v1/tokens` ; les trois portées refusées (400/403).
+- Surfaces : serveur (image), identité, noyau (authentification)
+- Source : ostrom-server#10 (`TokenAuthentication.kt`, `NEVER_ON_A_TOKEN`) ; S2-04, S2-31
+- Priorité : jalon
+- Statut : codé : `scenarios/identity.e2e.ts`
+
+### E2E-AUTH-006 — StepUp : un jeton ne dit jamais oui
+
+- Étapes : un jeton personnel répond à une demande (`POST /api/v1/approvals/{id}/answer`).
+- Attendu : 403 ; `error.type = step_up_required` dès que S2-54 est servi (un oui exige une connexion de moins de 5 min, canal BROWSER) ; d'ici là le scénario se marque sauté avec la raison. La moitié positive (une session fraîche dit oui) est la mise en place de LOAD-006.
+- Surfaces : serveur (image), identité, portes
+- Source : consigne QA du 30/10 10:00 ; S2-54 ; ostrom-server#41 (StepUp dans les portes), #51 (`authenticatedAt`)
+- Priorité : jalon
+- Statut : codé : `scenarios/identity.e2e.ts` (bloqué : step-up de ostrom-server#41)
+
 ## LOAD : Charge (k6)
 
 ### E2E-LOAD-001 — Démarrage à froid du serveur de contrôle
@@ -2890,7 +2946,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (k6)
 - Source : proto/COORD/PERF-CONTROLE.md (débit 1/10/100/1000 ; 170/170 conformance)
 - Priorité : P2
-- Statut : codé : `load/smoke.js` (`gates` : push sur main + oui de l'approbateur sur SA demande, seuils p95/p99), lancé par le job `ci` dès que `scripts/load-setup.ts` prépare les identifiants (bloqué : ostrom-server, portes #8 + identité #10/#18 + orgs + workflows)
+- Statut : codé : `load/smoke.js` (`gates` : push sur main + oui de l'approbateur sur SA demande, seuils p95/p99), lancé par le job `ci` dès que `scripts/load-setup.ts` prépare les identifiants (bloqué : ostrom-server#51 orgs + #43 compilateur (`POST /api/v1/workflows`, nœud `gate` de classe `push-main`) ; portes #8 et identité #10 sont sur main)
 
 ### E2E-LOAD-003 — Stress jusqu'à la dégradation
 
@@ -2926,7 +2982,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (k6)
 - Source : amont/COORD/AMONT-TEAMCODE.md §0 point 4 ; proto/server/src/selftest.ts (une seconde décision ne change rien)
 - Priorité : P1
-- Statut : codé : `load/race.js` (100 oui simultanés sur la demande de l'approbateur : 1 × 200, 99 × 409, rien d'autre), lancé par le job `ci` et la nuit dès que `scripts/load-setup.ts` prépare les identifiants (bloqué : ostrom-server, portes #8 + identité #10/#18 + orgs + workflows)
+- Statut : codé : `load/race.js` (100 oui simultanés sur la demande de l'approbateur : 1 × 200, 99 × 409, rien d'autre), lancé par le job `ci` et la nuit dès que `scripts/load-setup.ts` prépare les identifiants (bloqué : ostrom-server#51 orgs + #43 compilateur ; portes #8 et identité #10 sont sur main)
 
 ### E2E-LOAD-007 — Passerelle SSE : flux stables, TTFT, tempête de reconnexions, clients lents, stress
 
@@ -3119,7 +3175,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image), stripe-mock, identité, organisations
 - Source : ostrom-server#15 ; contrat `startBillingCheckout`
 - Priorité : P1
-- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15 + identité #18 (lien e-mail) + orgs (invitations))
+- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#51 orgs ; #15 et #10 sont sur main)
 
 ### E2E-BILL-006 — Au-delà du plan : 402
 
@@ -3128,7 +3184,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image), identité, organisations, facturation
 - Source : ostrom-server#15 `CheckEntitlementUseCaseImpl` (`AddPerson`)
 - Priorité : P1
-- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15 + identité #18 + orgs)
+- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#51 orgs, invitations par `POST /api/v1/orgs/{org}/members/invites` puis `POST /api/v1/invitations/accept`)
 
 ### E2E-BILL-007 — Un membre sans rôle de facturation
 
@@ -3137,18 +3193,27 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image), identité, organisations
 - Source : ostrom-server#15 (`BILLING_READ` / `BILLING_MANAGE`)
 - Priorité : P1
-- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15 + identité #18 + orgs)
+- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#51 orgs)
 
 ## ISO : Isolation entre organisations
 
-### E2E-ISO-001 — L'organisation B ne lit ni n'écrit rien de A, sur chaque route
+### E2E-ISO-001 — L'organisation B ne lit, n'écrit et ne liste rien de A, sur chaque route
 
-- Étapes : deux propriétaires, A et B, chacun dans son organisation. B appelle chaque route d'organisation servie avec les identifiants de A (facturation, membres, portes, demandes, reçus, sessions, réglages ; la table grandit avec le serveur, une route pas encore servie est listée, jamais en échec). A relit ses routes avant et après.
-- Attendu : aucune réponse 2xx sur une route de A (les routes portées par l'identifiant, comme `GET /api/v1/org`, répondent sur l'organisation de B), aucune 5xx, aucun corps qui contienne l'id, l'e-mail ou le nom de A ; l'état de A est identique après.
+- Étapes : deux propriétaires, A et B, chacun dans son organisation (`POST /api/v1/orgs`). A invite quelqu'un et crée ce qu'il peut (sessions cloud, artefacts, secrets MCP, automations). B appelle chaque route servie avec les identifiants de A : l'organisation (par id et par slug, renommage, suppression, transfert, départ), ses membres (liste, lecture, rôle, retrait), invitations et liens, facturation (7 routes), et pour chaque ressource la lecture, l'écriture et la suppression par id, plus les listes. A relit ses routes avant et après.
+- Attendu : aucune réponse 2xx sur une route de A (les listes répondent sur l'organisation de B), aucune 5xx, aucun corps qui contienne l'id, le slug, l'e-mail, le login, le nom de A ou l'id d'une de ses ressources ; l'état de A est identique après. Le rapport du run liste les routes pas encore servies et ce que A n'a pas pu créer.
 - Surfaces : serveur (image), identité, organisations, chaque module
-- Source : consigne QA du 30/10 ; S2-01 (`withOrganization`, JOURNAL 04:40 SERVER-SOCLE) ; `src/isolation.ts`
+- Source : consigne QA du 30/10 10:00 ; S2-01 (`withOrganization`) ; ostrom-server#51 (`OrgsApi.kt`, `MembershipOrgResolver`) ; `src/isolation.ts`
 - Priorité : jalon
-- Statut : codé : `scenarios/isolation.e2e.ts` (bloqué : identité #18 + orgs (une table d'organisation servie))
+- Statut : codé : `scenarios/isolation.e2e.ts` (bloqué : ostrom-server#51 orgs)
+
+### E2E-ISO-002 — La console de B ne montre rien de A
+
+- Étapes : A renomme son organisation avec une marque unique, invite une adresse marquée, crée un jeton marqué et ses ressources ; la session de B lit tout ce que lit la console : `/auth/me`, `/auth/me/audit`, `/tokens`, `/orgs`, son organisation, ses membres, invitations, facturation et factures, et la liste de chaque ressource.
+- Attendu : aucune réponse ne porte la marque, l'id, le slug, l'e-mail, le login de A, l'invité de A ni l'id d'une ressource de A ; aucune 5xx.
+- Surfaces : serveur (image), console (réponses lues par ostrom-web)
+- Source : demande WEB relayée par l'orchestrateur le 30/10 10:00
+- Priorité : jalon
+- Statut : codé : `scenarios/isolation.e2e.ts` (bloqué : ostrom-server#51 orgs)
 
 ## Récapitulatif
 

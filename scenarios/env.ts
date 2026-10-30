@@ -9,3 +9,6 @@ export const FAKE_CODEX = new URL('../bin/fake-codex', import.meta.url).pathname
 // it was started with (a test value of the bench, never a real one).
 export const MAIL_DIR = process.env['OSTROM_E2E_MAIL_DIR'] ?? '';
 export const STRIPE_WEBHOOK_SECRET = process.env['OSTROM_E2E_STRIPE_WEBHOOK_SECRET'] ?? '';
+// The port the fake GitHub of the identity scenarios listens on: the server was started pointing at it
+// (OSTROM_GITHUB_WEB_URL and OSTROM_GITHUB_API_URL = http://127.0.0.1:<port>), with a fake OAuth client.
+export const FAKE_GITHUB_PORT = Number(process.env['OSTROM_E2E_FAKE_GITHUB_PORT'] ?? '0');

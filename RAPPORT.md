@@ -59,13 +59,14 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | HARNESS | 8 | 0 | 0 | 0 | 0 | 8 |
 | DIST | 4 | 0 | 0 | 0 | 0 | 4 |
 | TC | 2 | 0 | 0 | 0 | 0 | 2 |
+| AUTH | 6 | 6 | 0 | 6 | 0 | 0 |
 | LOAD | 11 | 0 | 1 | 3 | 0 | 7 |
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
 | OBS | 3 | 0 | 0 | 0 | 0 | 3 |
 | SRV | 4 | 2 | 4 | 0 | 0 | 0 |
 | BILL | 7 | 0 | 4 | 3 | 0 | 0 |
-| ISO | 1 | 1 | 0 | 1 | 0 | 0 |
-| **Total** | 332 | 43 | 9 | 18 | 0 | 305 |
+| ISO | 2 | 2 | 0 | 2 | 0 | 0 |
+| **Total** | 339 | 50 | 9 | 25 | 0 | 305 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un

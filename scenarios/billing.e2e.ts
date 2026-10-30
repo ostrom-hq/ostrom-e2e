@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { isServed } from '../src/probe.ts';
 import { stripeEvent, stripeSignature } from '../src/stripe.ts';
 import { SERVER_URL, STRIPE_WEBHOOK_SECRET } from './env.ts';
-import { BILLING, STRIPE_WEBHOOK, call, email, orgOf, orgsUnavailable, signIn, url } from './org.ts';
+import { BILLING, STRIPE_WEBHOOK, call, email, invite, join, membersOf, orgOf, orgsUnavailable, signIn, url } from './org.ts';
 
 const WEBHOOK_SERVED = SERVER_URL !== '' && (await isServed(SERVER_URL, STRIPE_WEBHOOK, 'POST'));
 const ROUTES_SERVED = SERVER_URL !== '' && (await isServed(SERVER_URL, BILLING(randomUUID())));
@@ -97,28 +97,21 @@ describe.skipIf(ORGS !== '')(`E2E-BILL: an organization's subscription${ORGS ? `
     const org = await orgOf(owner);
     const emails = [1, 2, 3, 4, 5].map((i) => email(`m${i}`));
     const refusals: unknown[] = [];
-    const invited = await call(owner.caller, 'POST', '/api/v1/members/invites', { invites: emails.map((e) => ({ email: e, role: 'member' })) });
+    // All five at once: the owner plus five is six people. The server may refuse the invitation, or the join.
+    const invited = await invite(owner, org.id, emails);
     if (invited.status === 402) refusals.push(invited.body);
     else {
       expect(invited.status).toBe(200);
       for (const e of emails) {
-        try {
-          const p = await signIn(e);
-          const joined = await call(p.caller, 'GET', '/api/v1/org');
-          if (joined.status === 402) refusals.push(joined.body);
-        } catch (error) {
-          if (String(error).includes(' 402 ')) refusals.push(String(error));
-          else throw error;
-        }
+        const { accepted } = await join(e);
+        if (accepted.status === 402) refusals.push(accepted.body);
+        else expect(accepted.status, e).toBe(200);
       }
     }
     expect(refusals.length).toBeGreaterThan(0);
     expect(JSON.stringify(refusals)).toMatch(/payment_required/);
     expect(JSON.stringify(refusals)).toMatch(/5 people/);
-    const members = await call(owner.caller, 'GET', '/api/v1/members');
-    expect(members.status).toBe(200);
-    const list = (Array.isArray(members.body) ? members.body : (members.body['items'] ?? members.body['members'])) as unknown[];
-    expect(list.length).toBeLessThanOrEqual(5);
+    expect((await membersOf(owner, org.id)).length).toBeLessThanOrEqual(5);
     expect((await call(owner.caller, 'GET', BILLING(org.id))).body).toMatchObject({ activePeople: expect.any(Number) });
   });
 
@@ -126,9 +119,10 @@ describe.skipIf(ORGS !== '')(`E2E-BILL: an organization's subscription${ORGS ? `
     const owner = await signIn(email('owner'));
     const org = await orgOf(owner);
     const memberEmail = email('member');
-    expect((await call(owner.caller, 'POST', '/api/v1/members/invites', { invites: [{ email: memberEmail, role: 'member' }] })).status).toBe(200);
-    const member = await signIn(memberEmail);
-    expect((await orgOf(member)).id).toBe(org.id);
+    expect((await invite(owner, org.id, [memberEmail])).status).toBe(200);
+    const { person: member, accepted } = await join(memberEmail);
+    expect(accepted.status).toBe(200);
+    expect(accepted.body['id']).toBe(org.id);
     expect((await call(member.caller, 'GET', BILLING(org.id))).status).toBe(200);
     for (const action of ['checkout', 'portal', 'plan', 'cancel', 'resume']) {
       const r = await call(member.caller, 'POST', `${BILLING(org.id)}/${action}`, { plan: 'team', interval: 'month' });

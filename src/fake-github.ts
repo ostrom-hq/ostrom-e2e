@@ -10,6 +10,7 @@ import type { AddressInfo } from 'node:net';
 export interface FakeUser {
   readonly login: string;
   readonly id: number;
+  readonly email?: string;
 }
 
 export interface FakePull {
@@ -49,6 +50,7 @@ export class FakeGitHub {
   private readonly pulls = new Map<string, FakePull>();
   private readonly compares = new Map<string, readonly string[]>();
   private readonly devices = new Map<string, DeviceCode>();
+  private readonly codes = new Map<string, string>();
   private server: Server | undefined;
   private nextId = 1;
   url = '';
@@ -67,6 +69,19 @@ export class FakeGitHub {
     return token;
   }
 
+  /**
+   * The web OAuth flow (`/login/oauth/authorize` → callback): returns the one-time `code` GitHub would hand back to
+   * the redirect URI for `login`, whose verified primary address is `email`.
+   */
+  oauthCode(login: string, email: string): string {
+    const code = `code_${this.nextId++}`;
+    this.codes.set(code, login);
+    const id = this.ids.get(login) ?? 1000 + this.ids.size;
+    this.ids.set(login, id);
+    this.tokens.set(`gho_${login}`, { login, id, email });
+    return code;
+  }
+
   /** The next device flow will be approved by this login; a prepared flow nobody started is dropped. */
   deviceLogin(login: string): string {
     for (const [code, d] of this.devices) if (d.polls === 0) this.devices.delete(code);
@@ -83,9 +98,10 @@ export class FakeGitHub {
     this.compares.set(`${repo}:${base}...${head}`, shas);
   }
 
-  async start(): Promise<string> {
+  /** Listens on 127.0.0.1, on `port` when given (a server started beforehand points at it), else on a free one. */
+  async start(port = 0): Promise<string> {
     this.server = createServer((req, res) => void this.handle(req, res));
-    await new Promise<void>((resolve) => this.server?.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) => this.server?.listen(port, '127.0.0.1', resolve));
     this.url = `http://127.0.0.1:${(this.server.address() as AddressInfo).port}`;
     return this.url;
   }
@@ -142,6 +158,12 @@ export class FakeGitHub {
       if (!code || !d) return [404, { message: 'no device login prepared (FakeGitHub.deviceLogin)' }];
       return [200, { device_code: code, user_code: 'ABCD-1234', verification_uri: `${this.url}/login/device`, expires_in: 900, interval: 0 }];
     }
+    if (method === 'POST' && path === '/login/oauth/access_token' && fields['code'] !== undefined) {
+      // A code is good once, like GitHub's.
+      const login = this.codes.get(String(fields['code']));
+      this.codes.delete(String(fields['code']));
+      return login ? [200, { access_token: `gho_${login}`, token_type: 'bearer', scope: 'read:user,user:email' }] : [200, { error: 'bad_verification_code' }];
+    }
     if (method === 'POST' && path === '/login/oauth/access_token') {
       const d = this.devices.get(String(fields['device_code']));
       if (!d) return [200, { error: 'expired_token' }];
@@ -152,6 +174,7 @@ export class FakeGitHub {
     const user = this.who(req);
     if (!user) return [401, { message: 'Bad credentials' }];
     if (method === 'GET' && path === '/user') return [200, { login: user.login, id: user.id, type: 'User' }];
+    if (method === 'GET' && path === '/user/emails') return [200, user.email ? [{ email: user.email, primary: true, verified: true }] : []];
     const repoPath = /^\/repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path);
     if (!repoPath) return [404, { message: 'Not Found' }];
     const repo = repoPath[1] as string;

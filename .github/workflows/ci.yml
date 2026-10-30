@@ -52,7 +52,8 @@ jobs:
         run: pnpm test:coverage
       # Full stack: the real server and the real `ostrom` built from the main branches of ostrom-server and ostrom-cli.
       # The server runs as its own distroless image (its Dockerfile on main), the artefact that ships.
-      # A repository that does not meet the contract yet leaves its scenarios as todos (« bloqué »), it does not fail.
+      # Both now meet the contract on main: a server or CLI that does not build fails the job, it never leaves the
+      # scenarios silently skipped (run 41028221230 was green with neither, ostrom-core unreadable).
       - name: Sign-in mail directory (written by the server's non-root user, read by the scenarios)
         run: mkdir -p "$RUNNER_TEMP/ostrom-mail" && chmod 0777 "$RUNNER_TEMP/ostrom-mail"
       - name: Real Ostrom server (image of ostrom-server main)
@@ -60,6 +61,7 @@ jobs:
         uses: ./.github/actions/server
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
+          core-key: ${{ secrets.DEPLOY_KEY_CORE }}
           database-url: postgresql://localhost:5432/ostrom
           image: "true"
           # Test values of the bench, never real ones: stripe-mock behind billing, sign-in mails written to a directory.
@@ -70,20 +72,27 @@ jobs:
             OSTROM_MAIL_DIR=/var/lib/ostrom/mail
             OSTROM_PUBLIC_URL=http://127.0.0.1:4600
             OSTROM_CONSOLE_URL=http://127.0.0.1:4600
+            OSTROM_TRUSTED_PROXIES=127.0.0.1/32
+            OSTROM_GITHUB_WEB_URL=http://127.0.0.1:4610
+            OSTROM_GITHUB_API_URL=http://127.0.0.1:4610
+            OSTROM_GITHUB_CLIENT_ID=Iv1.e2ebench
+            OSTROM_GITHUB_CLIENT_SECRET=e2e-bench-fake-github
           docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail
-          required: "false"
+          required: "true"
       - name: Real ostrom CLI
         id: cli
         uses: ./.github/actions/cli
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_CLI }}
-          required: "false"
+          core-key: ${{ secrets.DEPLOY_KEY_CORE }}
+          required: "true"
       - name: Scenarios
         env:
           OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.url || '' }}
           OSTROM_E2E_CLI_BIN: ${{ steps.cli.outputs.available == 'true' && steps.cli.outputs.bin || '' }}
           OSTROM_E2E_MAIL_DIR: ${{ runner.temp }}/ostrom-mail
           OSTROM_E2E_STRIPE_WEBHOOK_SECRET: whsec_e2e_bench
+          OSTROM_E2E_FAKE_GITHUB_PORT: "4610"
         run: pnpm e2e --reporter=default --reporter=json --outputFile=e2e-results.json
       # Short load test on the served public routes; the thresholds of load/smoke.js fail the job.
       - name: k6 smoke against the server image (health, instance)

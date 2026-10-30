@@ -5,6 +5,12 @@ export interface Caller {
   readonly token?: string;
   readonly cookie?: string;
   readonly csrf?: string;
+  /**
+   * The client address the caller claims through `X-Forwarded-For`. The bench's server trusts 127.0.0.1 as its proxy
+   * (`OSTROM_TRUSTED_PROXIES`), so each person signs in from an address of its own and the per-address sign-in limits
+   * count people, not the whole bench.
+   */
+  readonly from?: string;
 }
 
 export interface RouteCase {
@@ -31,6 +37,7 @@ export function headersOf(caller: Caller, method: string, json: boolean): Record
   if (caller.token) h['authorization'] = `Bearer ${caller.token}`;
   if (caller.cookie) h['cookie'] = caller.cookie;
   if (caller.csrf && method !== 'GET' && method !== 'HEAD') h['x-csrf-token'] = caller.csrf;
+  if (caller.from) h['x-forwarded-for'] = caller.from;
   return h;
 }
 

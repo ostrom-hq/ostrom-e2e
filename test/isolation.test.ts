@@ -32,6 +32,7 @@ describe('isolation', () => {
     expect(headersOf({ cookie: 'ostrom_session=s', csrf: 'c' }, 'GET', false)).toEqual({ cookie: 'ostrom_session=s' });
     expect(headersOf({ csrf: 'c' }, 'HEAD', false)).toEqual({});
     expect(headersOf({}, 'DELETE', false)).toEqual({});
+    expect(headersOf({ token: 't', from: '10.1.2.3' }, 'GET', false)).toEqual({ authorization: 'Bearer t', 'x-forwarded-for': '10.1.2.3' });
   });
 
   it('lists every success, server error and echo of the owner, and nothing for a clean refusal', async () => {

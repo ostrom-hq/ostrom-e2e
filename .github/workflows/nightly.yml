@@ -36,6 +36,7 @@ jobs:
         uses: ./.github/actions/server
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
+          core-key: ${{ secrets.DEPLOY_KEY_CORE }}
           database-url: postgresql://localhost:5432/ostrom
           image: "true"
           # Test values of the bench, never real ones: stripe-mock behind billing, sign-in mails written to a directory.
@@ -46,8 +47,13 @@ jobs:
             OSTROM_MAIL_DIR=/var/lib/ostrom/mail
             OSTROM_PUBLIC_URL=http://127.0.0.1:4600
             OSTROM_CONSOLE_URL=http://127.0.0.1:4600
+            OSTROM_TRUSTED_PROXIES=127.0.0.1/32
+            OSTROM_GITHUB_WEB_URL=http://127.0.0.1:4610
+            OSTROM_GITHUB_API_URL=http://127.0.0.1:4610
+            OSTROM_GITHUB_CLIENT_ID=Iv1.e2ebench
+            OSTROM_GITHUB_CLIENT_SECRET=e2e-bench-fake-github
           docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail
-          required: "false"
+          required: "true"
       - name: Gate load setup (requester token, approver session)
         id: loadsetup
         if: steps.server.outputs.available == 'true'
