@@ -2971,7 +2971,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (image), PostgreSQL (k6)
 - Source : consigne QA du 30/10 (reprise après ostrom-server#1) ; seuils de `load/smoke.js`
 - Priorité : P1
-- Statut : codé : `load/smoke.js` (scénarios `health` et `instance`), job `ci` d'ostrom-e2e
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849 — `/health` p95 1,31 ms, p99 2,14 ms ; `/api/v1/instance` p95 1,92 ms, p99 3,04 ms ; 0 % d'erreurs sur 6 002 requêtes, 9 003 checks sur 9 003 (`load/smoke.js`, job `ci` d'ostrom-e2e)
 
 
 ## DOGFOOD : Le harnais ControlResell en workflows Ostrom (dogfood)
@@ -3043,7 +3043,7 @@ Servi par ostrom-server#1 (4fe38dd). Testé de l'extérieur sur l'image distrole
 - Surfaces : serveur (image), PostgreSQL
 - Source : ostrom-server `kernel/http/Health.kt` ; JOURNAL du 30/10 04:40 (SERVER-SOCLE)
 - Priorité : jalon
-- Statut : codé : `scenarios/server.e2e.ts`
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849 (image ostrom-server@4fe38dd, PostgreSQL 18), `scenarios/server.e2e.ts`
 
 ### E2E-SRV-002 — Instance et clé de signature
 
@@ -3052,7 +3052,7 @@ Servi par ostrom-server#1 (4fe38dd). Testé de l'extérieur sur l'image distrole
 - Surfaces : serveur (image), PostgreSQL
 - Source : ostrom-server `modules/instance` ; c'est la clé avec laquelle les reçus se vérifient hors ligne (RECEIPT)
 - Priorité : jalon
-- Statut : codé : `scenarios/server.e2e.ts`
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849 (image ostrom-server@4fe38dd, PostgreSQL 18), `scenarios/server.e2e.ts`
 
 ### E2E-SRV-003 — Corps d'erreur uniforme
 
@@ -3061,7 +3061,7 @@ Servi par ostrom-server#1 (4fe38dd). Testé de l'extérieur sur l'image distrole
 - Surfaces : serveur (image)
 - Source : ostrom-server `kernel/http/Errors.kt` (CONVENTIONS § 3.3) ; JOURNAL du 30/10 04:40 point 3
 - Priorité : P1
-- Statut : codé : `scenarios/server.e2e.ts`
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849 (image ostrom-server@4fe38dd, PostgreSQL 18), `scenarios/server.e2e.ts`
 
 ### E2E-SRV-004 — En-tête `X-Request-Id`
 
@@ -3070,7 +3070,7 @@ Servi par ostrom-server#1 (4fe38dd). Testé de l'extérieur sur l'image distrole
 - Surfaces : serveur (image)
 - Source : ostrom-server `kernel/http/Http.kt` (`isValidRequestId`)
 - Priorité : P1
-- Statut : codé : `scenarios/server.e2e.ts`
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849 (image ostrom-server@4fe38dd, PostgreSQL 18), `scenarios/server.e2e.ts`
 
 ## Récapitulatif
 
