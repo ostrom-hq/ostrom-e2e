@@ -28,7 +28,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | CLAUDE | 19 | 4 | 0 | 2 | 0 | 17 |
 | CODEX | 9 | 0 | 0 | 0 | 0 | 9 |
 | GATE | 15 | 5 | 0 | 1 | 0 | 14 |
-| BYPASS | 33 | 12 | 0 | 0 | 0 | 33 |
+| BYPASS | 33 | 12 | 0 | 3 | 0 | 30 |
 | YES | 13 | 5 | 0 | 2 | 0 | 11 |
 | YESCLI | 4 | 1 | 0 | 1 | 0 | 3 |
 | SLACK | 5 | 0 | 0 | 0 | 0 | 5 |
@@ -59,7 +59,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | TC | 2 | 0 | 0 | 0 | 0 | 2 |
 | LOAD | 10 | 0 | 0 | 3 | 0 | 7 |
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
-| **Total** | 316 | 40 | 0 | 11 | 0 | 305 |
+| **Total** | 316 | 40 | 0 | 14 | 0 | 302 |
 <!-- scenarios:end -->
 
 ## Charge

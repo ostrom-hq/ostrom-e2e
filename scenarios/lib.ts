@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentLog, Script } from '../src/fake-agent.ts';
-import type { FakeGitHub } from '../src/fake-github.ts';
+import { FakeGitHub } from '../src/fake-github.ts';
 import { GIT_ENV } from '../src/git.ts';
 import { CLI_BIN, FAKE_CLAUDE, FAKE_CODEX, SERVER_URL } from './env.ts';
 
@@ -85,4 +85,41 @@ export function login(p: Person, github: FakeGitHub): Promise<Run> {
 /** The gate id the CLI or the hook named in a refusal (`ostrom wait <id>` / `ostrom approve <id>`). */
 export function gateIdIn(text: string): string | undefined {
   return /ostrom (?:wait|approve) ([A-Za-z0-9_-]+)/.exec(text)?.[1];
+}
+
+/** True when the server and the CLI serve the milestone journeys (set by QA in the workflow, OSTROM_E2E_JALON=1). */
+export const JALON_READY = CLI_BIN !== '' && SERVER_URL !== '' && process.env['OSTROM_E2E_JALON'] === '1';
+
+export interface World {
+  readonly github: FakeGitHub;
+  /** The requester, first member of the organisation. */
+  readonly dev: Person;
+  /** An approver of the gate « push to main » of acme/api. */
+  readonly rev: Person;
+}
+
+/**
+ * The organisation of the milestone, built through the real surfaces (CLI.md § 3.1 and § 3.2): dev-a logs in first,
+ * invites rev-b and rev-c, rev-b logs in, dev-a adds the harness « git-safety » on acme/api with rev-b and rev-c as
+ * approvers (rev-c never logs in: two approvers, one active) and enforces it.
+ */
+export async function world(): Promise<World> {
+  const github = new FakeGitHub();
+  await github.start();
+  const dev = person('dev-a', github);
+  const rev = person('rev-b', github);
+  const run = async (what: string, p: Promise<Run>): Promise<void> => {
+    const r = await p;
+    if (r.code !== 0) throw new Error(`world: ${what} exited ${r.code}\n${r.stderr}${r.stdout}`);
+  };
+  await run('dev-a login', login(dev, github));
+  await run('invite', dev.ostrom(['invite', '@rev-b', '@rev-c']));
+  await run('rev-b login', login(rev, github));
+  await run('harness add', dev.ostrom(['harness', 'add', 'git-safety', '--scope', 'repo:acme/api', '--set', 'deploy_approvers=@rev-b,@rev-c', '--enforce']));
+  return { github, dev, rev };
+}
+
+/** A tool call the fake agent makes and really runs (Bash). */
+export function bash(command: string): { steps: { event: string; tool: string; input: { command: string }; run: boolean }[] } {
+  return { steps: [{ event: 'tool', tool: 'Bash', input: { command }, run: true }] };
 }
