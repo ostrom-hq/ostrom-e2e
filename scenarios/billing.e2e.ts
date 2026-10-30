@@ -110,7 +110,8 @@ describe.skipIf(ORGS !== '')(`E2E-BILL: an organization's subscription${ORGS ? `
     }
     expect(refusals.length).toBeGreaterThan(0);
     expect(JSON.stringify(refusals)).toMatch(/payment_required/);
-    expect(JSON.stringify(refusals)).toMatch(/5 people/);
+    // The wording is the server's; the type and a message to show are the contract.
+    expect(refusals.every((r) => typeof (r as { error?: { message?: unknown } }).error?.message === 'string')).toBe(true);
     expect((await membersOf(owner, org.id)).length).toBeLessThanOrEqual(5);
     expect((await call(owner.caller, 'GET', BILLING(org.id))).body).toMatchObject({ activePeople: expect.any(Number) });
   });

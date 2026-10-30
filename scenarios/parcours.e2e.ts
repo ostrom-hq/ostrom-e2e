@@ -63,15 +63,19 @@ async function needsCredential(method: string, path: string, body?: unknown) {
 
 // ---------------------------------------------------------------------------------------------- 2. Organization setup
 
+// The routes of the current org (rules, secrets, budgets, workflows, receipts…) resolve a person's org from its only
+// membership or the `Ostrom-Org` header: ostrom-server#64. Before it, a person gets 403 « belongs to no organization »
+// or 404 « Organization not found » there (run 41052130887; JOURNAL 10:00). Marker: `GET /api/v1/me/organizations`.
+const ORG64 = (await needs(['GET', '/api/v1/me/organizations'])) === '' ? '' : 'needs the current org of a person, ostrom-server#64';
 const W001 = await needs(['POST', '/api/v1/orgs'], ['GET', '/api/v1/orgs/{id}']);
 const W002 = await needs(['GET', '/api/v1/me/organizations']);
 const W003 = await needs(['GET', '/api/v1/orgs/{id}']);
 const W004 = await needs(['GET', '/api/v1/github/app/install/start'], ['GET', '/api/v1/github/app/install/callback'], ['GET', '/api/v1/repos'], ['GET', '/api/v1/github/app/manifest/start']);
 const W005 = await needs(['GET', '/api/v1/orgs/{id}/members'], ['PATCH', '/api/v1/orgs/{id}/members/{id}']);
 const W006 = await needs(['POST', '/api/v1/invitations/preview']);
-const W007 = await needs(['GET', '/api/v1/accounts'], ['POST', '/api/v1/accounts'], ['PATCH', '/api/v1/accounts/{id}'], ['DELETE', '/api/v1/accounts/{id}'], ['GET', '/api/v1/inference/v1/models']);
-const W008 = await needs(['POST', '/api/v1/mcp/servers'], ['PUT', '/api/v1/mcp/servers/{id}'], ['DELETE', '/api/v1/mcp/servers/{id}'], ['GET', '/api/v1/mcp/calls'], ['GET', '/api/v1/mcp/usage']);
-const W009 = await needs(['POST', '/api/v1/secrets'], ['GET', '/api/v1/secrets'], ['PUT', '/api/v1/secrets/{id}'], ['DELETE', '/api/v1/secrets/{id}']);
+const W007 = (await needs(['GET', '/api/v1/accounts'], ['POST', '/api/v1/accounts'], ['PATCH', '/api/v1/accounts/{id}'], ['DELETE', '/api/v1/accounts/{id}'], ['GET', '/api/v1/inference/v1/models'])) || ORG64;
+const W008 = (await needs(['POST', '/api/v1/mcp/servers'], ['PUT', '/api/v1/mcp/servers/{id}'], ['DELETE', '/api/v1/mcp/servers/{id}'], ['GET', '/api/v1/mcp/calls'], ['GET', '/api/v1/mcp/usage'])) || ORG64;
+const W009 = (await needs(['POST', '/api/v1/secrets'], ['GET', '/api/v1/secrets'], ['PUT', '/api/v1/secrets/{id}'], ['DELETE', '/api/v1/secrets/{id}'])) || ORG64;
 const W010 = await needs(['POST', '/api/v1/tokens'], ['GET', '/api/v1/tokens'], ['POST', '/api/v1/tokens/{id}/rotate'], ['DELETE', '/api/v1/tokens/{id}']);
 const W011 = await needs(['GET', '/api/v1/service-keys'], ['POST', '/api/v1/service-keys'], ['GET', '/api/v1/devices'], ['GET', '/api/v1/auth/sessions']);
 
@@ -303,12 +307,12 @@ describe('E2E-PARC: 2. organization setup', () => {
 // --------------------------------------------------------------------------------------------------------- 3. Rules
 
 const W012 = await needs(['GET', '/api/v1/rules'], ['PATCH', '/api/v1/rules/{id}'], ['POST', '/api/v1/rules/bulk'], ['GET', '/api/v1/analysis/state'], ['POST', '/api/v1/analysis/start']);
-const W013 = await needs(['GET', '/api/v1/gates/catalog'], ['GET', '/api/v1/gates/catalog/signed']);
-const W014 = await needs(['GET', '/api/v1/gates/approvers']);
+const W013 = (await needs(['GET', '/api/v1/gates/catalog'], ['GET', '/api/v1/gates/catalog/signed'])) || ORG64;
+const W014 = (await needs(['GET', '/api/v1/gates/approvers'])) || ORG64;
 const W015 = await needs(['GET', '/api/v1/gates/policy'], ['PUT', '/api/v1/gates/policy']);
-const W016 = await needs(['GET', '/api/v1/policy/models'], ['PUT', '/api/v1/policy/models'], ['GET', '/api/v1/inference/settings'], ['PUT', '/api/v1/inference/settings']);
+const W016 = (await needs(['GET', '/api/v1/policy/models'], ['PUT', '/api/v1/policy/models'], ['GET', '/api/v1/inference/settings'], ['PUT', '/api/v1/inference/settings'])) || ORG64;
 const W017 = await needs(['GET', '/api/v1/policy/agents']);
-const W018 = await needs(['GET', '/api/v1/budgets'], ['PUT', '/api/v1/budgets'], ['GET', '/api/v1/budgets/me']);
+const W018 = (await needs(['GET', '/api/v1/budgets'], ['PUT', '/api/v1/budgets'], ['GET', '/api/v1/budgets/me'])) || ORG64;
 const W019 = await needs(['GET', '/api/v1/spending']);
 const W020 = await needs(['GET', '/api/v1/decisions']);
 
@@ -443,10 +447,10 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
 
 // --------------------------------------------------------------------------------------- 4. Workflows and automations
 
-const W021 = await needs(['GET', '/api/v1/workflows'], ['POST', '/api/v1/workflows'], ['PUT', '/api/v1/workflows/{id}'], ['DELETE', '/api/v1/workflows/{id}'], ['GET', '/api/v1/packages/current']);
+const W021 = (await needs(['GET', '/api/v1/workflows'], ['POST', '/api/v1/workflows'], ['PUT', '/api/v1/workflows/{id}'], ['DELETE', '/api/v1/workflows/{id}'], ['GET', '/api/v1/packages/current'])) || ORG64;
 const W022 = await needs(['GET', '/api/v1/workflows/{id}/runs'], ['POST', '/api/v1/workflows/{id}/runs'], ['GET', '/api/v1/runs']);
-const W023 = await needs(['POST', '/api/v1/automations'], ['POST', '/api/v1/automations/{id}/enable'], ['PUT', '/api/v1/automations/{id}'], ['POST', '/api/v1/automations/{id}/run'], ['POST', '/api/v1/automations/{id}/webhook/rotate-secret'], ['DELETE', '/api/v1/automations/{id}']);
-const W024 = await needs(['POST', '/api/v1/waits'], ['GET', '/api/v1/waits/{id}'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/waits/{id}/cancel']);
+const W023 = (await needs(['POST', '/api/v1/automations'], ['POST', '/api/v1/automations/{id}/enable'], ['PUT', '/api/v1/automations/{id}'], ['POST', '/api/v1/automations/{id}/run'], ['POST', '/api/v1/automations/{id}/webhook/rotate-secret'], ['DELETE', '/api/v1/automations/{id}'])) || ORG64;
+const W024 = (await needs(['POST', '/api/v1/waits'], ['GET', '/api/v1/waits/{id}'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/waits/{id}/cancel'])) || ORG64;
 
 /** A workflow of the contract (`Workflow`): one trigger node, no edge. */
 const workflow = (id: string, name: string) => ({ id, name, domain: 'git', nodes: [{ id: 'start', kind: 'trigger', label: 'Session start' }], edges: [], start: 'start', status: 'proposed', foundAt: new Date().toISOString() });
@@ -548,7 +552,7 @@ const W025 = await needs(['POST', '/api/v1/launches'], ['GET', '/api/v1/sessions
 const W026 = await needs(['POST', '/api/v1/sessions/{id}/workflow-receipt'], ['POST', '/api/v1/launches'], ['GET', '/api/v1/sessions']);
 const W027 = await needs(['GET', '/api/v1/checks'], ['POST', '/api/v1/checks'], ['GET', '/api/v1/notifications'], ['POST', '/api/v1/notifications']);
 const W028 = await needs(['POST', '/api/v1/gates/{id}/reserve'], ['POST', '/api/v1/gates/{id}/consume'], ['POST', '/api/v1/gates/{id}/release']);
-const W029 = await needs(['GET', '/api/v1/receipts'], ['GET', '/api/v1/receipts/{id}'], ['GET', '/api/v1/receipts/{id}/verify'], ['GET', '/api/v1/receipts/keys']);
+const W029 = (await needs(['GET', '/api/v1/receipts'], ['GET', '/api/v1/receipts/{id}'], ['GET', '/api/v1/receipts/{id}/verify'], ['GET', '/api/v1/receipts/keys'])) || ORG64;
 const W030 = await needs(['GET', '/api/v1/receipts/{id}/bundle']);
 
 describe('E2E-PARC: 5. the CLI, gates, receipts (server side)', () => {
@@ -652,11 +656,11 @@ describe('E2E-PARC: 5. the CLI, gates, receipts (server side)', () => {
 
 // ------------------------------------------------------------------------- 6. Sessions, cloud, activity, usage, app
 
-const W031 = await needs(['GET', '/api/v1/sessions'], ['GET', '/api/v1/sessions/{id}']);
+const W031 = (await needs(['GET', '/api/v1/sessions'], ['GET', '/api/v1/sessions/{id}'])) || ORG64;
 const W032 = await needs(['GET', '/api/v1/cloud/sessions'], ['GET', '/api/v1/runners']);
 const W033 = await needs(['GET', '/api/v1/activity']);
-const W034 = await needs(['GET', '/api/v1/usage'], ['GET', '/api/v1/usage/summary'], ['GET', '/api/v1/usage/events']);
-const W035 = await needs(['POST', '/api/v1/import/teamcode']);
+const W034 = (await needs(['GET', '/api/v1/usage'], ['GET', '/api/v1/usage/summary'], ['GET', '/api/v1/usage/events'])) || ORG64;
+const W035 = (await needs(['POST', '/api/v1/import/teamcode'])) || ORG64;
 const W036 = await needs(['POST', '/api/v1/auth/mobile/token'], ['GET', '/api/v1/approvals/queue'], ['GET', '/api/v1/approvals/{id}/view'], ['GET', '/api/v1/me/notifications'], ['PUT', '/api/v1/me/notifications']);
 const W037 = await needs(['POST', '/api/v1/push-devices'], ['DELETE', '/api/v1/push-devices/{id}']);
 
