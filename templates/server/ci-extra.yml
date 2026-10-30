@@ -20,7 +20,7 @@ jobs:
         uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
         with:
           path: .
-          database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
+          database-url: postgresql://localhost:5432/ostrom
       - name: ostrom CLI from main
         id: cli
         uses: ostrom-hq/ostrom-e2e/.github/actions/cli@main
@@ -62,7 +62,7 @@ jobs:
         uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
         with:
           path: .
-          database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
+          database-url: postgresql://localhost:5432/ostrom
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-e2e
@@ -70,9 +70,13 @@ jobs:
           path: .ostrom/e2e
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
       - name: k6 smoke (p95/p99 thresholds)
-        env: { OSTROM_URL: "${{ steps.server.outputs.url }}" }
+        env:
+          OSTROM_URL: ${{ steps.server.outputs.url }}
+          OSTROM_LOAD_SCENARIOS: ${{ vars.OSTROM_LOAD_GATES == 'true' && 'health,asks,gates' || 'health' }}
         run: k6 run --summary-export smoke-summary.json .ostrom/e2e/load/smoke.js
       - name: k6 race (exactly one yes wins out of 100)
+        # Org variable OSTROM_LOAD_GATES, set to true by QA once the gate routes and the two tokens are on main.
+        if: vars.OSTROM_LOAD_GATES == 'true'
         env: { OSTROM_URL: "${{ steps.server.outputs.url }}" }
         run: k6 run --summary-export race-summary.json .ostrom/e2e/load/race.js
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
