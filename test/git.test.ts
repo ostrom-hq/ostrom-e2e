@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
 import { commit, git, originSha, sandbox } from '../src/git.ts';
 

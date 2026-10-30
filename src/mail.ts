@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Reads the sign-in links the server writes to OSTROM_MAIL_DIR instead of sending them (one file per mail:
 // `To: …`, `Subject: …`, a blank line, the text). The token is in the link's fragment: `…/auth/email#token=<token>`.
 import { readdirSync, readFileSync, statSync } from 'node:fs';

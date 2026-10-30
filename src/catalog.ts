@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Reads the scenario catalogue (SCENARIOS.md) and summarises it for RAPPORT.md.
 // A scenario is a `### E2E-<FAMILY>-<NNN> — <title>` section with `- Priorité : …` and `- Statut : …` bullets.
 

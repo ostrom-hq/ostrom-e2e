@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // What the bench was given by the CI (or a developer): the running server, the `ostrom` binary. A scenario that needs
 // something missing is skipped with the reason, and stays « bloqué » in SCENARIOS.md until the piece exists.
 export const SERVER_URL = process.env['OSTROM_E2E_SERVER_URL'] ?? '';

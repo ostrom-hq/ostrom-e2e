@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // How a coding agent finds and judges its hooks, reduced to what the bench needs to play them like the real agent.
 // Claude Code: settings JSON `{ "hooks": { "<Event>": [ { "matcher": "Bash", "hooks": [ { "type": "command",
 // "command": "...", "timeout": <seconds> } ] } ] } }`, from `--settings <file|json>`, `--plugin-dir <dir>`

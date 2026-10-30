@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Stripe webhooks as Stripe sends them: an event body and its `Stripe-Signature` header (HMAC-SHA256 of
 // `<t>.<body>` keyed by the whole `whsec_…` secret, lowercase hex), so the bench can play Stripe against the server.
 import { createHmac } from 'node:crypto';

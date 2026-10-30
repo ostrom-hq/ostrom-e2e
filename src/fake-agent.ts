@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // The fake coding agent of the bench. `ostrom claude` / `ostrom codex` launch it in place of the real agent
 // (OSTROM_CLAUDE_BIN / OSTROM_CODEX_BIN = bin/fake-claude, bin/fake-codex). It loads the hooks Ostrom gave it, plays a
 // script of agent events through them exactly as the agent would (stdin payload, timeout, exit 2, JSON decisions),

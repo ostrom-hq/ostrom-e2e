@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Short load test run on every ostrom-server pull request (about 70 s). The thresholds fail the job.
 // Usage: k6 run load/smoke.js  (OSTROM_URL, OSTROM_LOAD_TOKEN, OSTROM_LOAD_APPROVER_TOKEN, OSTROM_ROUTE_*)
 // OSTROM_LOAD_SCENARIOS picks the scenarios (default: all) while the server does not serve every route yet.

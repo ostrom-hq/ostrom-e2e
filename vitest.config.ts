@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { defineConfig } from 'vitest/config';
 
 // Two projects: `unit` (the bench's own code, 100 % coverage like every Ostrom repository) and `e2e` (the full-stack

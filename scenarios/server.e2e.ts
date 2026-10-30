@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // E2E-SRV : what the server foundation serves today (ostrom-server#1), tested from outside, on the server's own image
 // and a real PostgreSQL: health, the instance and its signing key, the uniform error body, the request id header.
 import { createPublicKey } from 'node:crypto';

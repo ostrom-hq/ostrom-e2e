@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { createHmac } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';

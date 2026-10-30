@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // A local stand-in for GitHub, so that the full-stack scenarios never reach the real one (and never need a real
 // account). The server and the CLI point at it through OSTROM_GITHUB_API_URL and OSTROM_GITHUB_WEB_URL.
 // It serves what Ostrom's journeys use: the user behind a token, the OAuth device flow, pull requests, compare,

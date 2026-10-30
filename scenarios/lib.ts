@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Helpers shared by the full-stack scenarios: one isolated person (own HOME and OSTROM_HOME, logged in through the
 // fake GitHub), the real `ostrom` binary, the fake agent in place of Claude Code / Codex.
 import { spawn } from 'node:child_process';

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // The bench's own moving parts, run as real processes: the fake agent launched through its executable wrapper, the
 // way `ostrom claude` will launch it (OSTROM_CLAUDE_BIN).
 import { spawnSync } from 'node:child_process';
