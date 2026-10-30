@@ -255,16 +255,20 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Statut : bloqué : ostrom-server + ostrom-web
 
 
-### E2E-CONN-016 — Une organisation ne prend pas l'installation d'une autre
+### E2E-CONN-016 — Une organisation ne prend ni l'installation ni le `state` d'une autre
 
-- Étapes : Le propriétaire de l'organisation B lance l'installation. Il revient de GitHub avec l'`installation_id` de l'installation d'acme (42), autorisé comme `globex-admin`, qui n'atteint que 43. Il recommence ensuite avec 43, puis le propriétaire d'acme installe 42.
+- Étapes :
+  1. Le propriétaire de B revient de GitHub avec l'`installation_id` de l'installation d'acme (42), autorisé comme `globex-admin`, qui n'atteint que 43.
+  2. Le `state` de A est rapporté dans la session de B.
+  3. B installe 43, A installe 42, puis A rejoue son `state`.
+  4. B lance l'installation avec `?org=` d'A.
 - Attendu :
-  - le premier retour reçoit 403 `installation_not_yours`, et B reste non installée ;
-  - le serveur a lu `GET /user/installations` avec le jeton de l'utilisateur ;
-  - 43 passe pour B (302) et 42 pour acme (302) ;
-  - le jeton de l'utilisateur ne sert qu'à lister ses installations.
+  - le callback renvoie toujours vers `/github` de la console, avec `?error=installation_not_yours`, puis `?error=forbidden` pour le `state` d'une autre session ;
+  - `?installed=1` pour B et pour A, et `?error=forbidden` quand A rejoue ;
+  - `?org=` d'une organisation qu'on n'administre pas reçoit 403 ;
+  - le serveur a lu `GET /user/installations`, et le jeton de l'utilisateur ne sert qu'à ça.
 - Surfaces : serveur, faux GitHub (port fixe `OSTROM_E2E_GITHUB_PORT`, App de test du banc)
-- Source : ostrom-server#44, bloquant de la revue (l'`installation_id` du retour n'est jamais cru seul)
+- Source : ostrom-server#44 (bloquant de la revue ; décision de l'orchestrateur du 30/10 à 12:55 : `?org`, `state` lié à la session, retour vers `/github`)
 - Fichier : `scenarios/github-install.e2e.ts` (E2E-GH-INSTALL-001)
 - Priorité : P1
 - Statut : codé
