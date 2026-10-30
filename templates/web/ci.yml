@@ -1,54 +1,24 @@
-# Test CI of ostrom-web. Job names = required checks on main (templates/README.md).
+# CI of ostrom-web: ONE job `ci` on pull requests (the organisation's runners are scarce, JOURNAL 03:10), which is the
+# required check on main. Types, lint, Vitest at 100 %, then Playwright against the REAL server and PostgreSQL.
 name: CI
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+    tags: ["[0-9]*"]
   merge_group:
   workflow_dispatch:
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 permissions:
   contents: read
 
 jobs:
-  lint:
-    name: lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version-file: .nvmrc, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck && pnpm lint && pnpm format:check
-
-  coverage:
-    name: coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version-file: .nvmrc, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - name: Unit and component tests, 100 % thresholds
-        run: pnpm test:coverage
-      - name: Coverage summary
-        if: always()
-        run: |
-          # shellcheck disable=SC2016 # JavaScript template literals, not shell expansions
-          node -e 'const t=require("./coverage/coverage-summary.json").total;const r=["lines","branches","functions","statements"].map(k=>`| ${k} | ${t[k].pct} % (${t[k].covered}/${t[k].total}) |`).join("\n");require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY,`### Vitest coverage\n\n| Metric | Value |\n|---|---|\n${r}\n`)' || true
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with: { name: coverage, path: coverage/, if-no-files-found: ignore }
-
-  # Playwright against the REAL server (native binary built from ostrom-server main) and PostgreSQL.
-  e2e:
-    name: e2e
+  ci:
+    name: ci
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -60,22 +30,27 @@ jobs:
           --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Real Ostrom server (built from ostrom-server, cached by commit)
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck && pnpm lint && pnpm format:check
+      - name: Unit and component tests, 100 % thresholds
+        run: pnpm test:coverage
+      - name: Real Ostrom server (built from ostrom-server main, cached by commit)
         id: server
         uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           database-url: postgresql://localhost:5432/ostrom
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version-file: .nvmrc, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
+          required: "false" # QA flips it to "true" once ostrom-server meets the bench contract
       - run: pnpm exec playwright install --with-deps chromium
       - name: Playwright
         env:
           VITE_OSTROM_API_URL: ${{ steps.server.outputs.url }}
           OSTROM_URL: ${{ steps.server.outputs.url }}
+          OSTROM_SERVER_AVAILABLE: ${{ steps.server.outputs.available }}
         run: pnpm build && pnpm e2e
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
-        with: { name: playwright-report, path: playwright-report/, if-no-files-found: ignore }
+        with: { name: reports, path: "coverage/\nplaywright-report/", if-no-files-found: ignore }
