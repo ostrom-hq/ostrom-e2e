@@ -5,7 +5,13 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { action, approve, ask, askPushToMain, headers, pick, requireTokens, route } from './lib.js';
 
+// Public scenarios (health, instance) need no token; the others ask gates and say yes.
+const PUBLIC = ['health', 'instance'];
 const SCENARIOS = {
+  instance: {
+    scenario: { executor: 'constant-arrival-rate', rate: 50, timeUnit: '1s', duration: '60s', preAllocatedVUs: 10, exec: 'instance' },
+    thresholds: { 'http_req_duration{name:instance}': ['p(95)<50', 'p(99)<100'] },
+  },
   health: {
     scenario: { executor: 'constant-arrival-rate', rate: 50, timeUnit: '1s', duration: '60s', preAllocatedVUs: 10, exec: 'health' },
     thresholds: { 'http_req_duration{name:health}': ['p(95)<50', 'p(99)<100'] },
@@ -28,7 +34,12 @@ export const options = {
 };
 
 export function setup() {
-  if (picked.some((k) => k !== 'health')) requireTokens(`smoke (${picked.join(',')})`);
+  if (picked.some((k) => !PUBLIC.includes(k))) requireTokens(`smoke (${picked.join(',')})`);
+}
+
+export function instance() {
+  const r = http.get(route('instance'), { headers: headers(''), tags: { name: 'instance' } });
+  check(r, { 'instance 200': (x) => x.status === 200, 'instance ed25519': (x) => x.status === 200 && x.json('signingKey.algorithm') === 'ed25519' });
 }
 
 export function health() {

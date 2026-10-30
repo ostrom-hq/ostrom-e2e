@@ -2,6 +2,8 @@ name: Ostrom server (real native binary)
 description: >
   Builds the native linuxX64 binary of ostrom-server at a given ref (cached by commit), starts it against the given
   PostgreSQL and waits for GET /health. Used by the CI of ostrom-web, ostrom-app, ostrom-cli and ostrom-e2e.
+  With `image: "true"`, runs the server's own distroless image instead (its Dockerfile at that ref, around the same
+  binary), in a container named `ostrom-e2e-server` on the host network: what the bench tests is what ships.
   Contract (ostrom-e2e/templates/README.md): the binary comes from `ci/build-linux.sh` (→ `dist/ostrom-server`) when
   the repository has it, else from `./gradlew :app:linkReleaseExecutableLinuxX64`; it reads OSTROM_DATABASE_URL,
   OSTROM_DATABASE_USER, OSTROM_DATABASE_PASSWORD and OSTROM_PORT, applies its migrations at start and answers
@@ -38,6 +40,10 @@ inputs:
     description: Extra environment lines (KEY=value, one per line) passed to the server.
     required: false
     default: ""
+  image:
+    description: '"true": build the Docker image of ostrom-server (its Dockerfile) and run it, instead of the bare binary.'
+    required: false
+    default: "false"
   required:
     description: "false: when the repository does not meet the contract yet, set `available` to false instead of failing (the bench marks its scenarios blocked)."
     required: false
@@ -58,6 +64,9 @@ outputs:
   bin:
     description: Path of the server binary.
     value: ${{ steps.src.outputs.bin }}
+  mode:
+    description: "`image` (the server's Docker image, container `ostrom-e2e-server`) or `binary`."
+    value: ${{ inputs.image == 'true' && 'image' || 'binary' }}
 runs:
   using: composite
   steps:
@@ -129,28 +138,58 @@ runs:
         echo "::$LEVEL title=ostrom-server contract::the build failed or did not produce $out (contract in ostrom-e2e/templates/README.md)"
         echo "built=false" >> "$GITHUB_OUTPUT"
         [ "$REQUIRED" = "true" ] && exit 1 || exit 0
+    - name: Build the server image (its own Dockerfile, around the same binary)
+      id: image
+      if: inputs.image == 'true' && steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false'
+      shell: bash
+      working-directory: ${{ steps.src.outputs.dir }}
+      env:
+        LEVEL: ${{ inputs.required == 'true' && 'error' || 'warning' }}
+        REQUIRED: ${{ inputs.required }}
+      run: |
+        mkdir -p dist && cp "${{ steps.src.outputs.bin }}" dist/ostrom-server && chmod 755 dist/ostrom-server
+        if [ -f Dockerfile ] && docker build -q -t ostrom-server:e2e .; then
+          docker images ostrom-server:e2e --format 'image ostrom-server:e2e {{.Size}}'
+          echo "built=true" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+        echo "::$LEVEL title=ostrom-server image::no Dockerfile, or docker build failed"
+        echo "built=false" >> "$GITHUB_OUTPUT"
+        [ "$REQUIRED" = "true" ] && exit 1 || exit 0
     - name: Start the server and wait for /health
       id: start
-      if: steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false'
+      if: steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false' && steps.image.outputs.built != 'false'
       shell: bash
       env:
         OSTROM_DATABASE_URL: ${{ inputs.database-url }}
         OSTROM_DATABASE_USER: ${{ inputs.database-user }}
         OSTROM_DATABASE_PASSWORD: ${{ inputs.database-password }}
         OSTROM_PORT: ${{ inputs.port }}
-        OSTROM_SIGNING_KEY_FILE: ${{ runner.temp }}/ostrom-instance-key-${{ inputs.port }}.pem
+        KEY_FILE: ${{ runner.temp }}/ostrom-instance-key-${{ inputs.port }}.pem
         EXTRA_ENV: ${{ inputs.extra-env }}
+        IMAGE: ${{ inputs.image }}
         LEVEL: ${{ inputs.required == 'true' && 'error' || 'warning' }}
         REQUIRED: ${{ inputs.required }}
       run: |
-        set -a; [ -n "$EXTRA_ENV" ] && eval "$(printf '%s\n' "$EXTRA_ENV" | sed 's/^/export /')"; set +a
-        chmod +x "${{ steps.src.outputs.bin }}"
-        nohup "${{ steps.src.outputs.bin }}" > "$RUNNER_TEMP/ostrom-server.log" 2>&1 &
-        echo $! > "$RUNNER_TEMP/ostrom-server.pid"
+        if [ "$IMAGE" = "true" ]; then
+          # The image keeps its own signing key path (/var/lib/ostrom, owned by its non-root user).
+          printf '%s\n' "$EXTRA_ENV" | grep -v '^$' > "$RUNNER_TEMP/ostrom-server.env" || true
+          docker run -d --name ostrom-e2e-server --network host --env-file "$RUNNER_TEMP/ostrom-server.env" \
+            -e OSTROM_DATABASE_URL -e OSTROM_DATABASE_USER -e OSTROM_DATABASE_PASSWORD -e OSTROM_PORT ostrom-server:e2e
+          alive() { [ "$(docker inspect -f '{{.State.Running}}' ostrom-e2e-server 2>/dev/null)" = "true" ]; }
+          logs() { docker logs ostrom-e2e-server 2>&1; }
+        else
+          export OSTROM_SIGNING_KEY_FILE="$KEY_FILE"
+          set -a; [ -n "$EXTRA_ENV" ] && eval "$(printf '%s\n' "$EXTRA_ENV" | sed 's/^/export /')"; set +a
+          chmod +x "${{ steps.src.outputs.bin }}"
+          nohup "${{ steps.src.outputs.bin }}" > "$RUNNER_TEMP/ostrom-server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/ostrom-server.pid"
+          alive() { kill -0 "$(cat "$RUNNER_TEMP/ostrom-server.pid")" 2>/dev/null; }
+          logs() { cat "$RUNNER_TEMP/ostrom-server.log"; }
+        fi
         for i in $(seq 1 120); do
           if curl -fsS "http://127.0.0.1:${OSTROM_PORT}/health" >/dev/null 2>&1; then echo "server up after ${i}×0.5 s"; echo "up=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          if ! kill -0 "$(cat "$RUNNER_TEMP/ostrom-server.pid")" 2>/dev/null; then break; fi
+          if ! alive; then break; fi
           sleep 0.5
         done
-        echo "::$LEVEL title=ostrom-server::did not answer /health within 60 s"; cat "$RUNNER_TEMP/ostrom-server.log"
+        echo "::$LEVEL title=ostrom-server::did not answer /health within 60 s"; logs
         [ "$REQUIRED" = "true" ] && exit 1 || exit 0

@@ -2964,6 +2964,15 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P2
 - Statut : bloqué : ostrom-server
 
+### E2E-LOAD-011 — Fumée de charge sur les routes publiques servies
+
+- Étapes : k6 `load/smoke.js` avec `OSTROM_LOAD_SCENARIOS=health,instance` contre l'image du serveur (main) et PostgreSQL 18 : 50 req/s sur `/health` et 50 req/s sur `/api/v1/instance`, 60 s chacun, dans le job `ci` du banc.
+- Attendu : p95 < 50 ms et p99 < 100 ms par route, `http_req_failed` < 1 %, `checks` > 99 % (clé `ed25519` dans chaque réponse d'instance) ; un seuil franchi fait échouer le job.
+- Surfaces : serveur (image), PostgreSQL (k6)
+- Source : consigne QA du 30/10 (reprise après ostrom-server#1) ; seuils de `load/smoke.js`
+- Priorité : P1
+- Statut : codé : `load/smoke.js` (scénarios `health` et `instance`), job `ci` d'ostrom-e2e
+
 
 ## DOGFOOD : Le harnais ControlResell en workflows Ostrom (dogfood)
 
@@ -3023,6 +3032,46 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P2
 - Statut : bloqué : ostrom-server (observability, après socle) + ostrom-cli#8 + RELAY (passerelle)
 
+## SRV : Socle du serveur (santé, instance, erreurs, en-têtes)
+
+Servi par ostrom-server#1 (4fe38dd). Testé de l'extérieur sur l'image distroless du serveur (son `Dockerfile` sur main, autour du binaire natif `linuxX64`) et un vrai PostgreSQL 18, dans le job `ci` du banc : `scenarios/server.e2e.ts`.
+
+### E2E-SRV-001 — Santé : `/health` et `/api/v1/health`
+
+- Étapes : `GET /health`, puis `GET /api/v1/health` (chemin du contrat), sur l'image fraîchement démarrée.
+- Attendu : 200, `application/json`, `{"status":"ok","version":"<semver>","checks":{"database":"ok"}}` sur les deux chemins.
+- Surfaces : serveur (image), PostgreSQL
+- Source : ostrom-server `kernel/http/Health.kt` ; JOURNAL du 30/10 04:40 (SERVER-SOCLE)
+- Priorité : jalon
+- Statut : codé : `scenarios/server.e2e.ts`
+
+### E2E-SRV-002 — Instance et clé de signature
+
+- Étapes : `GET /api/v1/instance` deux fois, puis `GET /api/v1/instance/keys`.
+- Attendu : 200 ; les deux réponses sont identiques (id stable) ; `id` est un UUID, `createdAt` une date ISO ; `signingKey.algorithm` = `ed25519`, `publicKeyPem` se charge comme clé publique Ed25519 (SPKI) ; la clé courante figure dans la liste des clés.
+- Surfaces : serveur (image), PostgreSQL
+- Source : ostrom-server `modules/instance` ; c'est la clé avec laquelle les reçus se vérifient hors ligne (RECEIPT)
+- Priorité : jalon
+- Statut : codé : `scenarios/server.e2e.ts`
+
+### E2E-SRV-003 — Corps d'erreur uniforme
+
+- Étapes : `GET /nowhere`, `GET /api/v1/nowhere`, `GET /api/v1/instance/nowhere` ; `POST /health` et `POST /api/v1/instance`.
+- Attendu : 404 `{"error":{"type":"not_found","message":"Not found."}}` et 405 `{"error":{"type":"method_not_allowed","message":"Method not allowed."}}`, toujours en `application/json`, jamais une page HTML ni une trace.
+- Surfaces : serveur (image)
+- Source : ostrom-server `kernel/http/Errors.kt` (CONVENTIONS § 3.3) ; JOURNAL du 30/10 04:40 point 3
+- Priorité : P1
+- Statut : codé : `scenarios/server.e2e.ts`
+
+### E2E-SRV-004 — En-tête `X-Request-Id`
+
+- Étapes : requête avec `X-Request-Id: e2e-srv_004` ; sans en-tête ; avec une valeur à espaces, de 129 caractères, ou avec `;`.
+- Attendu : l'id valide revient tel quel ; sinon un id généré (32 caractères hexadécimaux) le remplace, différent à chaque requête ; aucune valeur du client hors de `[A-Za-z0-9_-]{1,128}` ne revient (elle n'entre donc pas dans les journaux).
+- Surfaces : serveur (image)
+- Source : ostrom-server `kernel/http/Http.kt` (`isValidRequestId`)
+- Priorité : P1
+- Statut : codé : `scenarios/server.e2e.ts`
+
 ## Récapitulatif
 
 | Famille | Intitulé | Scénarios | dont jalon | P1 | P2 |
@@ -3061,9 +3110,10 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 | HARNESS | CLI : harnais, administration, installation | 8 | 0 | 2 | 6 |
 | DIST | Distribution et mise à jour | 4 | 0 | 2 | 2 |
 | TC | Migration depuis le prototype et compatibilité TeamCode | 2 | 0 | 0 | 2 |
-| LOAD | Charge (k6) | 10 | 0 | 1 | 9 |
+| LOAD | Charge (k6) | 11 | 0 | 2 | 9 |
 | DOGFOOD | Le harnais ControlResell en workflows Ostrom | 3 | 0 | 3 | 0 |
 | OBS | Observabilité (traces, télémétrie opt-in) | 3 | 0 | 2 | 1 |
-| **Total** | | **319** | **40** | **160** | **119** |
+| SRV | Socle du serveur (santé, instance, erreurs, en-têtes) | 4 | 2 | 2 | 0 |
+| **Total** | | **324** | **42** | **163** | **119** |
 
 Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-BYPASS-020, E2E-BYPASS-021, E2E-BYPASS-023, E2E-BYPASS-024, E2E-BYPASS-026, E2E-BYPASS-028, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.

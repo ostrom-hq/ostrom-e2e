@@ -9,6 +9,7 @@ import http from 'k6/http';
 export const BASE = (__ENV.OSTROM_URL || 'http://127.0.0.1:4600').replace(/\/$/, '');
 export const ROUTES = {
   health: __ENV.OSTROM_ROUTE_HEALTH || '/health',
+  instance: __ENV.OSTROM_ROUTE_INSTANCE || '/api/v1/instance',
   gates: __ENV.OSTROM_ROUTE_GATES || '/api/v1/gates',
   answer: __ENV.OSTROM_ROUTE_ANSWER || '/api/v1/approvals/{id}/answer',
   receipt: __ENV.OSTROM_ROUTE_RECEIPT || '/api/v1/receipts/{id}',

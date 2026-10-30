@@ -48,13 +48,15 @@ jobs:
       - name: Unit tests of the bench, 100 % thresholds
         run: pnpm test:coverage
       # Full stack: the real server and the real `ostrom` built from the main branches of ostrom-server and ostrom-cli.
+      # The server runs as its own distroless image (its Dockerfile on main), the artefact that ships.
       # A repository that does not meet the contract yet leaves its scenarios as todos (« bloqué »), it does not fail.
-      - name: Real Ostrom server
+      - name: Real Ostrom server (image of ostrom-server main)
         id: server
         uses: ./.github/actions/server
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           database-url: postgresql://localhost:5432/ostrom
+          image: "true"
           required: "false"
       - name: Real ostrom CLI
         id: cli
@@ -67,6 +69,16 @@ jobs:
           OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.url || '' }}
           OSTROM_E2E_CLI_BIN: ${{ steps.cli.outputs.available == 'true' && steps.cli.outputs.bin || '' }}
         run: pnpm e2e --reporter=default --reporter=json --outputFile=e2e-results.json
+      # Short load test on the served public routes; the thresholds of load/smoke.js fail the job.
+      - name: k6 smoke against the server image (health, instance)
+        if: steps.server.outputs.available == 'true'
+        env:
+          OSTROM_URL: ${{ steps.server.outputs.url }}
+          OSTROM_LOAD_SCENARIOS: health,instance
+        run: k6 run --summary-export smoke-summary.json load/smoke.js
+      - name: Server logs
+        if: always() && steps.server.outputs.available == 'true'
+        run: docker logs ostrom-e2e-server 2>&1 | tail -n 200
       - name: Summary
         if: always()
         run: |
@@ -74,12 +86,13 @@ jobs:
           node -e '
             const r = require("./e2e-results.json");
             const n = (s) => r.testResults.flatMap((f) => f.assertionResults).filter((a) => a.status === s).length;
-            const line = `### Bench e2e\n\nserver: ${process.env.S || "absent"} · cli: ${process.env.C || "absent"}\n\n| passed | failed | todo | skipped |\n|---|---|---|---|\n| ${n("passed")} | ${n("failed")} | ${n("todo")} | ${n("pending") + n("skipped")} |\n`;
+            const line = `### Bench e2e\n\nserver: ${process.env.S || "absent"} (${process.env.M}) · cli: ${process.env.C || "absent"}\n\n| passed | failed | todo | skipped |\n|---|---|---|---|\n| ${n("passed")} | ${n("failed")} | ${n("todo")} | ${n("pending") + n("skipped")} |\n`;
             require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, line);
           ' || true
         env:
           S: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.sha || '' }}
+          M: ${{ steps.server.outputs.mode }}
           C: ${{ steps.cli.outputs.available == 'true' && steps.cli.outputs.sha || '' }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
-        with: { name: e2e-results, path: e2e-results.json, if-no-files-found: ignore }
+        with: { name: e2e-results, path: "e2e-results.json\nsmoke-summary.json", if-no-files-found: ignore }
