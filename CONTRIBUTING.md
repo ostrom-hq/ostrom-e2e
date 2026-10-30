@@ -23,12 +23,13 @@ goes through the same short path. This guide takes ten minutes to read and saves
 
 ## Set up your machine
 
-Prerequisites: Node.js (version in `.nvmrc` or `package.json` `engines`) and pnpm (`corepack enable`).
+Prerequisites: Node.js (version in `.nvmrc`) and pnpm (`corepack enable`). The full-stack scenarios also need a
+running Ostrom server and the `ostrom` binary: CI builds both from their repositories.
 
 ```sh
 pnpm install
-pnpm test:coverage   # unit tests, and the 100 % coverage gate
-pnpm check           # what CI runs before the end-to-end tests
+pnpm test:coverage   # the bench's own code, and the 100 % coverage gate
+pnpm e2e             # the scenarios, with OSTROM_E2E_SERVER_URL and OSTROM_E2E_CLI_BIN set
 ```
 
 ## Tests: the bar
