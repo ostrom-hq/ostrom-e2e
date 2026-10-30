@@ -82,6 +82,7 @@ jobs:
       - name: Summary
         if: always()
         run: |
+          # shellcheck disable=SC2016 # JavaScript template literals, not shell expansions
           node -e '
             const r = require("./e2e-results.json");
             const n = (s) => r.testResults.flatMap((f) => f.assertionResults).filter((a) => a.status === s).length;
