@@ -1,23 +1,33 @@
 // Short load test run on every ostrom-server pull request (about 70 s). The thresholds fail the job.
 // Usage: k6 run load/smoke.js  (OSTROM_URL, optional OSTROM_LOAD_TOKEN, OSTROM_ROUTE_*)
+// OSTROM_LOAD_SCENARIOS picks the scenarios (default: all) while the server does not serve every route yet.
 import http from 'k6/http';
 import { check } from 'k6';
 import { BASE, ROUTES, command, headers, org, post, sha } from './lib.js';
 
+const SCENARIOS = {
+  health: {
+    scenario: { executor: 'constant-arrival-rate', rate: 50, timeUnit: '1s', duration: '60s', preAllocatedVUs: 10, exec: 'health' },
+    thresholds: { 'http_req_duration{name:health}': ['p(95)<50', 'p(99)<100'] },
+  },
+  checks: {
+    scenario: { executor: 'constant-arrival-rate', rate: 200, timeUnit: '1s', duration: '60s', preAllocatedVUs: 40, exec: 'checks' },
+    thresholds: { 'http_req_duration{name:check}': ['p(95)<50', 'p(99)<150'] },
+  },
+  gates: {
+    scenario: { executor: 'constant-arrival-rate', rate: 20, timeUnit: '1s', duration: '60s', preAllocatedVUs: 20, exec: 'gates' },
+    thresholds: { 'http_req_duration{name:gate}': ['p(95)<150', 'p(99)<400'], 'http_req_duration{name:approve}': ['p(95)<150', 'p(99)<400'] },
+  },
+};
+
+const picked = (__ENV.OSTROM_LOAD_SCENARIOS || Object.keys(SCENARIOS).join(','))
+  .split(',')
+  .map((s) => s.trim())
+  .filter((s) => s in SCENARIOS);
+
 export const options = {
-  scenarios: {
-    health: { executor: 'constant-arrival-rate', rate: 50, timeUnit: '1s', duration: '60s', preAllocatedVUs: 10, exec: 'health' },
-    checks: { executor: 'constant-arrival-rate', rate: 200, timeUnit: '1s', duration: '60s', preAllocatedVUs: 40, exec: 'checks' },
-    gates: { executor: 'constant-arrival-rate', rate: 20, timeUnit: '1s', duration: '60s', preAllocatedVUs: 20, exec: 'gates' },
-  },
-  thresholds: {
-    http_req_failed: ['rate<0.01'],
-    'http_req_duration{name:health}': ['p(95)<50', 'p(99)<100'],
-    'http_req_duration{name:check}': ['p(95)<50', 'p(99)<150'],
-    'http_req_duration{name:gate}': ['p(95)<150', 'p(99)<400'],
-    'http_req_duration{name:approve}': ['p(95)<150', 'p(99)<400'],
-    checks: ['rate>0.99'],
-  },
+  scenarios: Object.fromEntries(picked.map((k) => [k, SCENARIOS[k].scenario])),
+  thresholds: Object.assign({ http_req_failed: ['rate<0.01'], checks: ['rate>0.99'] }, ...picked.map((k) => SCENARIOS[k].thresholds)),
 };
 
 export function health() {

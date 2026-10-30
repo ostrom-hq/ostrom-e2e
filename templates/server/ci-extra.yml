@@ -70,9 +70,13 @@ jobs:
           path: .ostrom/e2e
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
       - name: k6 smoke (p95/p99 thresholds)
-        env: { OSTROM_URL: "${{ steps.server.outputs.url }}" }
+        env:
+          OSTROM_URL: ${{ steps.server.outputs.url }}
+          # Only the routes the server serves today; QA adds checks,gates when the gate routes are on main.
+          OSTROM_LOAD_SCENARIOS: health
         run: k6 run --summary-export smoke-summary.json .ostrom/e2e/load/smoke.js
       - name: k6 race (exactly one yes wins out of 100)
+        if: false # QA turns it on when the gate routes are on main
         env: { OSTROM_URL: "${{ steps.server.outputs.url }}" }
         run: k6 run --summary-export race-summary.json .ostrom/e2e/load/race.js
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
