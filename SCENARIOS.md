@@ -2890,7 +2890,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (k6)
 - Source : proto/COORD/PERF-CONTROLE.md (débit 1/10/100/1000 ; 170/170 conformance)
 - Priorité : P2
-- Statut : codé : `load/smoke.js` (check, porte, oui à débit fixe, seuils p95/p99), en attente du serveur (bloqué : ostrom-server)
+- Statut : codé : `load/smoke.js` (`gates` : push sur main + oui de l'approbateur sur SA demande, seuils p95/p99), lancé par le job `ci` dès que `scripts/load-setup.ts` prépare les identifiants (bloqué : ostrom-server, portes #8 + identité #10/#18 + orgs + workflows)
 
 ### E2E-LOAD-003 — Stress jusqu'à la dégradation
 
@@ -2926,7 +2926,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (k6)
 - Source : amont/COORD/AMONT-TEAMCODE.md §0 point 4 ; proto/server/src/selftest.ts (une seconde décision ne change rien)
 - Priorité : P1
-- Statut : codé : `load/race.js` (100 oui simultanés : 1 × 200, 99 × 409), en attente du serveur (bloqué : ostrom-server)
+- Statut : codé : `load/race.js` (100 oui simultanés sur la demande de l'approbateur : 1 × 200, 99 × 409, rien d'autre), lancé par le job `ci` et la nuit dès que `scripts/load-setup.ts` prépare les identifiants (bloqué : ostrom-server, portes #8 + identité #10/#18 + orgs + workflows)
 
 ### E2E-LOAD-007 — Passerelle SSE : flux stables, TTFT, tempête de reconnexions, clients lents, stress
 
@@ -3072,6 +3072,84 @@ Servi par ostrom-server#1 (4fe38dd). Testé de l'extérieur sur l'image distrole
 - Priorité : P1
 - Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849 (image ostrom-server@4fe38dd, PostgreSQL 18), `scenarios/server.e2e.ts`
 
+## BILL : Facturation (abonnement Stripe, limites du plan)
+
+Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec `stripe-mock` derrière (`OSTROM_STRIPE_API_BASE`), le banc qui joue les webhooks de Stripe (`src/stripe.ts`), les liens de connexion lus dans `OSTROM_MAIL_DIR` (`src/mail.ts`). Chaque partie s'allume seule le jour où ses routes sont sur main (`src/probe.ts`) : `scenarios/billing.e2e.ts`. Chemins du contrat : `/v1/orgs/{orgId}/billing…` et `/v1/billing/stripe/webhook`, hors du préfixe `/api/v1` (JOURNAL 30/10 05:50).
+
+### E2E-BILL-001 — Webhook signé : reçu une fois
+
+- Étapes : événement `customer.subscription.updated` d'une organisation inconnue, signé `t=…,v1=HMAC-SHA256(whsec, "t.corps")` ; le même identifiant d'événement renvoyé.
+- Attendu : 200 `{"received":true,"outcome":"ignored"}`, puis 200 `outcome: "duplicate"`.
+- Surfaces : serveur (image), PostgreSQL, faux Stripe
+- Source : ostrom-server#15 `StripeWebhooks.kt`, `HandleStripeEventUseCaseImpl`
+- Priorité : P1
+- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15)
+
+### E2E-BILL-002 — Webhook : signature absente, fausse, périmée ou d'un autre corps
+
+- Étapes : sans en-tête ; signé d'un autre secret ; horodatage à −10 min et +10 min ; corps modifié après signature ; en-tête illisible.
+- Attendu : 400 `{"error":{"type":"invalid_request","message":"Invalid Stripe signature."}}` à chaque fois ; rien n'est enregistré (le même événement bien signé passe ensuite pour la première fois).
+- Surfaces : serveur (image), PostgreSQL
+- Source : ostrom-server#15 `StripeSignatureVerifier` (tolérance 5 min)
+- Priorité : P1
+- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15)
+
+### E2E-BILL-003 — Webhook trop gros
+
+- Étapes : événement de plus de 256 Kio, bien signé.
+- Attendu : 413 `payload_too_large`, avant toute vérification.
+- Surfaces : serveur (image)
+- Source : ostrom-server#15 `MAX_WEBHOOK_BYTES`
+- Priorité : P2
+- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15)
+
+### E2E-BILL-004 — Routes de facturation sans identifiants
+
+- Étapes : les 7 routes `/v1/orgs/{orgId}/billing…` sans jeton ni session.
+- Attendu : 401 `unauthorized`, `WWW-Authenticate: Bearer`, sur chacune.
+- Surfaces : serveur (image)
+- Source : ostrom-server#15 `BillingRoutes.kt`
+- Priorité : P1
+- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15)
+
+### E2E-BILL-005 — Checkout Stripe en mode test
+
+- Étapes : le propriétaire d'une organisation neuve (connexion par lien e-mail) lit l'aperçu, puis `POST …/checkout {plan: team, interval: month}` ; puis un plan non vendu (`enterprise`).
+- Attendu : aperçu `plan: free`, `purchasable: true`, `limits.maxPeople: 5` ; checkout 200 avec une `url` https (session de stripe-mock) ; plan non vendu 400.
+- Surfaces : serveur (image), stripe-mock, identité, organisations
+- Source : ostrom-server#15 ; contrat `startBillingCheckout`
+- Priorité : P1
+- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15 + identité #18 (lien e-mail) + orgs (invitations))
+
+### E2E-BILL-006 — Au-delà du plan : 402
+
+- Étapes : organisation Free (5 personnes) ; le propriétaire invite 5 personnes, qui se connectent.
+- Attendu : la sixième personne est refusée en 402 `payment_required` (à l'invitation ou à l'arrivée) avec un message qui dit la limite (« 5 people ») ; la liste des membres ne dépasse jamais 5.
+- Surfaces : serveur (image), identité, organisations, facturation
+- Source : ostrom-server#15 `CheckEntitlementUseCaseImpl` (`AddPerson`)
+- Priorité : P1
+- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15 + identité #18 + orgs)
+
+### E2E-BILL-007 — Un membre sans rôle de facturation
+
+- Étapes : un membre invité lit l'aperçu, puis tente checkout, portail, changement de plan, résiliation, reprise.
+- Attendu : lecture 200 ; chaque changement 403.
+- Surfaces : serveur (image), identité, organisations
+- Source : ostrom-server#15 (`BILLING_READ` / `BILLING_MANAGE`)
+- Priorité : P1
+- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15 + identité #18 + orgs)
+
+## ISO : Isolation entre organisations
+
+### E2E-ISO-001 — L'organisation B ne lit ni n'écrit rien de A, sur chaque route
+
+- Étapes : deux propriétaires, A et B, chacun dans son organisation. B appelle chaque route d'organisation servie avec les identifiants de A (facturation, membres, portes, demandes, reçus, sessions, réglages ; la table grandit avec le serveur, une route pas encore servie est listée, jamais en échec). A relit ses routes avant et après.
+- Attendu : aucune réponse 2xx sur une route de A (les routes portées par l'identifiant, comme `GET /api/v1/org`, répondent sur l'organisation de B), aucune 5xx, aucun corps qui contienne l'id, l'e-mail ou le nom de A ; l'état de A est identique après.
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne QA du 30/10 ; S2-01 (`withOrganization`, JOURNAL 04:40 SERVER-SOCLE) ; `src/isolation.ts`
+- Priorité : jalon
+- Statut : codé : `scenarios/isolation.e2e.ts` (bloqué : identité #18 + orgs (une table d'organisation servie))
+
 ## Récapitulatif
 
 | Famille | Intitulé | Scénarios | dont jalon | P1 | P2 |
@@ -3114,6 +3192,8 @@ Servi par ostrom-server#1 (4fe38dd). Testé de l'extérieur sur l'image distrole
 | DOGFOOD | Le harnais ControlResell en workflows Ostrom | 3 | 0 | 3 | 0 |
 | OBS | Observabilité (traces, télémétrie opt-in) | 3 | 0 | 2 | 1 |
 | SRV | Socle du serveur (santé, instance, erreurs, en-têtes) | 4 | 2 | 2 | 0 |
-| **Total** | | **324** | **42** | **163** | **119** |
+| BILL | Facturation (abonnement Stripe, limites du plan) | 7 | 0 | 6 | 1 |
+| ISO | Isolation entre organisations | 1 | 1 | 0 | 0 |
+| **Total** | | **332** | **43** | **169** | **120** |
 
 Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-BYPASS-020, E2E-BYPASS-021, E2E-BYPASS-023, E2E-BYPASS-024, E2E-BYPASS-026, E2E-BYPASS-028, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.

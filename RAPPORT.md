@@ -63,7 +63,9 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
 | OBS | 3 | 0 | 0 | 0 | 0 | 3 |
 | SRV | 4 | 2 | 4 | 0 | 0 | 0 |
-| **Total** | 324 | 42 | 5 | 14 | 0 | 305 |
+| BILL | 7 | 0 | 0 | 7 | 0 | 0 |
+| ISO | 1 | 1 | 0 | 1 | 0 | 0 |
+| **Total** | 332 | 43 | 5 | 22 | 0 | 305 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un
@@ -78,16 +80,21 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
 | SRV-003 | erreurs 404/405 en `{"error":{type,message}}` | vert | [40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849) |
 | SRV-004 | `X-Request-Id` gardé ou remplacé | vert | [40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849) |
 | LOAD-011 | k6 `health,instance`, p95 < 50 ms, p99 < 100 ms | vert | [40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849) : `/health` p95 1,31 ms / p99 2,14 ms ; `/api/v1/instance` p95 1,92 ms / p99 3,04 ms ; 0 erreur sur 6 002 requêtes |
+| BILL-001 à 003 | webhook Stripe signé : reçu une fois, signatures refusées (400), > 256 Kio (413) | manquant | s'allume seul quand ostrom-server#15 est sur `main` (`/v1/billing/stripe/webhook` servi) |
+| BILL-004 | routes de facturation sans identifiants : 401 + `WWW-Authenticate` | manquant | idem (`/v1/orgs/{id}/billing` servi) |
+| BILL-005 à 007 | checkout Stripe test, 402 au-delà de 5 personnes en Free, 403 sans rôle de facturation | manquant | ostrom-server#15 + identité #18 (lien e-mail) + orgs (invitations) |
+| ISO-001 | B ne lit ni n'écrit rien de A, sur chaque route d'organisation servie | manquant | identité #18 + orgs (une table d'organisation servie) ; la table des routes grandit seule |
 | LOGIN-001, CLAUDE-001/003, GATE-001, YES-001/003, YESCLI-002, RECEIPT-001 | jalon | manquant | ostrom-cli#1 (login, `ostrom claude`) ; portes, oui et reçus côté serveur (GATES) |
 | BYPASS-001/005/024 | contournements | manquant | idem (porte servie par le serveur, hooks par la CLI) |
-| LOAD-002/003/006 | portes, oui, course | manquant | routes `/api/v1/gates` et `/approvals` pas encore servies |
+| LOAD-002/006 | portes + oui, course de 100 oui (1 × 200, 99 × 409) | manquant | prêts : `scripts/load-setup.ts` dit ce qui manque à chaque run (portes #8, identité #10/#18, orgs, workflows) ; tournent dès `ready=true` |
+| LOAD-003 | soak + rampe (nuit) | manquant | idem pour les portes ; `/health` seul la nuit d'ici là |
 
 ## Charge
 
 | Script | Quand | Seuils | Dernier résultat |
 |---|---|---|---|
 | `load/smoke.js` | chaque PR et `main` du banc (`health,instance` sur l'image serveur) ; chaque PR serveur | p95/p99 : `/health` et `/api/v1/instance` 50/100 ms à 50 req/s, question de hook `POST /api/v1/gates` 50/150 ms, push sur main + oui 150/400 ms ; erreurs < 1 %, checks > 99 % | `health,instance` vert ([40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849), 50 req/s × 60 s chacun) : p95/p99 1,31/2,14 ms et 1,92/3,04 ms, 0 % d'erreurs ; portes : pas encore servies |
-| `load/race.js` | chaque PR serveur + nuit | 100 oui simultanés sur une demande : 1 × 200, 99 × 409, rien d'autre | bloqué : pas encore de serveur |
+| `load/race.js` | chaque PR et `main` du banc + nuit, dès que `scripts/load-setup.ts` écrit `ready=true` | 100 oui simultanés sur la demande de l'approbateur : 1 × 200, 99 × 409, rien d'autre | prêt, en attente des portes, de l'identité, des orgs et des workflows sur `main` |
 | `load/soak.js` | nuit | 20 min à 500 questions/s + 50 portes/s, rampe 2 000/s p99 < 500 ms | bloqué : pas encore de serveur |
 
 ## Journal
@@ -108,3 +115,8 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
   famille SRV (santé, instance, erreurs, `X-Request-Id`) et fumée k6 `health,instance` (LOAD-011) dans le job `ci`.
 - 30/10 05:40 — ostrom-e2e#11 fusionnée, `ci` vert ([40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849)) : SRV-001 à 004 et LOAD-011 verts sur l'image
   d'ostrom-server@4fe38dd ; k6 : p95 1,31 ms (`/health`) et 1,92 ms (`/api/v1/instance`), 0 erreur.
+- 30/10 06:10 — Scénarios qui s'allument seuls au fil des fusions (`src/probe.ts`) : facturation BILL-001 à 007
+  (stripe-mock derrière l'image, webhooks signés par le banc, liens de connexion lus dans `OSTROM_MAIL_DIR`) et
+  isolation entre organisations ISO-001 (`src/isolation.ts`). Charge des portes prête : `scripts/load-setup.ts` crée
+  jeton du demandeur et session de l'approbateur, la course et `gates` tournent dès `ready=true` (fin de la variable
+  `OSTROM_LOAD_GATES` dans le banc).

@@ -44,6 +44,10 @@ inputs:
     description: '"true": build the Docker image of ostrom-server (its Dockerfile) and run it, instead of the bare binary.'
     required: false
     default: "false"
+  docker-args:
+    description: Extra arguments of `docker run` in image mode (volumes, for instance the sign-in mail directory).
+    required: false
+    default: ""
   required:
     description: "false: when the repository does not meet the contract yet, set `available` to false instead of failing (the bench marks its scenarios blocked)."
     required: false
@@ -167,13 +171,15 @@ runs:
         KEY_FILE: ${{ runner.temp }}/ostrom-instance-key-${{ inputs.port }}.pem
         EXTRA_ENV: ${{ inputs.extra-env }}
         IMAGE: ${{ inputs.image }}
+        DOCKER_ARGS: ${{ inputs.docker-args }}
         LEVEL: ${{ inputs.required == 'true' && 'error' || 'warning' }}
         REQUIRED: ${{ inputs.required }}
       run: |
         if [ "$IMAGE" = "true" ]; then
           # The image keeps its own signing key path (/var/lib/ostrom, owned by its non-root user).
           printf '%s\n' "$EXTRA_ENV" | grep -v '^$' > "$RUNNER_TEMP/ostrom-server.env" || true
-          docker run -d --name ostrom-e2e-server --network host --env-file "$RUNNER_TEMP/ostrom-server.env" \
+          # shellcheck disable=SC2086 # DOCKER_ARGS is a list of arguments
+          docker run -d --name ostrom-e2e-server --network host --env-file "$RUNNER_TEMP/ostrom-server.env" $DOCKER_ARGS \
             -e OSTROM_DATABASE_URL -e OSTROM_DATABASE_USER -e OSTROM_DATABASE_PASSWORD -e OSTROM_PORT ostrom-server:e2e
           alive() { [ "$(docker inspect -f '{{.State.Running}}' ostrom-e2e-server 2>/dev/null)" = "true" ]; }
           logs() { docker logs ostrom-e2e-server 2>&1; }

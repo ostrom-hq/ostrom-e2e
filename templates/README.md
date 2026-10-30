@@ -75,9 +75,12 @@ l'organisation) construisent les vrais binaires natifs linuxX64, en cache par co
 | `soak.js` | nuit (`nightly.yml`, 25 min) | 500 questions/s et 50 portes/s pendant 20 min (mêmes p95/p99, erreurs < 0,1 %), puis rampe à 2 000/s : p99 < 500 ms |
 
 Les routes sont celles du contrat `ostrom-core/api/openapi.yaml` (`/api/v1/...`, sonde `/health`) ; `OSTROM_ROUTE_*`
-les change sans toucher aux scénarios. Jetons : `OSTROM_LOAD_TOKEN` (le demandeur) et `OSTROM_LOAD_APPROVER_TOKEN`
-(un approbateur de la porte de `OSTROM_LOAD_REPO`, défaut `acme/api`), créés par le job avant k6. Tant que la variable d'organisation `OSTROM_LOAD_GATES` n'est pas `true` (QA la pose quand
-les routes des portes et ces jetons sont sur `main`), seul `/health` est mesuré et la course ne tourne pas ; un
-scénario de porte lancé sans jetons s'arrête aussitôt en le disant. Seuils de
+les change sans toucher aux scénarios. Identifiants : `OSTROM_LOAD_TOKEN` (jeton `gates:ask` du demandeur) et la
+session de l'approbateur (`OSTROM_LOAD_APPROVER_COOKIE` + `OSTROM_LOAD_APPROVER_CSRF` : seul un navigateur dit oui ;
+`OSTROM_LOAD_APPROVER_TOKEN` là où un jeton le peut), approbateur de la porte de `OSTROM_LOAD_REPO` (défaut `acme/api`).
+`scripts/load-setup.ts` les crée par les routes du serveur (lien de connexion lu dans `OSTROM_MAIL_DIR`, invitation,
+jeton, workflow) et écrit `ready` ; tant qu'il manque une route sur `main`, il dit laquelle, seuls `/health` et
+`/api/v1/instance` sont mesurés et la course ne tourne pas (la variable `OSTROM_LOAD_GATES` ne sert plus qu'au
+fragment `server/ci-extra.yml`). Un scénario de porte lancé sans jetons s'arrête aussitôt en le disant. Seuils de
 départ, recalés sur la première série verte (le serveur de contrôle du prototype consomme ~0,1 ms de CPU par
 `/check` et ~0,2-0,6 ms par porte : ces seuils laissent large pour un runner partagé).
