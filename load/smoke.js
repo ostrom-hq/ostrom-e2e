@@ -3,7 +3,7 @@
 // OSTROM_LOAD_SCENARIOS picks the scenarios (default: all) while the server does not serve every route yet.
 import http from 'k6/http';
 import { check } from 'k6';
-import { action, approve, ask, askPushToMain, headers, pick, requireTokens, route } from './lib.js';
+import { action, approvalOf, approve, ask, askPushToMain, headers, pick, requireTokens, route } from './lib.js';
 
 // Public scenarios (health, instance) need no token; the others ask gates and say yes.
 const PUBLIC = ['health', 'instance'];
@@ -58,8 +58,11 @@ export function asks() {
 export function gates() {
   const i = __VU * 100000 + __ITER;
   const g = askPushToMain(i, 'gate');
-  check(g, { 'gate 200 pending with an approval': (x) => x.status === 200 && x.json('gate.status') === 'pending' && !!x.json('approval.id') });
-  if (g.status !== 200 || !g.json('approval.id')) return;
-  const a = approve(g.json('approval'), 'approve');
+  check(g, { 'gate 200 pending': (x) => x.status === 200 && x.json('gate.status') === 'pending' });
+  if (g.status !== 200) return;
+  const approval = approvalOf(g.json());
+  check(approval, { 'an approval for the approver': (x) => !!(x && x.id) });
+  if (!approval || !approval.id) return;
+  const a = approve(approval, 'approve');
   check(a, { 'approve 200 with a signed receipt': (x) => x.status === 200 && x.json('approval.status') === 'approved' && !!x.json('receipt.signature') });
 }

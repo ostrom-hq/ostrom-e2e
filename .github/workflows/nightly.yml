@@ -1,4 +1,4 @@
-# Nightly: the long k6 test (soak + ramp) and the 100-yes race against the server built from ostrom-server main.
+# Nightly: the long k6 test (soak + ramp) and the 100-yes race against the server image of ostrom-server main.
 name: Nightly
 on:
   schedule:
@@ -22,26 +22,50 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+      stripe-mock:
+        image: stripe/stripe-mock@sha256:aeb96b83e87a893d2ac005e363ac01ffa6e59a5ad85b49c155dfc9129de02e78 # latest, 2026-10-01 (as ostrom-server)
+        ports: ["12111:12111"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Real Ostrom server
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version-file: .nvmrc }
+      - name: Sign-in mail directory (written by the server's non-root user, read by the scenarios)
+        run: mkdir -p "$RUNNER_TEMP/ostrom-mail" && chmod 0777 "$RUNNER_TEMP/ostrom-mail"
+      - name: Real Ostrom server (image of ostrom-server main)
         id: server
         uses: ./.github/actions/server
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           database-url: postgresql://localhost:5432/ostrom
+          image: "true"
+          # Test values of the bench, never real ones: stripe-mock behind billing, sign-in mails written to a directory.
+          extra-env: |
+            OSTROM_STRIPE_SECRET_KEY=sk_test_e2e
+            OSTROM_STRIPE_WEBHOOK_SECRET=whsec_e2e_bench
+            OSTROM_STRIPE_API_BASE=http://127.0.0.1:12111
+            OSTROM_MAIL_DIR=/var/lib/ostrom/mail
+            OSTROM_PUBLIC_URL=http://127.0.0.1:4600
+            OSTROM_CONSOLE_URL=http://127.0.0.1:4600
+          docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail
           required: "false"
+      - name: Gate load setup (requester token, approver session)
+        id: loadsetup
+        if: steps.server.outputs.available == 'true'
+        env:
+          OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.url }}
+          OSTROM_E2E_MAIL_DIR: ${{ runner.temp }}/ostrom-mail
+        run: node scripts/load-setup.ts
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
         if: steps.server.outputs.available == 'true'
       - name: k6 soak (25 min) and ramp
         if: steps.server.outputs.available == 'true'
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
-          OSTROM_LOAD_SCENARIOS: ${{ vars.OSTROM_LOAD_GATES == 'true' && 'health,asks,gates' || 'health' }}
+          OSTROM_LOAD_SCENARIOS: ${{ steps.loadsetup.outputs.ready == 'true' && 'health,asks,gates' || 'health' }}
         run: k6 run --summary-export soak-summary.json load/soak.js
       - name: k6 race (100 simultaneous yes)
-        # Org variable OSTROM_LOAD_GATES, set to true by QA once the gate routes and the two tokens are on main.
-        if: vars.OSTROM_LOAD_GATES == 'true' && steps.server.outputs.available == 'true'
+        # Runs as soon as scripts/load-setup.ts could make the requester token and the approver session.
+        if: steps.loadsetup.outputs.ready == 'true'
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
         run: k6 run --summary-export race-summary.json load/race.js
