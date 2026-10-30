@@ -55,6 +55,10 @@ jobs:
       # A repository that does not meet the contract yet leaves its scenarios as todos (« bloqué »), it does not fail.
       - name: Sign-in mail directory (written by the server's non-root user, read by the scenarios)
         run: mkdir -p "$RUNNER_TEMP/ostrom-mail" && chmod 0777 "$RUNNER_TEMP/ostrom-mail"
+      # The GitHub App of the bench: a key made for this run only, and the fake GitHub of scenarios/github-install
+      # on a fixed port, so that the server started before the scenarios already points at it.
+      - name: Test key of the bench's GitHub App
+        run: echo "E2E_GITHUB_APP_PEM=$(openssl genrsa -traditional 2048 2>/dev/null | awk '{printf "%s\\n", $0}')" >> "$GITHUB_ENV"
       - name: Real Ostrom server (image of ostrom-server main)
         id: server
         uses: ./.github/actions/server
@@ -70,6 +74,15 @@ jobs:
             OSTROM_MAIL_DIR=/var/lib/ostrom/mail
             OSTROM_PUBLIC_URL=http://127.0.0.1:4600
             OSTROM_CONSOLE_URL=http://127.0.0.1:4600
+            OSTROM_WEB_ORIGIN=http://127.0.0.1:4600
+            OSTROM_GITHUB_API=http://127.0.0.1:4700
+            OSTROM_GITHUB_WEB=http://127.0.0.1:4700
+            OSTROM_GITHUB_APP_ID=1
+            OSTROM_GITHUB_APP_SLUG=ostrom-e2e
+            OSTROM_GITHUB_APP_PEM=${{ env.E2E_GITHUB_APP_PEM }}
+            OSTROM_GITHUB_APP_CLIENT_ID=Iv1.fake
+            OSTROM_GITHUB_APP_CLIENT_SECRET=fake-client-secret
+            OSTROM_GITHUB_WEBHOOK_SECRET=whsec_github_e2e
           docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail
           required: "false"
       - name: Real ostrom CLI
@@ -84,6 +97,7 @@ jobs:
           OSTROM_E2E_CLI_BIN: ${{ steps.cli.outputs.available == 'true' && steps.cli.outputs.bin || '' }}
           OSTROM_E2E_MAIL_DIR: ${{ runner.temp }}/ostrom-mail
           OSTROM_E2E_STRIPE_WEBHOOK_SECRET: whsec_e2e_bench
+          OSTROM_E2E_GITHUB_PORT: "4700"
         run: pnpm e2e --reporter=default --reporter=json --outputFile=e2e-results.json
       # Short load test on the served public routes; the thresholds of load/smoke.js fail the job.
       - name: k6 smoke against the server image (health, instance)

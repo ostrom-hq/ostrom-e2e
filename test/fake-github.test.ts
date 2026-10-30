@@ -99,4 +99,60 @@ describe('FakeGitHub', () => {
     expect(sent?.headers['x-github-event']).toBe('push');
     expect(sent?.headers['x-hub-signature-256']).toBe(`sha256=${createHmac('sha256', 's3cret').update(sent?.body ?? '').digest('hex')}`);
   });
+
+  it('installs the App: its JWT reads an installation and gets a token that acts on its repositories', async () => {
+    gh.installation(42, 'acme', 'acme-admin');
+    const jwt = 'Bearer eyJhbGciOiJSUzI1NiJ9.e30.sig';
+    expect((await call('GET', '/app/installations/42', { token: jwt })).json).toEqual({ id: 42, account: { login: 'acme' } });
+    expect((await call('GET', '/app/installations/7', { token: jwt })).status).toBe(404);
+    expect((await call('GET', '/app/installations/42', { token: 'Bearer gho_x' })).status).toBe(401);
+    expect((await call('GET', '/app/installations/42')).status).toBe(401);
+    expect((await call('DELETE', '/app/installations/42', { token: jwt, text: '' })).status).toBe(404);
+    expect((await call('GET', '/app/installations/42/access_tokens', { token: jwt })).status).toBe(404);
+    const issued = await call('POST', '/app/installations/42/access_tokens', { token: jwt, json: {} });
+    expect(issued.status).toBe(201);
+    expect(String(issued.json['expires_at'])).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+    gh.pull('acme/api', { number: 9, headSha: 'h9', baseRef: 'main', headRef: 'f' });
+    const token = `Bearer ${String(issued.json['token'])}`;
+    expect((await call('GET', '/repos/acme/api/pulls/9', { token })).json).toMatchObject({ number: 9 });
+    expect((await call('GET', '/user', { token })).json['login']).toBe('acme[bot]');
+  });
+
+  it('exchanges the install’s code once, with the App’s OAuth client, for the token of the person who authorized', async () => {
+    const client = { client_id: gh.oauth.id, client_secret: gh.oauth.secret };
+    const code = gh.webCode('acme-admin');
+    expect((await call('POST', '/login/oauth/access_token', { form: { client_id: 'other', client_secret: gh.oauth.secret, code } })).json).toEqual({ error: 'incorrect_client_credentials' });
+    expect((await call('POST', '/login/oauth/access_token', { form: { client_id: gh.oauth.id, client_secret: 'no', code } })).json).toEqual({ error: 'incorrect_client_credentials' });
+    expect((await call('POST', '/login/oauth/access_token', { form: { ...client, code: 'forged' } })).json).toEqual({ error: 'bad_verification_code' });
+    const done = await call('POST', '/login/oauth/access_token', { form: { ...client, code } });
+    expect(String(done.json['access_token'])).toMatch(/^ghu_acme-admin_/);
+    expect((await call('GET', '/user', { token: `Bearer ${String(done.json['access_token'])}` })).json['login']).toBe('acme-admin');
+    expect((await call('POST', '/login/oauth/access_token', { json: { ...client, code } })).json).toEqual({ error: 'bad_verification_code' });
+  });
+
+  it('lists only the installations a person administers: org B’s owner never sees acme’s', async () => {
+    gh.installation(42, 'acme', 'acme-admin');
+    gh.installation(43, 'globex', 'globex-admin', 'acme-admin');
+    for (let i = 0; i < 3; i++) gh.installation(100 + i, `many-${i}`, 'collector');
+    const globex = `Bearer ${gh.user('globex-admin')}`;
+    expect((await call('GET', '/user/installations', { token: globex })).json).toEqual({ total_count: 1, installations: [{ id: 43, account: { login: 'globex' } }] });
+    const acme = (await call('GET', '/user/installations?per_page=100&page=1', { token: `Bearer ${gh.user('acme-admin')}` })).json;
+    expect((acme['installations'] as { id: number }[]).map((i) => i.id)).toEqual([42, 43]);
+    const collector = `Bearer ${gh.user('collector')}`;
+    const page2 = (await call('GET', '/user/installations?per_page=2&page=2', { token: collector })).json;
+    expect(page2).toEqual({ total_count: 3, installations: [{ id: 102, account: { login: 'many-2' } }] });
+    const capped = (await call('GET', '/user/installations?per_page=500', { token: collector })).json;
+    expect((capped['installations'] as unknown[]).length).toBe(3);
+    expect((await call('GET', '/user/installations')).status).toBe(401);
+  });
+
+  it('listens on a fixed port when asked', async () => {
+    const fixed = new FakeGitHub();
+    const probe = createServer();
+    await new Promise<void>((r) => probe.listen(0, '127.0.0.1', r));
+    const port = (probe.address() as AddressInfo).port;
+    await new Promise<void>((r) => probe.close(() => r()));
+    expect(await fixed.start(port)).toBe(`http://127.0.0.1:${port}`);
+    await fixed.stop();
+  });
 });
