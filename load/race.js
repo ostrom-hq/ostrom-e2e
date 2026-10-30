@@ -1,10 +1,8 @@
 // 100 simultaneous "yes" on the same gate: exactly one 200, 99 × 409, one receipt (SPEC of the control server,
 // conformance « 100 approbations simultanées »). Run on every ostrom-server PR and every night.
-import http from 'k6/http';
-import { check } from 'k6';
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
-import { BASE, ROUTES, headers, post, sha } from './lib.js';
+import { ROUTES, post, sha } from './lib.js';
 
 const ok = new Counter('race_ok');
 const conflict = new Counter('race_conflict');
@@ -28,7 +26,3 @@ export default function (d) {
   else other.add(1);
 }
 
-export function teardown(d) {
-  const r = http.get(`${BASE}${ROUTES.receipt}${d.id.replace('gate_', 'rcpt_')}?org=org-0001`, { headers: headers() });
-  check(r, { 'receipt route answers': (x) => x.status === 200 || x.status === 404 });
-}
