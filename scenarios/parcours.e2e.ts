@@ -557,7 +557,7 @@ describe('E2E-PARC: 5. the CLI, gates, receipts (server side)', () => {
     const launch = await call(a.c, 'POST', '/api/v1/launches', { agent: 'claude', repo: 'acme/parc' });
     expect(launch.status, JSON.stringify(launch.body)).toBe(201);
     for (const k of ['launchId', 'agentToken', 'expiresAt']) expect(typeof launch.body[k], k).toBe('string');
-    const agent: Caller = { token: launch.body['agentToken'] as string, from: a.c.from, org: a.org.id };
+    const agent: Caller = { token: launch.body['agentToken'] as string, org: a.org.id, ...(a.c.from ? { from: a.c.from } : {}) };
     const sessions = itemsOf((await call(a.c, 'GET', '/api/v1/sessions')).body);
     const s = sessions.find((x) => JSON.stringify(x).includes(launch.body['launchId'] as string)) ?? sessions[0];
     expect(s, 'the launch opened no session').toBeTruthy();
@@ -577,7 +577,7 @@ describe('E2E-PARC: 5. the CLI, gates, receipts (server side)', () => {
   it.skipIf(W026 !== '')(named('E2E-PARC-026 — 5.2 a session asks for its workflow receipt: signed, verified, bound to the package digest', W026), async () => {
     const a = await owner('parc-026');
     const launch = await call(a.c, 'POST', '/api/v1/launches', { agent: 'claude' });
-    const agent: Caller = { token: launch.body['agentToken'] as string, from: a.c.from, org: a.org.id };
+    const agent: Caller = { token: launch.body['agentToken'] as string, org: a.org.id, ...(a.c.from ? { from: a.c.from } : {}) };
     const sid = (itemsOf((await call(a.c, 'GET', '/api/v1/sessions')).body)[0] ?? {})['id'] as string;
     const digest = `sha256:${'0'.repeat(64)}`;
     const r = await call(agent, 'POST', `/api/v1/sessions/${sid}/workflow-receipt`, { digest, agent: 'claude' });
