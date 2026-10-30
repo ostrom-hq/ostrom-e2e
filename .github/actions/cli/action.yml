@@ -22,7 +22,7 @@ inputs:
 outputs:
   available:
     description: "true when the binary was built (or restored) and, for the server, is running."
-    value: ${{ steps.src.outputs.available }}
+    value: ${{ steps.path.outputs.ok == 'true' && 'true' || 'false' }}
   bin:
     description: Path of the `ostrom` binary.
     value: ${{ steps.src.outputs.bin }}
@@ -80,17 +80,27 @@ runs:
         key: konan-${{ runner.os }}-cli-${{ hashFiles('.ostrom/cli/gradle/libs.versions.toml') }}
         restore-keys: konan-${{ runner.os }}-
     - name: Build the native CLI
+      id: build
       if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
       working-directory: ${{ steps.src.outputs.dir }}
+      env:
+        LEVEL: ${{ inputs.required == 'true' && 'error' || 'warning' }}
+        REQUIRED: ${{ inputs.required }}
       run: |
-        ./ci/build-linux.sh
         mkdir -p "$RUNNER_TEMP/ostrom-cli-bin"
-        cp dist/ostrom "$RUNNER_TEMP/ostrom-cli-bin/ostrom"
+        if ./ci/build-linux.sh && [ -f dist/ostrom ]; then
+          cp dist/ostrom "$RUNNER_TEMP/ostrom-cli-bin/ostrom"; echo "built=true" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+        echo "::$LEVEL title=ostrom-cli contract::ci/build-linux.sh failed or did not leave dist/ostrom"
+        echo "built=false" >> "$GITHUB_OUTPUT"
+        [ "$REQUIRED" = "true" ] && exit 1 || exit 0
     - name: Put ostrom on PATH
-      if: steps.src.outputs.available == 'true'
+      id: path
+      if: steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false'
       shell: bash
       run: |
+        echo "ok=true" >> "$GITHUB_OUTPUT"
         chmod +x "${{ steps.src.outputs.bin }}"
         echo "$RUNNER_TEMP/ostrom-cli-bin" >> "$GITHUB_PATH"
         "${{ steps.src.outputs.bin }}" --version || true
