@@ -1,0 +1,96 @@
+# CI of the bench itself. Job names = required checks on main.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - name: actionlint (workflows, composite actions and templates)
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) latest .
+          ./actionlint -color .github/workflows/*.yml templates/*/ci.yml
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Unit tests of the bench, 100 % thresholds
+        run: pnpm test:coverage
+
+  # Full stack: the real server and the real `ostrom` built from the main branches of ostrom-server and ostrom-cli.
+  # A repository that does not meet the contract yet leaves its scenarios as todos (« bloqué »), it does not fail.
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:18
+        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Real Ostrom server
+        id: server
+        uses: ./.github/actions/server
+        with:
+          deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
+          database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
+          required: "false"
+      - name: Real ostrom CLI
+        id: cli
+        uses: ./.github/actions/cli
+        with:
+          deploy-key: ${{ secrets.DEPLOY_KEY_CLI }}
+          required: "false"
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Scenarios
+        env:
+          OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.url || '' }}
+          OSTROM_E2E_CLI_BIN: ${{ steps.cli.outputs.available == 'true' && steps.cli.outputs.bin || '' }}
+        run: pnpm e2e --reporter=default --reporter=json --outputFile=e2e-results.json
+      - name: Summary
+        if: always()
+        run: |
+          node -e '
+            const r = require("./e2e-results.json");
+            const n = (s) => r.testResults.flatMap((f) => f.assertionResults).filter((a) => a.status === s).length;
+            const line = `### Bench e2e\n\nserver: ${process.env.S || "absent"} · cli: ${process.env.C || "absent"}\n\n| passed | failed | todo | skipped |\n|---|---|---|---|\n| ${n("passed")} | ${n("failed")} | ${n("todo")} | ${n("pending") + n("skipped")} |\n`;
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, line);
+          ' || true
+        env:
+          S: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.sha || '' }}
+          C: ${{ steps.cli.outputs.available == 'true' && steps.cli.outputs.sha || '' }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: e2e-results, path: e2e-results.json, if-no-files-found: ignore }

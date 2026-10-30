@@ -1,0 +1,103 @@
+# Test CI of ostrom-app (React Native Expo). Job names = required checks on main (templates/README.md).
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck && pnpm lint
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Jest, 100 % thresholds
+        run: pnpm test --coverage --ci
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: coverage, path: coverage/, if-no-files-found: ignore }
+
+  # Maestro on an Android emulator (KVM on the Linux runner), app built in release against the real server.
+  e2e-android:
+    name: e2e-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:18
+        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - name: Real Ostrom server
+        id: server
+        uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
+        with:
+          deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
+          database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Build the Android app (release, pointed at the emulator's view of the host server)
+        env:
+          # 10.0.2.2 = the host as seen from the Android emulator.
+          EXPO_PUBLIC_OSTROM_API_URL: http://10.0.2.2:${{ steps.server.outputs.port }}
+        run: |
+          pnpm exec expo prebuild --platform android --no-install
+          cd android && ./gradlew assembleRelease -PreactNativeArchitectures=x86_64
+      - name: Install Maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Maestro flows on the emulator
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            adb install android/app/build/outputs/apk/release/app-release.apk
+            maestro test --format junit --output maestro-report.xml .maestro/
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: maestro-report
+          path: |
+            maestro-report.xml
+            ~/.maestro/tests/
+          if-no-files-found: ignore

@@ -1,0 +1,96 @@
+name: Ostrom CLI (real native binary)
+description: >
+  Builds the native linuxX64 `ostrom` binary of ostrom-cli at a given ref (cached by commit) and puts it on PATH.
+  Contract: ostrom-cli has `ci/build-linux.sh` that leaves `dist/ostrom`.
+inputs:
+  deploy-key:
+    description: Read-only deploy key of ostrom-cli (org secret DEPLOY_KEY_CLI). Empty when called from ostrom-cli itself.
+    required: false
+    default: ""
+  ref:
+    description: Ref of ostrom-cli to build (ignored when `path` is given).
+    required: false
+    default: main
+  path:
+    description: Path of an ostrom-cli checkout already on the runner (ostrom-cli's own CI).
+    required: false
+    default: ""
+  required:
+    description: "false: when the repository does not meet the contract yet, set `available` to false instead of failing (the bench marks its scenarios blocked)."
+    required: false
+    default: "true"
+outputs:
+  available:
+    description: "true when the binary was built (or restored) and, for the server, is running."
+    value: ${{ steps.src.outputs.available }}
+  bin:
+    description: Path of the `ostrom` binary.
+    value: ${{ steps.src.outputs.bin }}
+  sha:
+    description: Commit of ostrom-cli that was built.
+    value: ${{ steps.src.outputs.sha }}
+runs:
+  using: composite
+  steps:
+    - name: Checkout ostrom-cli
+      if: inputs.path == ''
+      uses: actions/checkout@v7
+      with:
+        repository: ostrom-hq/ostrom-cli
+        ref: ${{ inputs.ref }}
+        ssh-key: ${{ inputs.deploy-key }}
+        path: .ostrom/cli
+    - name: Locate sources
+      id: src
+      shell: bash
+      run: |
+        dir="${{ inputs.path }}"; [ -n "$dir" ] || dir=.ostrom/cli
+        dir="$(cd "$dir" && pwd)"
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "sha=$(git -C "$dir" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        echo "bin=$RUNNER_TEMP/ostrom-cli-bin/ostrom" >> "$GITHUB_OUTPUT"
+        if [ ! -x "$dir/ci/build-linux.sh" ]; then
+          echo "::${{ inputs.required == 'true' && 'error' || 'warning' }} title=ostrom-cli contract::ostrom-cli@$(git -C "$dir" rev-parse --short HEAD) has no executable ci/build-linux.sh yet (contract in ostrom-e2e/templates/README.md)"
+          if [ "${{ inputs.required }}" = "true" ]; then exit 1; fi
+          echo "available=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Cache the CLI binary by commit
+      if: steps.src.outputs.available == 'true'
+      id: cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.temp }}/ostrom-cli-bin/ostrom
+        key: ostrom-cli-linuxX64-${{ steps.src.outputs.sha }}
+    - name: Set up Java (build only)
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/setup-java@v6
+      with: { distribution: temurin, java-version: 21 }
+    - name: Set up Gradle (build only)
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: gradle/actions/setup-gradle@v6
+      with:
+        build-root-directory: ${{ steps.src.outputs.dir }}
+    - name: Cache ~/.konan (build only)
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache@v6
+      with:
+        path: ~/.konan
+        key: konan-${{ runner.os }}-cli-${{ hashFiles('.ostrom/cli/gradle/libs.versions.toml') }}
+        restore-keys: konan-${{ runner.os }}-
+    - name: Build the native CLI
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ${{ steps.src.outputs.dir }}
+      run: |
+        ./ci/build-linux.sh
+        mkdir -p "$RUNNER_TEMP/ostrom-cli-bin"
+        cp dist/ostrom "$RUNNER_TEMP/ostrom-cli-bin/ostrom"
+    - name: Put ostrom on PATH
+      if: steps.src.outputs.available == 'true'
+      shell: bash
+      run: |
+        chmod +x "${{ steps.src.outputs.bin }}"
+        echo "$RUNNER_TEMP/ostrom-cli-bin" >> "$GITHUB_PATH"
+        "${{ steps.src.outputs.bin }}" --version || true

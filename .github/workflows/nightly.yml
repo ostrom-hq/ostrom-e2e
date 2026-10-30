@@ -1,0 +1,51 @@
+# Nightly: the long k6 test (soak + ramp) and the 100-yes race against the server built from ostrom-server main.
+name: Nightly
+on:
+  schedule:
+    - cron: "30 1 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  load-soak:
+    name: load-soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:18
+        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Real Ostrom server
+        id: server
+        uses: ./.github/actions/server
+        with:
+          deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
+          database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
+          required: "false"
+      - uses: grafana/setup-k6-action@v1
+        if: steps.server.outputs.available == 'true'
+      - name: k6 soak (25 min) and ramp
+        if: steps.server.outputs.available == 'true'
+        env:
+          OSTROM_URL: ${{ steps.server.outputs.url }}
+        run: k6 run --summary-export soak-summary.json load/soak.js
+      - name: k6 race (100 simultaneous yes)
+        if: steps.server.outputs.available == 'true'
+        env:
+          OSTROM_URL: ${{ steps.server.outputs.url }}
+        run: k6 run --summary-export race-summary.json load/race.js
+      - name: No server yet
+        if: steps.server.outputs.available != 'true'
+        run: echo "ostrom-server does not meet the bench contract yet; load tests are blocked (RAPPORT.md)." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: k6-nightly
+          path: "*-summary.json"
+          if-no-files-found: ignore

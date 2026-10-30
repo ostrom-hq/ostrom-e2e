@@ -1,0 +1,126 @@
+name: Ostrom server (real native binary)
+description: >
+  Builds the native linuxX64 binary of ostrom-server at a given ref (cached by commit), starts it against the given
+  PostgreSQL and waits for GET /health. Used by the CI of ostrom-web, ostrom-app, ostrom-cli and ostrom-e2e.
+  Contract (ostrom-e2e/templates/README.md): ostrom-server has `ci/build-linux.sh` that leaves `dist/ostrom-server`;
+  the binary reads OSTROM_DATABASE_URL and OSTROM_PORT, applies its migrations at start and answers GET /health.
+inputs:
+  deploy-key:
+    description: Read-only deploy key of ostrom-server (org secret DEPLOY_KEY_SERVER). Empty when called from ostrom-server itself.
+    required: false
+    default: ""
+  ref:
+    description: Ref of ostrom-server to build (ignored when `path` is given).
+    required: false
+    default: main
+  path:
+    description: Path of an ostrom-server checkout already on the runner (ostrom-server's own CI).
+    required: false
+    default: ""
+  database-url:
+    description: PostgreSQL URL for the server.
+    required: true
+  port:
+    description: Port to listen on.
+    required: false
+    default: "4600"
+  extra-env:
+    description: Extra environment lines (KEY=value, one per line) passed to the server.
+    required: false
+    default: ""
+  required:
+    description: "false: when the repository does not meet the contract yet, set `available` to false instead of failing (the bench marks its scenarios blocked)."
+    required: false
+    default: "true"
+outputs:
+  available:
+    description: "true when the binary was built (or restored) and, for the server, is running."
+    value: ${{ steps.src.outputs.available }}
+  url:
+    description: Base URL of the running server.
+    value: http://127.0.0.1:${{ inputs.port }}
+  port:
+    description: Port of the running server.
+    value: ${{ inputs.port }}
+  sha:
+    description: Commit of ostrom-server that runs.
+    value: ${{ steps.src.outputs.sha }}
+  bin:
+    description: Path of the server binary.
+    value: ${{ steps.src.outputs.bin }}
+runs:
+  using: composite
+  steps:
+    - name: Checkout ostrom-server
+      if: inputs.path == ''
+      uses: actions/checkout@v7
+      with:
+        repository: ostrom-hq/ostrom-server
+        ref: ${{ inputs.ref }}
+        ssh-key: ${{ inputs.deploy-key }}
+        path: .ostrom/server
+    - name: Locate sources
+      id: src
+      shell: bash
+      run: |
+        dir="${{ inputs.path }}"; [ -n "$dir" ] || dir=.ostrom/server
+        dir="$(cd "$dir" && pwd)"
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "sha=$(git -C "$dir" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        echo "bin=$RUNNER_TEMP/ostrom-bin/ostrom-server" >> "$GITHUB_OUTPUT"
+        if [ ! -x "$dir/ci/build-linux.sh" ]; then
+          echo "::${{ inputs.required == 'true' && 'error' || 'warning' }} title=ostrom-server contract::ostrom-server@$(git -C "$dir" rev-parse --short HEAD) has no executable ci/build-linux.sh yet (contract in ostrom-e2e/templates/README.md)"
+          if [ "${{ inputs.required }}" = "true" ]; then exit 1; fi
+          echo "available=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Cache the server binary by commit
+      if: steps.src.outputs.available == 'true'
+      id: cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.temp }}/ostrom-bin/ostrom-server
+        key: ostrom-server-linuxX64-${{ steps.src.outputs.sha }}
+    - name: Set up Java (build only)
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/setup-java@v6
+      with: { distribution: temurin, java-version: 21 }
+    - name: Set up Gradle (build only)
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: gradle/actions/setup-gradle@v6
+      with:
+        build-root-directory: ${{ steps.src.outputs.dir }}
+    - name: Cache ~/.konan (build only)
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache@v6
+      with:
+        path: ~/.konan
+        key: konan-${{ runner.os }}-server-${{ hashFiles('.ostrom/server/gradle/libs.versions.toml') }}
+        restore-keys: konan-${{ runner.os }}-
+    - name: Build the native server
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ${{ steps.src.outputs.dir }}
+      run: |
+        ./ci/build-linux.sh
+        mkdir -p "$RUNNER_TEMP/ostrom-bin"
+        cp dist/ostrom-server "$RUNNER_TEMP/ostrom-bin/ostrom-server"
+    - name: Start the server and wait for /health
+      if: steps.src.outputs.available == 'true'
+      shell: bash
+      env:
+        OSTROM_DATABASE_URL: ${{ inputs.database-url }}
+        OSTROM_PORT: ${{ inputs.port }}
+        EXTRA_ENV: ${{ inputs.extra-env }}
+      run: |
+        set -a; [ -n "$EXTRA_ENV" ] && eval "$(printf '%s\n' "$EXTRA_ENV" | sed 's/^/export /')"; set +a
+        chmod +x "${{ steps.src.outputs.bin }}"
+        nohup "${{ steps.src.outputs.bin }}" > "$RUNNER_TEMP/ostrom-server.log" 2>&1 &
+        echo $! > "$RUNNER_TEMP/ostrom-server.pid"
+        for i in $(seq 1 120); do
+          if curl -fsS "http://127.0.0.1:${OSTROM_PORT}/health" >/dev/null 2>&1; then echo "server up after ${i}×0.5 s"; exit 0; fi
+          if ! kill -0 "$(cat "$RUNNER_TEMP/ostrom-server.pid")" 2>/dev/null; then break; fi
+          sleep 0.5
+        done
+        echo "::error title=ostrom-server::did not answer /health within 60 s"; cat "$RUNNER_TEMP/ostrom-server.log"; exit 1

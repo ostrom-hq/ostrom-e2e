@@ -1,0 +1,45 @@
+# Extra job for ostrom-cli's .github/workflows/ci.yml, next to `coverage` and `native-tests` of
+# templates/kotlin/ci.yml. Job name = required check on main.
+jobs:
+  # THIS commit's native `ostrom` against the real server (ostrom-server main) and PostgreSQL, driving the fake
+  # agent of the bench (OSTROM_CLAUDE_BIN / OSTROM_CODEX_BIN), plus the hook start-up budget.
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:18
+        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: This CLI, built
+        id: cli
+        uses: ostrom-hq/ostrom-e2e/.github/actions/cli@main
+        with:
+          path: .
+      - name: Real Ostrom server from main
+        id: server
+        uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
+        with:
+          deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
+          database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
+          required: "false" # flip to "true" once ostrom-server meets the contract (QA does it)
+      - uses: actions/checkout@v7
+        with:
+          repository: ostrom-hq/ostrom-e2e
+          ssh-key: ${{ secrets.DEPLOY_KEY_E2E }}
+          path: .ostrom/e2e
+      - uses: pnpm/action-setup@v6
+        with: { package_json_file: .ostrom/e2e/package.json }
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .ostrom/e2e/.nvmrc }
+      - name: Bench scenarios
+        working-directory: .ostrom/e2e
+        env:
+          OSTROM_E2E_CLI_BIN: ${{ steps.cli.outputs.bin }}
+          OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.url || '' }}
+        run: pnpm install --frozen-lockfile && pnpm e2e
