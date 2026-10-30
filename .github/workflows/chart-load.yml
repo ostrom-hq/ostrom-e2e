@@ -1,0 +1,314 @@
+# Full-stack load pass of the Helm chart: the real server image (ostrom-server main), installed by ostrom-helm main's
+# chart in a kind cluster (built-in PostgreSQL, `ostrom-server migrate` init container, 2 server replicas, ingress-nginx,
+# namespace under the restricted Pod Security standard), loaded by QA's k6 scripts through the ingress. The job
+# summary gives p95/p99, error rate and requests/s per script, and the peak CPU and memory of every pod (what the
+# chart's `resources` are set from). Not on pull requests: the organisation runs a single `ci` job per PR.
+name: Chart load
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+# A load pass gates nothing: a newer run of the same ref replaces the one in progress (runners are scarce).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+
+jobs:
+  chart-load:
+    name: chart-load
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      NS: ostrom
+      CLUSTER: ostrom-load
+      API_URL: http://api.ostrom.test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      # The server needs ostrom-core next to its checkout (ostrom.core.local): GitHub Packages of another repository
+      # are not readable from here, like in ostrom-server's own CI (JOURNAL 05:50).
+      - name: Checkout ostrom-server main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ostrom-hq/ostrom-server
+          ref: main
+          ssh-key: ${{ secrets.DEPLOY_KEY_SERVER }}
+          path: .ostrom/server
+          persist-credentials: false
+      - name: ostrom-core version pinned by the server
+        id: core
+        run: echo "ref=$(tr -d '[:space:]' < .ostrom/server/gradle/ostrom-core.ref)" >> "$GITHUB_OUTPUT"
+      - name: Checkout ostrom-core at that commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ostrom-hq/ostrom-core
+          ref: ${{ steps.core.outputs.ref }}
+          ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
+          path: .ostrom/ostrom-core
+          persist-credentials: false
+      - name: Build ostrom-core from that checkout
+        run: printf '\nostrom.core.local=true\n' >> .ostrom/server/gradle.properties
+      # The action builds the image and then starts it against `database-url`; only the image is wanted here, so the
+      # start is let fail (nothing listens there, `required: "false"`) and the next step checks the image.
+      - name: Server image (ostrom-server main, its own Dockerfile)
+        id: server
+        uses: ./.github/actions/server
+        with:
+          path: .ostrom/server
+          image: "true"
+          database-url: postgresql://127.0.0.1:1/none
+          required: "false"
+      - name: The image is built
+        env:
+          SHA: ${{ steps.server.outputs.sha }}
+        run: |
+          docker rm -f ostrom-e2e-server >/dev/null 2>&1 || true
+          if ! docker image inspect ostrom-server:e2e >/dev/null 2>&1; then
+            echo "::error title=server image::ostrom-server@$SHA did not build (see the step above)"; exit 1
+          fi
+          docker images ostrom-server:e2e --format 'ostrom-server:e2e {{.Size}} (ostrom-server@'"$SHA"')'
+      - name: Checkout ostrom-helm main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ostrom-hq/ostrom-helm
+          ref: main
+          ssh-key: ${{ secrets.DEPLOY_KEY_HELM }}
+          path: .ostrom/helm
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with: { version: v3.17.2 }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version-file: .nvmrc }
+      - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
+      # One node that publishes ports 80 and 443 of ingress-nginx on the runner (kind's documented ingress setup).
+      - name: kind cluster configuration
+        run: |
+          cat > "$RUNNER_TEMP/kind.yaml" <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+              kubeadmConfigPatches:
+                - |
+                  kind: InitConfiguration
+                  nodeRegistration:
+                    kubeletExtraArgs:
+                      node-labels: "ingress-ready=true"
+              extraPortMappings:
+                - { containerPort: 80, hostPort: 80, protocol: TCP }
+                - { containerPort: 443, hostPort: 443, protocol: TCP }
+          EOF
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          version: v0.29.0
+          node_image: kindest/node:v1.31.9
+          cluster_name: ${{ env.CLUSTER }}
+          config: ${{ runner.temp }}/kind.yaml
+      - name: ingress-nginx and metrics-server (pinned manifests, checked by digest)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/ingress-nginx.yaml" \
+            https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/kind/deploy.yaml
+          curl -fsSL -o "$RUNNER_TEMP/metrics-server.yaml" \
+            https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.1/components.yaml
+          sha256sum -c <<EOF
+          2a3ae008c8786431115502644e77ab398fdebfb721a5d1195ed3089cde3299df  $RUNNER_TEMP/ingress-nginx.yaml
+          3c7f57cdbee0f57fb0259a150e8f6d6cb4f29d72d1aa5dce8803151dd6d4c2a1  $RUNNER_TEMP/metrics-server.yaml
+          EOF
+          kubectl apply -f "$RUNNER_TEMP/ingress-nginx.yaml"
+          kubectl apply -f "$RUNNER_TEMP/metrics-server.yaml"
+          # kind's kubelets serve self-signed certificates.
+          kubectl -n kube-system patch deployment metrics-server --type json -p '[
+            {"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"},
+            {"op":"replace","path":"/spec/template/spec/containers/0/args/4","value":"--metric-resolution=10s"}]'
+          kubectl -n ingress-nginx wait --for=condition=ready pod -l app.kubernetes.io/component=controller --timeout=300s
+          kubectl -n kube-system rollout status deployment/metrics-server --timeout=300s
+      - name: Load the server image into kind
+        run: kind load docker-image ostrom-server:e2e --name "$CLUSTER"
+      - name: Namespace under the restricted Pod Security standard
+        run: |
+          kubectl create namespace "$NS"
+          kubectl label namespace "$NS" pod-security.kubernetes.io/enforce=restricted pod-security.kubernetes.io/enforce-version=latest
+      # Test values of the bench, never real ones. Sign-in mails go to a directory (as in ci.yml); billing stays off:
+      # no route of the load pass needs it, and the chart's NetworkPolicy denies the server any private address, so an
+      # in-cluster stripe-mock would not be reachable anyway. Test accounts are allowed for `seed-test-account`.
+      - name: helm install charts/ostrom (built-in PostgreSQL, migrate init container, 2 server replicas)
+        run: |
+          cat > "$RUNNER_TEMP/load-values.yaml" <<'EOF'
+          global:
+            imagePullPolicy: IfNotPresent
+            urls: { api: "http://api.ostrom.test", app: "http://app.ostrom.test", site: "http://ostrom.test" }
+          server:
+            image: { repository: ostrom-server, tag: e2e }
+            replicas: 2
+            trustedProxies: 10.244.0.0/16
+            config:
+              OSTROM_MAIL_DIR: /var/lib/ostrom/mail
+              OSTROM_ALLOW_TEST_ACCOUNTS: "true"
+          migrations: { initContainer: true }
+          postgresql:
+            enabled: true
+            persistence: { size: 1Gi }
+          cloudSessions: { enabled: false }
+          polis: { enabled: false }
+          site: { enabled: false }
+          # No console image is built by the bench: the API is reached on its own host only.
+          web: { enabled: false }
+          ingress:
+            className: nginx
+            tls: { enabled: false }
+            hosts: { api: api.ostrom.test, app: app.ostrom.test, site: ostrom.test }
+          EOF
+          helm install ostrom .ostrom/helm/charts/ostrom -n "$NS" -f "$RUNNER_TEMP/load-values.yaml" --wait --timeout 10m
+          kubectl -n "$NS" rollout status deployment/ostrom-server --timeout=300s
+          kubectl -n "$NS" get pods -o wide
+      - name: The API host answers through the ingress
+        run: |
+          echo "127.0.0.1 api.ostrom.test app.ostrom.test" | sudo tee -a /etc/hosts
+          for i in $(seq 1 60); do
+            if curl -fsS "$API_URL/health" >/dev/null 2>&1; then echo "ingress up after $i s"; exit 0; fi
+            sleep 1
+          done
+          curl -sS -i "$API_URL/health" || true; exit 1
+      - name: Sample CPU and memory of every pod (kubectl top, every 5 s, in the background)
+        run: |
+          for _ in $(seq 1 36); do kubectl top pods -n "$NS" >/dev/null 2>&1 && break; sleep 5; done
+          kubectl top pods -n "$NS" || echo "::warning title=metrics::kubectl top not ready yet, samples may start late"
+          sample() {
+            while :; do
+              ts=$(date +%s)
+              for ns in "$NS" ingress-nginx; do
+                kubectl top pods -n "$ns" --no-headers 2>/dev/null | sed "s|^|$ts $ns |"
+              done
+              sleep 5
+            done
+          }
+          sample >> "$RUNNER_TEMP/top.txt" 2>/dev/null < /dev/null &
+          echo $! > "$RUNNER_TEMP/top.pid"
+          disown || true
+      # Same invocation as ci.yml, through the ingress; --summary-trend-stats only adds p(99) to the exported summary.
+      - name: k6 smoke (health, instance)
+        env:
+          OSTROM_URL: ${{ env.API_URL }}
+          OSTROM_LOAD_SCENARIOS: health,instance
+        run: k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export smoke-summary.json load/smoke.js
+      - name: QA account (ostrom-server seed-test-account, in a server pod)
+        run: |
+          out=$(kubectl -n "$NS" exec deployment/ostrom-server -c server -- \
+            /usr/local/bin/ostrom-server seed-test-account "k6-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}@e2e.ostrom.test")
+          line=$(printf '%s\n' "$out" | grep -E '^\{.*"organizationId"' | tail -n 1)
+          token=$(printf '%s' "$line" | node -e 'const a = JSON.parse(require("fs").readFileSync(0, "utf8")); process.stdout.write(a.token || "")')
+          org=$(printf '%s' "$line" | node -e 'const a = JSON.parse(require("fs").readFileSync(0, "utf8")); process.stdout.write(a.organizationId || "")')
+          if [ -z "$token" ] || [ -z "$org" ]; then echo "::error title=seed-test-account::no token in its output"; exit 1; fi
+          echo "::add-mask::$token"
+          { echo "OSTROM_LOAD_SEED_TOKEN=$token"; echo "OSTROM_LOAD_SEED_ORG=$org"; } >> "$GITHUB_ENV"
+      - name: k6 chart journeys (me, organizations, rename)
+        env:
+          OSTROM_URL: ${{ env.API_URL }}
+        run: k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export journeys-summary.json load/chart-journeys.js
+      # scripts/load-setup.ts reads the sign-in links from a directory of the runner. In the chart the mails are written
+      # in each server pod's own volume: the setup talks to one pod (port-forward) whose mail directory, on the kind
+      # node's /var volume, is bind-mounted on the runner. Checked by one sign-in mail; else the setup says why it skips.
+      - name: Gate load setup (requester token, approver session)
+        id: loadsetup
+        run: |
+          pod=$(kubectl -n "$NS" get pod -l app.kubernetes.io/component=server -o jsonpath='{.items[0].metadata.name}')
+          kubectl -n "$NS" port-forward "pod/$pod" 18080:8080 > "$RUNNER_TEMP/port-forward.log" 2>&1 < /dev/null &
+          echo $! > "$RUNNER_TEMP/port-forward.pid"
+          for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:18080/health >/dev/null 2>&1 && break; sleep 1; done
+          mail=""
+          uid=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.metadata.uid}')
+          var=$(docker inspect "$CLUSTER-control-plane" --format '{{range .Mounts}}{{if eq .Destination "/var"}}{{.Source}}{{end}}{{end}}')
+          src="$var/lib/kubelet/pods/$uid/volumes/kubernetes.io~empty-dir/data/mail"
+          if [ -n "$var" ] && sudo test -d "$var/lib/kubelet/pods/$uid"; then
+            sudo mkdir -p "$src" && sudo chown 65532:65532 "$src"
+            mkdir -p "$RUNNER_TEMP/ostrom-mail" && sudo mount --bind "$src" "$RUNNER_TEMP/ostrom-mail"
+            probe="mail-probe-${GITHUB_RUN_ID}@e2e.ostrom.test"
+            curl -fsS -X POST -H 'content-type: application/json' -d "{\"email\":\"$probe\"}" \
+              http://127.0.0.1:18080/api/v1/auth/email >/dev/null || true
+            if grep -qs "^To: $probe" "$RUNNER_TEMP"/ostrom-mail/*; then mail="$RUNNER_TEMP/ostrom-mail"; fi
+          fi
+          [ -n "$mail" ] || echo "::warning title=mail directory::the sign-in mails of $pod are not readable from the runner"
+          OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="$mail" node scripts/load-setup.ts
+      - name: k6 gates (push to main + yes) and race (100 simultaneous yes → 1 × 200, 99 × 409)
+        if: steps.loadsetup.outputs.ready == 'true'
+        env:
+          OSTROM_URL: ${{ env.API_URL }}
+          OSTROM_LOAD_SCENARIOS: gates
+        run: |
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js
+      - name: Stop the background sampler and port-forward
+        if: always()
+        run: |
+          for f in top port-forward; do [ -f "$RUNNER_TEMP/$f.pid" ] && kill "$(cat "$RUNNER_TEMP/$f.pid")" 2>/dev/null || true; done
+          mountpoint -q "$RUNNER_TEMP/ostrom-mail" && sudo umount "$RUNNER_TEMP/ostrom-mail" || true
+          cp "$RUNNER_TEMP/top.txt" top-samples.txt 2>/dev/null || true
+      - name: Summary (k6 per script, peak CPU and memory per pod, restarts)
+        if: always()
+        env:
+          SERVER_SHA: ${{ steps.server.outputs.sha }}
+          GATES: ${{ steps.loadsetup.outputs.ready == 'true' && 'run' || steps.loadsetup.outputs.reason }}
+        run: |
+          {
+            echo "### Chart load pass (kind, ingress-nginx, 2 server replicas)"
+            echo
+            echo "ostrom-server@${SERVER_SHA:-?} · gates and race: ${GATES:-not run}"
+            echo
+            # shellcheck disable=SC2016 # JavaScript template literals, not shell expansions
+            node -e '
+              const fs = require("fs");
+              const files = [["smoke (health, instance)", "smoke-summary.json"], ["chart journeys", "journeys-summary.json"],
+                ["gates", "gates-summary.json"], ["race", "race-summary.json"]];
+              const ms = (v) => (v === undefined ? "" : v.toFixed(1));
+              const pct = (v) => (v === undefined ? "" : `${(v * 100).toFixed(2)} %`);
+              let out = "| script | metric | p95 (ms) | p99 (ms) | errors | req/s |\n|---|---|---|---|---|---|\n";
+              for (const [label, file] of files) {
+                if (!fs.existsSync(file)) { out += `| ${label} | not run | | | | |\n`; continue; }
+                const m = JSON.parse(fs.readFileSync(file, "utf8")).metrics;
+                for (const [k, v] of Object.entries(m).filter(([k]) => k.startsWith("http_req_duration"))) {
+                  const sel = k.slice("http_req_duration".length);
+                  const failed = m[`http_req_failed${sel}`] ?? (sel === "" ? m.http_req_failed : undefined);
+                  const reqs = m[`http_reqs${sel}`] ?? (sel === "" ? m.http_reqs : undefined);
+                  out += `| ${label} | ${sel || "all"} | ${ms(v["p(95)"])} | ${ms(v["p(99)"])} | ${pct(failed?.value)} | ${reqs?.rate === undefined ? "" : reqs.rate.toFixed(1)} |\n`;
+                }
+              }
+              process.stdout.write(out);
+            ' || echo "(no k6 summary)"
+            echo
+            echo "| pod | peak CPU | peak memory | samples |"
+            echo "|---|---|---|---|"
+            if [ -s top-samples.txt ]; then
+              awk '{ k = $2 "/" $3; c = $4; m = $5; sub(/m$/, "", c); sub(/Mi$/, "", m); n[k]++
+                     if (c + 0 > cpu[k]) cpu[k] = c + 0; if (m + 0 > mem[k]) mem[k] = m + 0 }
+                   END { for (k in n) printf "| %s | %d m | %d Mi | %d |\n", k, cpu[k], mem[k], n[k] }' top-samples.txt | sort
+            else
+              echo "| (no sample) | | | |"
+            fi
+            echo
+            echo "| pod | restarts | last termination |"
+            echo "|---|---|---|"
+            kubectl -n "$NS" get pods --no-headers \
+              -o custom-columns='P:.metadata.name,R:.status.containerStatuses[*].restartCount,L:.status.containerStatuses[*].lastState.terminated.reason' \
+              2>/dev/null | awk '{ printf "| %s | %s | %s |\n", $1, $2, ($3 == "<none>" ? "" : $3) }' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl get all,events -n "$NS" -o wide || true
+          kubectl get events -n "$NS" --sort-by=.lastTimestamp | tail -80 || true
+          for p in $(kubectl get pods -n "$NS" -o name); do
+            echo "== $p"; kubectl logs -n "$NS" "$p" --all-containers --prefix --tail=200 || true
+            kubectl logs -n "$NS" "$p" --all-containers --prefix --previous --tail=100 2>/dev/null || true
+          done
+          kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller --tail=100 || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: chart-load-k6
+          path: "*-summary.json\ntop-samples.txt"
+          retention-days: 7
+          if-no-files-found: ignore
