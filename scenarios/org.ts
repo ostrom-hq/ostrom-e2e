@@ -139,5 +139,12 @@ export async function membersOf(p: Person, orgId: string): Promise<unknown[]> {
   return (Array.isArray(r.body) ? r.body : (r.body['items'] ?? r.body['members'])) as unknown[];
 }
 
-/** A fresh e-mail address per run, so that scenarios never share a person. */
-export const email = (who: string) => `${who}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}@e2e.ostrom.test`;
+/**
+ * A fresh e-mail address per person, on a domain of its own: scenarios never share a person, and never a company.
+ * A company domain holds one free team (`freeClaimOf`, `domain:<domain>`, ostrom-server#67): people who shared
+ * `e2e.ostrom.test` got 402 `payment_required` from the second `POST /api/v1/orgs` on (run 41050531308).
+ */
+export const email = (who: string) => {
+  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  return `${who}-${id}@c${id}.e2e.ostrom.test`;
+};
