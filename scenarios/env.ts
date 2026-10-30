@@ -12,3 +12,8 @@ export const STRIPE_WEBHOOK_SECRET = process.env['OSTROM_E2E_STRIPE_WEBHOOK_SECR
 // The port the fake GitHub of the identity scenarios listens on: the server was started pointing at it
 // (OSTROM_GITHUB_WEB_URL and OSTROM_GITHUB_API_URL = http://127.0.0.1:<port>), with a fake OAuth client.
 export const FAKE_GITHUB_PORT = Number(process.env['OSTROM_E2E_FAKE_GITHUB_PORT'] ?? '0');
+// The console's origin, the only one a browser session may write from (OSTROM_CONSOLE_URL of the bench's server, audit
+// S2-08, ostrom-server#58). The bench is plain HTTP, so the session cookie has no `__Host-` prefix (HTTPS only).
+export const CONSOLE_ORIGIN = process.env['OSTROM_E2E_CONSOLE_ORIGIN'] ?? 'http://127.0.0.1:4600';
+// The superuser URL of the bench's `ostrom` database: only to age a session (AUTH-007), never to make data.
+export const DATABASE_ADMIN_URL = process.env['OSTROM_E2E_DATABASE_ADMIN_URL'] ?? '';

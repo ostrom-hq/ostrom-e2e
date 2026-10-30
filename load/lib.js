@@ -23,6 +23,8 @@ const ASKER = __ENV.OSTROM_LOAD_TOKEN || '';
 const APPROVER = __ENV.OSTROM_LOAD_APPROVER_TOKEN || '';
 const APPROVER_COOKIE = __ENV.OSTROM_LOAD_APPROVER_COOKIE || '';
 const APPROVER_CSRF = __ENV.OSTROM_LOAD_APPROVER_CSRF || '';
+// A session write needs the console's Origin too (audit S2-08, ostrom-server#58).
+const APPROVER_ORIGIN = __ENV.OSTROM_LOAD_APPROVER_ORIGIN || 'http://127.0.0.1:4600';
 
 export function headers(token) {
   const h = { 'content-type': 'application/json' };
@@ -33,7 +35,7 @@ export function headers(token) {
 /** The approver's headers: its session cookie and CSRF token when given, else its bearer token. */
 export function approverHeaders() {
   if (!APPROVER_COOKIE) return headers(APPROVER);
-  return { 'content-type': 'application/json', cookie: APPROVER_COOKIE, 'x-csrf-token': APPROVER_CSRF };
+  return { 'content-type': 'application/json', cookie: APPROVER_COOKIE, 'x-csrf-token': APPROVER_CSRF, origin: APPROVER_ORIGIN };
 }
 
 /**

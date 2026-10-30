@@ -11,6 +11,11 @@ export interface Caller {
    * count people, not the whole bench.
    */
   readonly from?: string;
+  /**
+   * The `Origin` a browser sends with the session cookie. Since ostrom-server#58 (audit S2-08), a session write needs it
+   * to be an allowed origin (the console's), besides its CSRF token.
+   */
+  readonly origin?: string;
 }
 
 export interface RouteCase {
@@ -30,7 +35,10 @@ export interface Violation {
   readonly reason: string;
 }
 
-/** The headers a caller sends: bearer token, or session cookie plus its CSRF token on a state-changing request. */
+/**
+ * The headers a caller sends: bearer token, or session cookie plus its CSRF token on a state-changing request, and the
+ * caller's address and `Origin` when it has them.
+ */
 export function headersOf(caller: Caller, method: string, json: boolean): Record<string, string> {
   const h: Record<string, string> = {};
   if (json) h['content-type'] = 'application/json';
@@ -38,6 +46,7 @@ export function headersOf(caller: Caller, method: string, json: boolean): Record
   if (caller.cookie) h['cookie'] = caller.cookie;
   if (caller.csrf && method !== 'GET' && method !== 'HEAD') h['x-csrf-token'] = caller.csrf;
   if (caller.from) h['x-forwarded-for'] = caller.from;
+  if (caller.origin) h['origin'] = caller.origin;
   return h;
 }
 

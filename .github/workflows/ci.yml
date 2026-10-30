@@ -95,6 +95,8 @@ jobs:
           OSTROM_E2E_MAIL_DIR: ${{ runner.temp }}/ostrom-mail
           OSTROM_E2E_STRIPE_WEBHOOK_SECRET: whsec_e2e_bench
           OSTROM_E2E_FAKE_GITHUB_PORT: "4610"
+          # Only to age a session in AUTH-007 (the step-up), as the superuser of the bench's throwaway database.
+          OSTROM_E2E_DATABASE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/ostrom
         run: pnpm e2e --reporter=default --reporter=json --outputFile=e2e-results.json
       # Short load test on the served public routes; the thresholds of load/smoke.js fail the job.
       - name: k6 smoke against the server image (health, instance)

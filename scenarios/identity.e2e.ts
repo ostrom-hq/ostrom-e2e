@@ -3,12 +3,13 @@
 // by GitHub (the bench plays GitHub, src/fake-github.ts), the CLI's device login, personal tokens, sign-out and their
 // revocation, refusals without a credential, and the step-up of a yes. Each part switches itself on when its routes
 // are served (src/probe.ts); routes and bodies are those of ostrom-server main (IdentityApi.kt, contract 0.1.140).
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeGitHub } from '../src/fake-github.ts';
 import { isServed } from '../src/probe.ts';
-import { FAKE_GITHUB_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
-import { address, call, cookiesOf, email, mailedToken, signIn, url } from './org.ts';
+import { DATABASE_ADMIN_URL, FAKE_GITHUB_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
+import { address, call, cookiesOf, email, invite, join, mailedToken, orgOf, signIn, url } from './org.ts';
 
 const served = async (method: string, path: string) => SERVER_URL !== '' && (await isServed(SERVER_URL, path, method));
 const EMAIL_SIGN_IN = MAIL_DIR !== '' && (await served('POST', '/api/v1/auth/email')) && (await served('POST', '/api/v1/auth/email/verify'));
@@ -115,7 +116,20 @@ describe.skipIf(!GITHUB)(`E2E-AUTH: sign-in with GitHub (fake GitHub on :${FAKE_
 });
 
 describe.skipIf(!EMAIL_SIGN_IN || !DEVICE || !ME)('E2E-AUTH: device login of the CLI (RFC 8628)', () => {
-  const poll = (deviceCode: string, from: string) => call({ from }, 'POST', '/api/v1/auth/device/token', { deviceCode });
+  // Two shapes: main's (200 `{status, accessToken?, scopes?}`), and the contract's of ostrom-server#62 (428 while
+  // pending, 400 `access_denied` / `expired_token` / `slow_down`, 200 `AuthToken {token, login, scopes}`).
+  type Poll = { status: string; accessToken?: string | undefined; scopes?: string[] | undefined };
+  const poll = async (deviceCode: string, from: string): Promise<Poll> => {
+    const r = await call({ from }, 'POST', '/api/v1/auth/device/token', { deviceCode });
+    const b = r.body ?? {};
+    if (r.status === 428) return { status: 'pending' };
+    if (r.status === 400) {
+      const type = (b['error'] as { type?: string } | undefined)?.type ?? '';
+      return { status: ({ access_denied: 'denied', expired_token: 'expired' } as Record<string, string>)[type] ?? type };
+    }
+    if (r.status === 200 && typeof b['token'] === 'string') return { status: 'approved', accessToken: b['token'] as string, scopes: b['scopes'] as string[] };
+    return { status: String(b['status'] ?? r.status), accessToken: b['accessToken'] as string | undefined, scopes: b['scopes'] as string[] | undefined };
+  };
 
   it('E2E-AUTH-003 a device code is approved in the signed-in browser, gives one CLI token (no answering scope), once; a denied code gives none', async () => {
     const person = await signIn(email('auth-device'));
@@ -124,7 +138,7 @@ describe.skipIf(!EMAIL_SIGN_IN || !DEVICE || !ME)('E2E-AUTH: device login of the
     expect(started.status).toBe(200);
     const { deviceCode, userCode, verificationUri, interval } = started.body as { deviceCode: string; userCode: string; verificationUri: string; interval: number };
     expect(verificationUri).toBe('http://127.0.0.1:4600/device');
-    expect((await poll(deviceCode, from)).body['status']).toBe('pending');
+    expect((await poll(deviceCode, from)).status).toBe('pending');
     // The console shows what is asking before the person answers.
     const shown = await call(person.caller, 'GET', `/api/v1/auth/device?userCode=${encodeURIComponent(userCode)}`);
     expect(shown.status).toBe(200);
@@ -132,9 +146,9 @@ describe.skipIf(!EMAIL_SIGN_IN || !DEVICE || !ME)('E2E-AUTH: device login of the
     expect((await call(person.caller, 'POST', '/api/v1/auth/device/answer', { userCode, approve: true })).status).toBe(204);
     await sleep(interval * 1000 + 500);
     const approved = await poll(deviceCode, from);
-    expect(approved.body['status']).toBe('approved');
-    const cliToken = String(approved.body['accessToken']);
-    const scopes = approved.body['scopes'] as string[];
+    expect(approved.status).toBe('approved');
+    const cliToken = String(approved.accessToken);
+    const scopes = approved.scopes ?? [];
     expect(scopes).toContain('profile:read');
     expect(scopes).not.toContain('gates:answer');
     expect(scopes).not.toContain('user:*');
@@ -143,15 +157,15 @@ describe.skipIf(!EMAIL_SIGN_IN || !DEVICE || !ME)('E2E-AUTH: device login of the
     expect(profile.body['primaryEmail']).toBe(person.email);
     // The device code was spent: polling again never gives a second token.
     await sleep(interval * 1000 + 500);
-    expect((await poll(deviceCode, from)).body['status']).not.toBe('approved');
+    expect((await poll(deviceCode, from)).status).not.toBe('approved');
 
     const other = await call({ from }, 'POST', '/api/v1/auth/device', { clientName: 'ostrom e2e denied' });
     const denied = other.body as { deviceCode: string; userCode: string };
     expect((await call(person.caller, 'POST', '/api/v1/auth/device/answer', { userCode: denied.userCode, approve: false })).status).toBe(204);
     await sleep(interval * 1000 + 500);
     const refused = await poll(denied.deviceCode, from);
-    expect(refused.body['status']).toBe('denied');
-    expect(refused.body['accessToken'] ?? null).toBeNull();
+    expect(refused.status).toBe('denied');
+    expect(refused.accessToken ?? null).toBeNull();
   });
 });
 
@@ -223,6 +237,12 @@ describe.skipIf(!EMAIL_SIGN_IN || !TOKENS || !ME)('E2E-AUTH: no credential, no a
     // The session cookie alone, without X-CSRF-Token, writes nothing.
     const noCsrf = await call({ cookie: person.caller.cookie ?? '' }, 'POST', '/api/v1/tokens', { name: 'csrf', scopes: ['profile:read'] });
     expect([401, 403]).toContain(noCsrf.status);
+    // With its CSRF token but from another origin, or with none, the session writes nothing either (S2-08, #58).
+    const { origin: _console, ...noOrigin } = person.caller;
+    for (const caller of [{ ...noOrigin, origin: 'https://evil.example' }, noOrigin]) {
+      const r = await call(caller, 'POST', '/api/v1/tokens', { name: 'origin', scopes: ['profile:read'] });
+      expect([401, 403], `Origin ${'origin' in caller ? caller.origin : 'absent'}`).toContain(r.status);
+    }
     expect(await call(person.caller, 'GET', '/api/v1/tokens')).toMatchObject({ status: 200, body: before.body });
     // A token never manages tokens (browser session only) and can never carry the right to answer a gate.
     const made = await call(person.caller, 'POST', '/api/v1/tokens', { name: 'e2e scoped', scopes: ['profile:read'], expiresInDays: 1 });
@@ -237,16 +257,65 @@ describe.skipIf(!EMAIL_SIGN_IN || !TOKENS || !ME)('E2E-AUTH: no credential, no a
   });
 });
 
-describe.skipIf(!EMAIL_SIGN_IN || !(await served('POST', `/api/v1/approvals/${randomUUID()}/answer`)))('E2E-AUTH: step-up of a yes', () => {
-  it('E2E-AUTH-006 a CLI token never says yes: 403 (step_up_required once S2-54 is served), whatever the approval', async (ctx) => {
-    // The positive half (a browser session signed in less than 5 minutes ago says yes) is LOAD-006's setup: 100
-    // fresh yes on one approval. Here: the credentials that must never say yes.
-    const person = await signIn(email('auth-stepup'));
-    const made = await call(person.caller, 'POST', '/api/v1/tokens', { name: 'e2e step-up', scopes: ['profile:read'], expiresInDays: 1 });
+const ANSWER_SERVED = await served('POST', `/api/v1/approvals/${randomUUID()}/answer`);
+
+describe.skipIf(!EMAIL_SIGN_IN || !TOKENS || !ANSWER_SERVED)('E2E-AUTH: a token never says yes', () => {
+  it('E2E-AUTH-006 a CLI token never says yes: 403, whatever the approval (only a browser session answers, channel BROWSER)', async () => {
+    const person = await signIn(email('auth-token-yes'));
+    const made = await call(person.caller, 'POST', '/api/v1/tokens', { name: 'e2e no yes', scopes: ['profile:read'], expiresInDays: 1 });
+    expect(made.status).toBe(201);
     const answer = await call({ token: String(made.body['secret']) }, 'POST', `/api/v1/approvals/${randomUUID()}/answer`, { answer: 'approve', shownDigest: 'sha256:00' });
     expect(answer.status).toBe(403);
-    const type = (answer.body['error'] as { type?: string } | undefined)?.type;
-    expect(['forbidden', 'step_up_required']).toContain(type);
-    if (type !== 'step_up_required') ctx.skip('step-up (S2-54, ostrom-server#41) not served yet: the token is refused as forbidden');
+    expect(['forbidden', 'step_up_required']).toContain((answer.body['error'] as { type?: string } | undefined)?.type);
+  });
+});
+
+// AUTH-007 needs a real request to answer: an accepted workflow with a gate on pushes to main (ostrom-server#43), a
+// question from the requester's token, and the approver's own request; then the approver's browser session is made
+// older than 5 minutes in the database (the only way to age it without waiting), as the clock would.
+const STEP_UP_READY = EMAIL_SIGN_IN && TOKENS && ANSWER_SERVED && DATABASE_ADMIN_URL !== '' && (await served('POST', '/api/v1/workflows')) && (await served('POST', '/api/v1/gates'));
+
+/** Moves a person's browser sessions `minutes` into the past (their sign-in time, which the step-up reads). */
+function ageSessions(userId: string, minutes: number): void {
+  if (!/^[0-9a-f-]{36}$/.test(userId)) throw new Error(`not a user id: ${userId}`);
+  const sql = `UPDATE identity_web_sessions SET created_at = created_at - interval '${minutes} minutes' WHERE user_id = '${userId}'`;
+  execFileSync('docker', ['run', '--rm', '--network', 'host', 'postgres:18', 'psql', DATABASE_ADMIN_URL, '-v', 'ON_ERROR_STOP=1', '-c', sql], { stdio: 'pipe', timeout: 60_000 });
+}
+
+describe.skipIf(!STEP_UP_READY)(`E2E-AUTH: step-up of a yes${STEP_UP_READY ? '' : ' (needs POST /api/v1/workflows and /api/v1/gates, ostrom-server#43, and the database URL)'}`, () => {
+  it('E2E-AUTH-007 a browser session signed in more than 5 minutes ago cannot say yes (403 step_up_required); signed in again, it can', async () => {
+    const requester = await signIn(email('stepup-dev'));
+    const org = await orgOf(requester);
+    const approverEmail = email('stepup-rev');
+    expect((await invite(requester, org.id, [approverEmail], 'admin')).status).toBe(200);
+    const { person: approver, accepted } = await join(approverEmail);
+    expect(accepted.status).toBe(200);
+    const me = await call(approver.caller, 'GET', '/api/v1/auth/me');
+    const repo = `acme/stepup-${Date.now().toString(36)}`;
+    const workflow = await call(requester.caller, 'POST', '/api/v1/workflows', {
+      id: `stepup-${Date.now().toString(36)}`, name: 'step-up', domain: 'delivery', status: 'accepted', foundAt: new Date().toISOString(),
+      nodes: [{ id: 'push-main', kind: 'gate', label: 'Push to main', approvers: [me.body['login']], actions: [{ class: 'push-main', label: 'Push to the main branch', patterns: [], repos: [repo] }] }],
+      edges: [],
+    });
+    expect(workflow.status, JSON.stringify(workflow.body)).toBeLessThan(300);
+    const token = await call(requester.caller, 'POST', '/api/v1/tokens', { name: 'stepup asker', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
+    const asker = { token: String(token.body['secret']) };
+    const sha = randomUUID().replaceAll('-', '').padEnd(40, '0').slice(0, 40);
+    const gate = await call(asker, 'POST', '/api/v1/gates', { repo, class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
+    expect(gate.status, JSON.stringify(gate.body)).toBeLessThan(300);
+    const gateId = (gate.body['gate'] as { id?: string } | undefined)?.id;
+    const pending = await call(approver.caller, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
+    const mine = ((pending.body['items'] as { id: string; group?: string; shownDigest: string }[] | undefined) ?? []).find((a) => a.group === gateId);
+    expect(mine, JSON.stringify(pending.body)).toBeDefined();
+    const answer = (who: typeof approver) => call(who.caller, 'POST', `/api/v1/approvals/${mine?.id}/answer`, { answer: 'approve', shownDigest: mine?.shownDigest });
+
+    ageSessions(String(me.body['id']), 6);
+    const stale = await answer(approver);
+    expect(stale.status).toBe(403);
+    expect(stale.body['error']).toMatchObject({ type: 'step_up_required' });
+
+    const fresh = await signIn(approverEmail);
+    const yes = await answer(fresh);
+    expect(yes.status, JSON.stringify(yes.body)).toBe(200);
   });
 });

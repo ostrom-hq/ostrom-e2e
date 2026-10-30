@@ -2919,14 +2919,23 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : jalon
 - Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057 (PR ostrom-e2e#19, image ostrom-server@a3b551d), `scenarios/identity.e2e.ts`
 
-### E2E-AUTH-006 — StepUp : un jeton ne dit jamais oui
+### E2E-AUTH-006 — un jeton ne dit jamais oui
 
 - Étapes : un jeton personnel répond à une demande (`POST /api/v1/approvals/{id}/answer`).
-- Attendu : 403 ; `error.type = step_up_required` dès que S2-54 est servi (un oui exige une connexion de moins de 5 min, canal BROWSER) ; d'ici là le scénario se marque sauté avec la raison. La moitié positive (une session fraîche dit oui) est la mise en place de LOAD-006.
+- Attendu : 403 (`forbidden`, ou `step_up_required`), quelle que soit la demande : seule une session navigateur répond (canal BROWSER).
 - Surfaces : serveur (image), identité, portes
-- Source : consigne QA du 30/10 10:00 ; S2-54 ; ostrom-server#41 (StepUp dans les portes), #51 (`authenticatedAt`)
+- Source : consigne QA du 30/10 10:00 et 11:00 ; S2-54 ; ostrom-server#41, #51
 - Priorité : jalon
-- Statut : codé : `scenarios/identity.e2e.ts` (sauté au run 41034102057 : un jeton reçoit 403 `forbidden`, car une session navigateur est exigée avant le step-up ; `step_up_required` demande une session de plus de 5 min, pas encore jouée)
+- Statut : codé : `scenarios/identity.e2e.ts` (sauté au run 41034102057 par l'ancienne version, qui attendait `step_up_required` ; joué vert dès le prochain run)
+
+### E2E-AUTH-007 — StepUp : une session de plus de 5 min ne dit pas oui, reconnectée elle le peut
+
+- Étapes : flux accepté avec une porte sur les pushs vers main, l'approbateur nommé. Le demandeur pose la question (jeton `gates:ask`). La session navigateur de l'approbateur est vieillie de 6 min en base (`identity_web_sessions.created_at`), puis il répond oui. Il se reconnecte par lien et répond de nouveau.
+- Attendu : 403 `error.type = step_up_required` sur la session vieillie ; 200 sur la session fraîche.
+- Surfaces : serveur (image), identité, portes, base
+- Source : consigne QA du 30/10 11:00 ; S2-54 ; ostrom-server#41 (StepUp), #43 (flux et portes)
+- Priorité : jalon
+- Statut : codé : `scenarios/identity.e2e.ts` (bloqué : ostrom-server#43 compilateur pour la demande, #41 pour le step-up)
 
 ## LOAD : Charge (k6)
 

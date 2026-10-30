@@ -5,7 +5,7 @@
 import { type Caller, headersOf } from '../src/isolation.ts';
 import { invitationToken, signInToken } from '../src/mail.ts';
 import { firstServed, isServed } from '../src/probe.ts';
-import { MAIL_DIR, SERVER_URL } from './env.ts';
+import { CONSOLE_ORIGIN, MAIL_DIR, SERVER_URL } from './env.ts';
 
 export const url = (path: string) => SERVER_URL.replace(/\/$/, '') + path;
 
@@ -73,7 +73,7 @@ export async function mailedToken(email: string, from = address()): Promise<stri
 /** The cookies a response sets, as a `Cookie` header (name=value pairs). */
 export const cookiesOf = (r: Response) => r.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
 
-/** Signs `email` in by its e-mailed link: a session cookie and its CSRF token. */
+/** Signs `email` in by its e-mailed link: a session cookie, its CSRF token, and the console's `Origin` to write. */
 export async function signIn(email: string): Promise<Person> {
   const from = address();
   const token = await mailedToken(email, from);
@@ -81,7 +81,7 @@ export async function signIn(email: string): Promise<Person> {
   const body = (await r.json()) as { csrfToken?: string };
   const cookie = cookiesOf(r);
   if (r.status !== 200 || !cookie || !body.csrfToken) throw new Error(`verify → ${r.status} ${JSON.stringify(body)}`);
-  return { email, caller: { cookie, csrf: body.csrfToken, from } };
+  return { email, caller: { cookie, csrf: body.csrfToken, from, origin: CONSOLE_ORIGIN } };
 }
 
 export type Org = { id: string; slug: string; name: string; role: string } & Record<string, unknown>;
