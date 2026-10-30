@@ -6,8 +6,7 @@ une PR ne fusionne que si tous ses checks sont verts. Ces gabarits sont la faço
 
 | Fichier | Pour | Ce qu'il fait |
 |---|---|---|
-| `kotlin/ostrom.coverage.gradle.kts` | core, cli, server | Plugin de convention : cible `jvm()` réservée aux tests (Kover ne mesure pas le natif ; jamais publiée), Kover 0.9.11, règle 100 % lignes + branches (`koverVerify`). Seule exclusion : `@ExcludeFromCoverage` avec une ligne `// coverage: <pourquoi>` au-dessus. |
-| `kotlin/ci.yml` | core, cli, server | Jobs `coverage` (jvmTest + Kover, résumé dans le run) et `native-tests` (linuxX64Test), PostgreSQL en service, cache Gradle et `~/.konan`. |
+| `ostrom-core/docs/conventions/` (CONVENTIONS, fait foi) | core, cli, server | Plugin `ostrom.kmp` : cible `jvm()` réservée aux tests (Kover ne mesure pas le natif ; jamais publiée), Kover, règle 100 % lignes + branches ; workflow `build.yml`, job `linux` = detekt + `jvmTest` + `koverVerify` + `linuxX64Test`, PostgreSQL en service. Toute exclusion de couverture est dans le plugin ou annotée, avec sa ligne de justification. |
 | `server/ci-extra.yml` | server | Jobs `e2e` (banc complet contre CE commit du serveur) et `load-smoke` (k6 : `load/smoke.js` seuils p95/p99 + `load/race.js` 100 oui simultanés → un seul gagne). |
 | `cli/ci-extra.yml` | cli | Job `e2e` : CE binaire natif contre le vrai serveur, faux agent du banc. |
 | `web/vitest-coverage.snippet.ts`, `web/ci.yml` | web | Seuils Vitest 100 % (lignes, branches, fonctions, instructions) ; jobs `lint`, `coverage`, `e2e` (Playwright contre le vrai serveur + PostgreSQL). |
@@ -19,11 +18,11 @@ La protection de branche exige ces noms exacts (nom du job, `name:`). Ne pas les
 
 | Dépôt | Checks obligatoires |
 |---|---|
-| ostrom-core | `coverage`, `native-tests` |
-| ostrom-cli | `coverage`, `native-tests`, `e2e` |
-| ostrom-server | `coverage`, `native-tests`, `e2e`, `load-smoke` |
+| ostrom-core | `linux` |
+| ostrom-cli | `linux`, `e2e` |
+| ostrom-server | `linux`, `e2e`, `load-smoke` |
 | ostrom-web | `lint`, `coverage`, `e2e` |
-| ostrom-app | `lint`, `coverage`, `e2e-android` |
+| ostrom-app | le job Jest à seuils 100 %, `e2e-android` |
 | ostrom-e2e | `lint`, `coverage`, `e2e` |
 
 Protection (posée par QA, admins compris) : PR obligatoire, checks ci-dessus obligatoires, branche à jour avec
