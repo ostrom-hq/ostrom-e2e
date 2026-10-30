@@ -180,8 +180,17 @@ runs:
         else
           out=app/build/bin/linuxX64/releaseExecutable/ostrom-server.kexe; ./gradlew --no-daemon :app:linkReleaseExecutableLinuxX64 && ok=1 || ok=0
         fi
+        # Free the runner's memory for what comes next (the other native build, the server, the scenarios): the
+        # Gradle and Kotlin daemons of this build stay up otherwise, and two native links at once exhaust the runner
+        # (runs 41031154110 #1 and #2 cancelled during the CLI's link). Only this job's own daemons run here.
+        stop_daemons() { ./gradlew --stop >/dev/null 2>&1 || true; pkill -f 'KotlinCompileDaemon' || true; }
+        stop_daemons
         if [ "$ok" = 1 ] && [ -f "$out" ]; then
-          cp "$out" "$RUNNER_TEMP/ostrom-bin/ostrom-server"; echo "built=true" >> "$GITHUB_OUTPUT"; exit 0
+          cp "$out" "$RUNNER_TEMP/ostrom-bin/ostrom-server"; echo "built=true" >> "$GITHUB_OUTPUT"
+          # The binary is copied: the build outputs of the server and of ostrom-core only take disk from the CLI's build.
+          find . ../ostrom-core -name build -type d -prune -exec rm -rf {} + 2>/dev/null || true
+          df -h / | tail -1; free -m | sed -n 2p
+          exit 0
         fi
         echo "::$LEVEL title=ostrom-server contract::the build failed or did not produce $out (contract in ostrom-e2e/templates/README.md)"
         echo "built=false" >> "$GITHUB_OUTPUT"
