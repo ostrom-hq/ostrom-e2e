@@ -34,8 +34,8 @@ Les actions composites `ostrom-hq/ostrom-e2e/.github/actions/server@main` et `..
 l'organisation) construisent les vrais binaires natifs linuxX64, en cache par commit, depuis le dépôt lui-même
 (`path: .`) ou depuis `main` d'un autre dépôt (clé de déploiement en lecture seule, secrets d'org `DEPLOY_KEY_*`).
 
-- **ostrom-server** : `ci/build-linux.sh` (exécutable) laisse `dist/ostrom-server` ; le binaire lit
-  `OSTROM_DATABASE_URL` et `OSTROM_PORT`, applique ses migrations au démarrage, répond `GET /health` → 200 quand il
+- **ostrom-server** : `ci/build-linux.sh` (exécutable) laisse `dist/ostrom-server`, sinon `./gradlew :app:linkReleaseExecutableLinuxX64` ; le binaire lit
+  `OSTROM_DATABASE_URL`, `OSTROM_DATABASE_USER`, `OSTROM_DATABASE_PASSWORD` et `OSTROM_PORT`, applique ses migrations au démarrage, répond `GET /health` → 200 quand il
   est prêt ; un moyen de semer des comptes de test (`dev-a`, `rev-b`, `rev-c`, un admin) pour le banc.
 - **ostrom-cli** : `ci/build-linux.sh` laisse `dist/ostrom` ; `OSTROM_URL`, `OSTROM_TOKEN`, `OSTROM_HOME`,
   `OSTROM_CLAUDE_BIN`, `OSTROM_CODEX_BIN` honorés (le banc remplace l'agent par `bin/fake-claude` / `bin/fake-codex`).
