@@ -660,7 +660,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (catalogue), faux agent
 - Source : audit/server/src/bridge/audit-gate.test.ts P1 (première boucle) ; commit 4a74f6a0
 - Priorité : jalon
-- Statut : bloqué : ostrom-server
+- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
 
 ### E2E-BYPASS-002 — Contournement : options avant le verbe de déploiement (piste 1b)
 
@@ -696,7 +696,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, faux agent
 - Source : audit/server/src/bridge/audit-gate.test.ts P2
 - Priorité : jalon
-- Statut : bloqué : ostrom-server
+- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
 
 ### E2E-BYPASS-006 — Contournement : git redirigé vers un autre dépôt (piste 3)
 
@@ -869,7 +869,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, faux agent
 - Source : audit/COORD/AUDIT-PORTE.md A9 ; audit/bridge/test/audit-push.test.mjs (4 cas) ; audit/launcher/tests/audit_push_refs.rs
 - Priorité : jalon
-- Statut : bloqué : ostrom-cli (hook)
+- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
 
 ### E2E-BYPASS-025 — Contournement A10 : écrire dans une session sans en être le propriétaire
 
