@@ -2994,6 +2994,35 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P1
 - Statut : bloqué : ostrom-server (compilateur) + ostrom-cli (hooks)
 
+## OBS : Observabilité (traces, télémétrie opt-in)
+
+### E2E-OBS-001 — Une trace CLI → serveur → passerelle
+
+- Étapes : banc avec un collecteur `otel/opentelemetry-collector-contrib` (exportateur fichier, modèle `ostrom-server/ci/otel-collector.yaml`) ; serveur lancé avec `OTEL_EXPORTER_OTLP_ENDPOINT` ; une commande CLI qui appelle l'API, puis un appel de modèle par la passerelle vers le faux fournisseur SSE.
+- Attendu : un seul `traceId` sur le span CLI (en-tête `traceparent`), le span SERVER `<méthode> <gabarit de route>` et le span CLIENT `gen_ai.chat` ; aucun prompt dans le fichier des traces.
+- Surfaces : CLI, serveur, passerelle, collecteur OTel
+- Source : JOURNAL du 30/10 04:20 (OBS)
+- Priorité : P1
+- Statut : bloqué : ostrom-server (observability, après socle) + ostrom-cli#8 + RELAY (passerelle)
+
+### E2E-OBS-002 — Rien ne part sans configuration
+
+- Étapes : serveur sans `OTEL_*`, `OSTROM_LANGFUSE_*` ni `OSTROM_POSTHOG_*` ; CLI sans `ostrom telemetry enable` ; un parcours complet (login, `ostrom claude`, porte, oui).
+- Attendu : zéro connexion sortante (faux DNS ou proxy qui compte les connexions).
+- Surfaces : CLI, serveur
+- Source : JOURNAL du 30/10 04:20 (OBS)
+- Priorité : P1
+- Statut : bloqué : ostrom-server (observability, après socle) + ostrom-cli#8 + RELAY (passerelle)
+
+### E2E-OBS-003 — Statistiques CLI opt-in
+
+- Étapes : `DO_NOT_TRACK=1`, puis `ostrom telemetry enable`, puis `ostrom telemetry status`.
+- Attendu : rien n'est envoyé ; `status` dit pourquoi (`DO_NOT_TRACK`).
+- Surfaces : CLI
+- Source : JOURNAL du 30/10 04:20 (OBS)
+- Priorité : P2
+- Statut : bloqué : ostrom-server (observability, après socle) + ostrom-cli#8 + RELAY (passerelle)
+
 ## Récapitulatif
 
 | Famille | Intitulé | Scénarios | dont jalon | P1 | P2 |
@@ -3034,6 +3063,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 | TC | Migration depuis le prototype et compatibilité TeamCode | 2 | 0 | 0 | 2 |
 | LOAD | Charge (k6) | 10 | 0 | 1 | 9 |
 | DOGFOOD | Le harnais ControlResell en workflows Ostrom | 3 | 0 | 3 | 0 |
-| **Total** | | **316** | **40** | **158** | **118** |
+| OBS | Observabilité (traces, télémétrie opt-in) | 3 | 0 | 2 | 1 |
+| **Total** | | **319** | **40** | **160** | **119** |
 
 Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-BYPASS-020, E2E-BYPASS-021, E2E-BYPASS-023, E2E-BYPASS-024, E2E-BYPASS-026, E2E-BYPASS-028, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.

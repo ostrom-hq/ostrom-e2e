@@ -14,6 +14,8 @@ ni suppression, historique linéaire.
 | ostrom-web | oui (#1) | 100 % imposé (Vitest, job `check`) | 21 | — | 3 (Playwright) | — | `check`, `e2e` (puis `ci`) | posée | — |
 | ostrom-app | oui (#4) | 100 % imposé (Jest, job `ci`) | 51 | 15 (MSW) | — (Maestro à brancher) | — | `ci` (Jest 100 %, puis Maestro) | posée | — |
 | ostrom-e2e | oui (#1, #2) | 100 % / 100 % imposé (job `ci`) | 30 | — | 2 (banc) + 4 parcours du jalon codés | 3 scripts k6 | `ci` | posée | — |
+| ostrom-site | oui | 100 % imposé (docs-tools, `node --test`, job `ci`) | 60 | — | blocs de code testés (`--strict`) | — | `ci` | posée | — |
+| ostrom-helm | oui (#1) | — (chart : helm-unittest, kubeconform, ct install sur kind) | helm-unittest | ct install | Docker Compose de bout en bout | — | `ci` | posée | — |
 
 ## Scénarios end-to-end (SCENARIOS.md)
 
@@ -59,7 +61,8 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | TC | 2 | 0 | 0 | 0 | 0 | 2 |
 | LOAD | 10 | 0 | 0 | 3 | 0 | 7 |
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
-| **Total** | 316 | 40 | 0 | 14 | 0 | 302 |
+| OBS | 3 | 0 | 0 | 0 | 0 | 3 |
+| **Total** | 319 | 40 | 0 | 14 | 0 | 305 |
 <!-- scenarios:end -->
 
 ## Charge
@@ -81,3 +84,5 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
   le banc tourne en un seul job `ci`.
 - 30/10 03:20 — Règles de CI de l'organisation (JOURNAL 03:10) : un seul job `ci` par PR, pas de CI sur un
   brouillon, `concurrency` annulant sauf sur `main`, caches ; check obligatoire `ci` partout. Gabarits mis à jour.
+- 30/10 04:30 — Règles de CI appliquées et fusionnées : e2e#6, app#11, site#10, helm#4, server#22 ; checks
+  obligatoires `ci` sur e2e, app, site, helm. Famille OBS ajoutée (3 scénarios, demande OBS 04:20).
