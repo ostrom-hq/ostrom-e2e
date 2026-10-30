@@ -3083,7 +3083,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image), PostgreSQL, faux Stripe
 - Source : ostrom-server#15 `StripeWebhooks.kt`, `HandleStripeEventUseCaseImpl`
 - Priorité : P1
-- Statut : codé : `scenarios/billing.e2e.ts` (rouge au run 41010125416 : une organisation inconnue est « processed », le test attendait « ignored » ; test corrigé sur un événement sans organisation, comportement signalé à BILLING)
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41011286496 (image ostrom-server@87f9d14), `scenarios/billing.e2e.ts`
 
 ### E2E-BILL-002 — Webhook : signature absente, fausse, périmée ou d'un autre corps
 
