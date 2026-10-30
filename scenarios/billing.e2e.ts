@@ -21,9 +21,11 @@ const post = (body: string, signature?: string) =>
   });
 
 describe.skipIf(!WEBHOOK_SERVED || STRIPE_WEBHOOK_SECRET === '')('E2E-BILL: Stripe webhook', () => {
-  it('E2E-BILL-001 a signed event is received once: unknown organization ignored, the same event id a duplicate', async () => {
+  it('E2E-BILL-001 a signed event is received once: an event of no organization ignored, the same event id a duplicate', async () => {
+    // No customer and no org_id: billing has nothing to act on. (An unknown org_id is processed: billing makes the
+    // organization's billing row on the fly, ostrom-server#15 `findBilling`; JOURNAL 07:10 QA → BILLING.)
     const id = `evt_e2e_${randomUUID().replaceAll('-', '')}`;
-    const body = stripeEvent(id, 'customer.subscription.updated', { object: 'subscription', id: 'sub_e2e', metadata: { org_id: randomUUID() } });
+    const body = stripeEvent(id, 'customer.subscription.updated', { object: 'subscription', id: 'sub_e2e', metadata: {} });
     const first = await post(body, stripeSignature(STRIPE_WEBHOOK_SECRET, body));
     expect(first.status).toBe(200);
     expect(await first.json()).toEqual({ received: true, outcome: 'ignored' });
