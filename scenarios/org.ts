@@ -3,14 +3,21 @@
 // that needs them stays skipped with the reason until the routes are on main.
 import { type Caller, headersOf } from '../src/isolation.ts';
 import { signInToken } from '../src/mail.ts';
-import { isServed } from '../src/probe.ts';
+import { firstServed, isServed } from '../src/probe.ts';
 import { MAIL_DIR, SERVER_URL } from './env.ts';
 
 export const url = (path: string) => SERVER_URL.replace(/\/$/, '') + path;
 
-/** Billing routes of the contract (`/v1/orgs/{orgId}/billing…`, outside `/api/v1`, JOURNAL 30/10 05:50). */
-export const BILLING = (orgId: string) => `/v1/orgs/${orgId}/billing`;
-export const STRIPE_WEBHOOK = '/v1/billing/stripe/webhook';
+// Billing routes: under `/api/v1/orgs/{orgId}/billing` (decision of 30/10 05:55), the Stripe webhook outside the prefix
+// at `/webhooks/stripe`. Until the contract and ostrom-server#15 move, the paths of the first contract (`/v1/…`) are
+// still probed, so the bench follows whichever the server serves, and needs no change the day it moves.
+const SAMPLE_ORG = '00000000-0000-4000-8000-000000000000';
+let billingBase = '/api/v1/orgs';
+if (SERVER_URL !== '' && !(await isServed(SERVER_URL, `${billingBase}/${SAMPLE_ORG}/billing`)) && (await isServed(SERVER_URL, `/v1/orgs/${SAMPLE_ORG}/billing`))) {
+  billingBase = '/v1/orgs';
+}
+export const BILLING = (orgId: string) => `${billingBase}/${orgId}/billing`;
+export const STRIPE_WEBHOOK = (SERVER_URL !== '' && (await firstServed(SERVER_URL, ['/webhooks/stripe', '/v1/billing/stripe/webhook'], 'POST'))) || '/webhooks/stripe';
 
 export interface Person {
   readonly email: string;
