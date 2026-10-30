@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeGitHub } from '../src/fake-github.ts';
 import { isServed } from '../src/probe.ts';
 import { DATABASE_ADMIN_URL, FAKE_GITHUB_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
-import { address, call, cookiesOf, email, invite, join, mailedToken, orgOf, signIn, url } from './org.ts';
+import { address, call, cookiesOf, email, invite, join, mailedToken, orgOf, profileOf, signIn, url } from './org.ts';
 
 const served = async (method: string, path: string) => SERVER_URL !== '' && (await isServed(SERVER_URL, path, method));
 const EMAIL_SIGN_IN = MAIL_DIR !== '' && (await served('POST', '/api/v1/auth/email')) && (await served('POST', '/api/v1/auth/email/verify'));
@@ -38,9 +38,9 @@ describe.skipIf(!EMAIL_SIGN_IN || !ME)('E2E-AUTH: sign-in by e-mailed link', () 
     expect(session).toMatch(/HttpOnly/i);
     expect(session).toMatch(/SameSite=(Lax|Strict)/i);
     expect(session).toMatch(/Path=\//i);
-    const profile = await me({ cookie: cookiesOf(first), from });
+    const profile = await profileOf({ cookie: cookiesOf(first), from });
     expect(profile.status).toBe(200);
-    expect(profile.body['primaryEmail']).toBe(who);
+    expect(profile.primaryEmail).toBe(who);
     // The same link a second time, then a token nobody was sent: no session either time.
     for (const t of [token, randomUUID().replaceAll('-', '')]) {
       const again = await verify(t);
@@ -94,9 +94,9 @@ describe.skipIf(!GITHUB)(`E2E-AUTH: sign-in with GitHub (fake GitHub on :${FAKE_
     const exchange = gh.requests.find((r) => r.path === '/login/oauth/access_token');
     expect(exchange?.body).toMatchObject({ code, client_id: 'Iv1.e2ebench', client_secret: 'e2e-bench-fake-github' });
     expect(String((exchange?.body as Record<string, unknown>)['code_verifier'] ?? '')).toMatch(/.{32,}/);
-    const profile = await me({ cookie: cookiesOf(back), from });
+    const profile = await profileOf({ cookie: cookiesOf(back), from });
     expect(profile.status).toBe(200);
-    expect(profile.body).toMatchObject({ login, primaryEmail: `${login}@e2e.ostrom.test` });
+    expect({ login: profile.login, primaryEmail: profile.primaryEmail }).toEqual({ login, primaryEmail: `${login}@e2e.ostrom.test` });
 
     // Refusals land on the console's login page with an error code, and set no session.
     const refusals: [string, Record<string, string>, (s: string) => string][] = [
@@ -152,9 +152,11 @@ describe.skipIf(!EMAIL_SIGN_IN || !DEVICE || !ME)('E2E-AUTH: device login of the
     expect(scopes).toContain('profile:read');
     expect(scopes).not.toContain('gates:answer');
     expect(scopes).not.toContain('user:*');
-    const profile = await me({ token: cliToken });
+    // The CLI token reads who it is (`/auth/me`), and names the person who approved it.
+    expect((await me({ token: cliToken })).status).toBe(200);
+    const profile = await profileOf({ token: cliToken });
     expect(profile.status).toBe(200);
-    expect(profile.body['primaryEmail']).toBe(person.email);
+    expect(profile.primaryEmail).toBe(person.email);
     // The device code was spent: polling again never gives a second token.
     await sleep(interval * 1000 + 500);
     expect((await poll(deviceCode, from)).status).not.toBe('approved');
@@ -290,11 +292,11 @@ describe.skipIf(!STEP_UP_READY)(`E2E-AUTH: step-up of a yes${STEP_UP_READY ? '' 
     expect((await invite(requester, org.id, [approverEmail], 'admin')).status).toBe(200);
     const { person: approver, accepted } = await join(approverEmail);
     expect(accepted.status).toBe(200);
-    const me = await call(approver.caller, 'GET', '/api/v1/auth/me');
+    const who = await profileOf(approver.caller);
     const repo = `acme/stepup-${Date.now().toString(36)}`;
     const workflow = await call(requester.caller, 'POST', '/api/v1/workflows', {
       id: `stepup-${Date.now().toString(36)}`, name: 'step-up', domain: 'delivery', status: 'accepted', foundAt: new Date().toISOString(),
-      nodes: [{ id: 'push-main', kind: 'gate', label: 'Push to main', approvers: [me.body['login']], actions: [{ class: 'push-main', label: 'Push to the main branch', patterns: [], repos: [repo] }] }],
+      nodes: [{ id: 'push-main', kind: 'gate', label: 'Push to main', approvers: [who.login], actions: [{ class: 'push-main', label: 'Push to the main branch', patterns: [], repos: [repo] }] }],
       edges: [],
     });
     expect(workflow.status, JSON.stringify(workflow.body)).toBeLessThan(300);
@@ -309,7 +311,7 @@ describe.skipIf(!STEP_UP_READY)(`E2E-AUTH: step-up of a yes${STEP_UP_READY ? '' 
     expect(mine, JSON.stringify(pending.body)).toBeDefined();
     const answer = (who: typeof approver) => call(who.caller, 'POST', `/api/v1/approvals/${mine?.id}/answer`, { answer: 'approve', shownDigest: mine?.shownDigest });
 
-    ageSessions(String(me.body['id']), 6);
+    ageSessions(who.id, 6);
     const stale = await answer(approver);
     expect(stale.status).toBe(403);
     expect(stale.body['error']).toMatchObject({ type: 'step_up_required' });

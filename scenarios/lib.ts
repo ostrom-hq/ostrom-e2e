@@ -12,7 +12,7 @@ import { FakeGitHub } from '../src/fake-github.ts';
 import { GIT_ENV } from '../src/git.ts';
 import { isServed } from '../src/probe.ts';
 import { CLI_BIN, FAKE_CLAUDE, FAKE_CODEX, SERVER_URL } from './env.ts';
-import { type Person as Browser, address, call, email, invite, join, orgOf, orgsUnavailable, signIn, url } from './org.ts';
+import { type Person as Browser, address, call, email, invite, join, orgOf, orgsUnavailable, profileOf, signIn, url } from './org.ts';
 
 export interface Run {
   readonly code: number | null;
@@ -258,9 +258,9 @@ export interface RealWorld {
 
 /** The member signed in as `browser`, with a clean terminal (not logged in yet). */
 export async function member(browser: Browser): Promise<Member> {
-  const me = await call(browser.caller, 'GET', '/api/v1/auth/me');
-  const login = me.body['login'];
-  if (me.status !== 200 || typeof login !== 'string') throw new Error(`GET /api/v1/auth/me → ${me.status} ${JSON.stringify(me.body)}`);
+  const me = await profileOf(browser.caller);
+  const login = me.login;
+  if (me.status !== 200 || login === '') throw new Error(`profile → ${me.status} ${JSON.stringify(me.body)}`);
   const m: Member = {
     email: browser.email,
     login,

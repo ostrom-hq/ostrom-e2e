@@ -39,6 +39,29 @@ export async function call(caller: Caller, method: string, path: string, body?: 
   return { status: r.status, headers: r.headers, body: parsed as Record<string, unknown> };
 }
 
+/** Who a credential is: its id, login and primary e-mail. */
+export interface Profile {
+  readonly status: number;
+  readonly id: string;
+  readonly login: string;
+  readonly primaryEmail: string;
+  readonly body: Record<string, unknown>;
+}
+
+/**
+ * The profile of the credential's person. Since the decision of 30/10 11:50, `GET /api/v1/auth/me` is the contract's
+ * `Me` (`dev.login`, member, organization, capabilities) and the account (id, primaryEmail, emails, providers) moves
+ * to `GET /api/v1/auth/me/account`. Reads the account when it is served, else the older `/auth/me`, the same way.
+ */
+export async function profileOf(caller: Caller): Promise<Profile> {
+  const account = await call(caller, 'GET', '/api/v1/auth/me/account');
+  const r = account.status === 404 || account.status === 405 ? await call(caller, 'GET', '/api/v1/auth/me') : account;
+  const b = r.body ?? {};
+  const dev = (b['dev'] as Record<string, unknown> | undefined) ?? {};
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  return { status: r.status, id: text(b['id']), login: text(b['login'] ?? dev['login']), primaryEmail: text(b['primaryEmail']), body: b };
+}
+
 /** Why people and organizations cannot be made yet, or '' when they can (routes of ostrom-server#51). */
 export async function orgsUnavailable(): Promise<string> {
   if (SERVER_URL === '') return 'no server';

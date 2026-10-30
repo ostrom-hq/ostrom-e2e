@@ -8,7 +8,7 @@
 import { appendFileSync } from 'node:fs';
 import { isServed } from '../src/probe.ts';
 import { SERVER_URL } from '../scenarios/env.ts';
-import { call, email, invite, join, orgOf, orgsUnavailable, signIn } from '../scenarios/org.ts';
+import { call, email, invite, join, orgOf, orgsUnavailable, profileOf, signIn } from '../scenarios/org.ts';
 
 const REPO = process.env['OSTROM_LOAD_REPO'] ?? 'acme/api';
 const out = (file: string | undefined, line: string) => (file ? appendFileSync(file, `${line}\n`) : console.log(line));
@@ -32,9 +32,9 @@ async function setup(): Promise<string> {
   if (token.status !== 201 || typeof secret !== 'string') return `token → ${token.status} ${JSON.stringify(token.body)}`;
   // The approver of pushes to main of REPO comes from an accepted workflow whose gate node names rev-b's login
   // (contract `Workflow`/`WorkflowNode`/`GateAction`, action class `push-main` of the compiler, ostrom-server#43).
-  const reviewer = await call(revB.caller, 'GET', '/api/v1/auth/me');
-  const login = reviewer.body['login'];
-  if (typeof login !== 'string') return `rev-b profile → ${reviewer.status} ${JSON.stringify(reviewer.body)}`;
+  const reviewer = await profileOf(revB.caller);
+  const login = reviewer.login;
+  if (login === '') return `rev-b profile → ${reviewer.status} ${JSON.stringify(reviewer.body)}`;
   const workflow = await call(devA.caller, 'POST', '/api/v1/workflows', {
     id: `k6-push-main-${Date.now().toString(36)}`,
     name: 'k6 push to main',

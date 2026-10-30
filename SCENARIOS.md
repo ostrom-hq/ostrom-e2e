@@ -2877,7 +2877,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 ### E2E-AUTH-001 — Connexion par lien e-mail, une seule fois
 
 - Étapes : `POST /api/v1/auth/email` (adresse propre à la personne, `X-Forwarded-For` d'une adresse à elle), le lien est lu dans `OSTROM_MAIL_DIR`, `POST /api/v1/auth/email/verify` ; puis le même lien une seconde fois, et un jeton inventé.
-- Attendu : 200 `{redirect, csrfToken}`, cookie de session `HttpOnly`, `SameSite`, `Path=/` ; `GET /api/v1/auth/me` rend l'adresse ; le lien réutilisé et le jeton inventé : 4xx, aucun cookie de session.
+- Attendu : 200 `{redirect, csrfToken}`, cookie de session `HttpOnly`, `SameSite`, `Path=/` ; `GET /api/v1/auth/me/account` rend l'adresse (le compte quitte `GET /auth/me`, qui devient le `Me` du contrat : décision du 30/10 11:50, JOURNAL 12:10 ; le banc lit `/auth/me` tant que `/me/account` n'est pas servi) ; le lien réutilisé et le jeton inventé : 4xx, aucun cookie de session.
 - Surfaces : serveur (image), identité
 - Source : ostrom-server#10 (`SignInRoutes.kt`) ; contrat 0.1.140 `requestMagicLink`, `verifyMagicLink`
 - Priorité : jalon
@@ -2886,7 +2886,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 ### E2E-AUTH-002 — Connexion GitHub (faux GitHub), PKCE et `state` liés au navigateur
 
 - Étapes : le serveur est lancé avec `OSTROM_GITHUB_WEB_URL`/`OSTROM_GITHUB_API_URL` sur le faux GitHub du banc (port 4610) et un client OAuth factice ; `GET /api/v1/auth/github/start`, le faux GitHub rend un code ; `GET …/callback?code&state` avec le cookie de `state` ; puis un `state` d'un autre navigateur, un code déjà utilisé, un refus sur GitHub.
-- Attendu : 302 vers `/login/oauth/authorize` (client, `S256`, `user:email`, `state`) ; l'échange porte `client_secret` et `code_verifier` ; 302 vers la console + session, `GET /auth/me` = le login GitHub et son adresse vérifiée ; les trois refus : 302 vers `/login?error=…`, aucune session.
+- Attendu : 302 vers `/login/oauth/authorize` (client, `S256`, `user:email`, `state`) ; l'échange porte `client_secret` et `code_verifier` ; 302 vers la console + session, `GET /auth/me/account` = le login GitHub et son adresse vérifiée (`/auth/me` avant le déplacement du compte) ; les trois refus : 302 vers `/login?error=…`, aucune session.
 - Surfaces : serveur (image), identité, faux GitHub (`src/fake-github.ts`)
 - Source : ostrom-server#10 (`OAuthProviders.kt`, `SignInRoutes.kt`)
 - Priorité : jalon
@@ -2895,7 +2895,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 ### E2E-AUTH-003 — Connexion d'appareil (RFC 8628) : un jeton CLI, une fois
 
 - Étapes : `POST /api/v1/auth/device` ; poll (`pending`) ; la personne connectée voit la demande (`GET /api/v1/auth/device?userCode`) et l'accepte (`POST …/device/answer`) ; poll après l'intervalle ; poll encore ; une seconde demande refusée.
-- Attendu : `approved` avec un jeton dont les portées n'ont ni `gates:answer` ni `user:*`, `GET /auth/me` avec lui = la même personne ; le code ne donne jamais un second jeton ; la demande refusée rend `denied` sans jeton.
+- Attendu : `approved` avec un jeton dont les portées n'ont ni `gates:answer` ni `user:*`, `GET /auth/me` avec lui répond 200, et `GET /auth/me/account` (ou `/auth/me` avant le déplacement) donne l'adresse de la même personne ; le code ne donne jamais un second jeton ; la demande refusée rend `denied` sans jeton.
 - Surfaces : serveur (image), identité
 - Source : ostrom-server#10 (`IdentityRoutes.kt`, `DeviceUseCases.kt`, `CLI_SCOPES`)
 - Priorité : jalon
@@ -3217,7 +3217,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 
 ### E2E-ISO-002 — La console de B ne montre rien de A
 
-- Étapes : A renomme son organisation avec une marque unique, invite une adresse marquée, crée un jeton marqué et ses ressources ; la session de B lit tout ce que lit la console : `/auth/me`, `/auth/me/audit`, `/tokens`, `/orgs`, son organisation, ses membres, invitations, facturation et factures, et la liste de chaque ressource.
+- Étapes : A renomme son organisation avec une marque unique, invite une adresse marquée, crée un jeton marqué et ses ressources ; la session de B lit tout ce que lit la console : `/auth/me`, `/auth/me/account`, `/auth/me/audit`, `/tokens`, `/orgs`, son organisation, ses membres, invitations, facturation et factures, et la liste de chaque ressource.
 - Attendu : aucune réponse ne porte la marque, l'id, le slug, l'e-mail, le login de A, l'invité de A ni l'id d'une ressource de A ; aucune 5xx.
 - Surfaces : serveur (image), console (réponses lues par ostrom-web)
 - Source : demande WEB relayée par l'orchestrateur le 30/10 10:00

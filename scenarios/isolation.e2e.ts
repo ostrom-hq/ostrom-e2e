@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { type RouteCase, intrusions } from '../src/isolation.ts';
 import { isServed } from '../src/probe.ts';
 import { SERVER_URL } from './env.ts';
-import { BILLING, type Org, type Person, call, email, invite, orgOf, orgsUnavailable, signIn } from './org.ts';
+import { BILLING, type Org, type Person, call, email, invite, orgOf, orgsUnavailable, profileOf, signIn } from './org.ts';
 
 const ORGS = await orgsUnavailable();
 
@@ -69,8 +69,7 @@ interface Side {
 async function side(who: string): Promise<Side> {
   const person = await signIn(email(who));
   const org = await orgOf(person);
-  const me = await call(person.caller, 'GET', '/api/v1/auth/me');
-  return { person, org, login: String(me.body['login']) };
+  return { person, org, login: (await profileOf(person.caller)).login };
 }
 
 /** A's own resources, made through the API: the routes B then calls with their ids, and what A could not make. */
@@ -106,6 +105,7 @@ function consoleReads(b: Side): string[] {
   const o = `/api/v1/orgs/${b.org.id}`;
   return [
     '/api/v1/auth/me',
+    '/api/v1/auth/me/account',
     '/api/v1/auth/me/audit',
     '/api/v1/tokens',
     '/api/v1/orgs',
