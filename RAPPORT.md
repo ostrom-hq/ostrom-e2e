@@ -80,8 +80,8 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
 | SRV-003 | erreurs 404/405 en `{"error":{type,message}}` | vert | [40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849) |
 | SRV-004 | `X-Request-Id` gardé ou remplacé | vert | [40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849) |
 | LOAD-011 | k6 `health,instance`, p95 < 50 ms, p99 < 100 ms | vert | [40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849) : `/health` p95 1,31 ms / p99 2,14 ms ; `/api/v1/instance` p95 1,92 ms / p99 3,04 ms ; 0 erreur sur 6 002 requêtes |
-| BILL-001 à 003 | webhook Stripe signé : reçu une fois, signatures refusées (400), > 256 Kio (413) | manquant | s'allume seul quand ostrom-server#15 est sur `main` (`/v1/billing/stripe/webhook` servi) |
-| BILL-004 | routes de facturation sans identifiants : 401 + `WWW-Authenticate` | manquant | idem (`/v1/orgs/{id}/billing` servi) |
+| BILL-001 à 003 | webhook Stripe signé : reçu une fois, signatures refusées (400), > 256 Kio (413) | manquant | s'allume seul quand ostrom-server#15 est sur `main` (`/webhooks/stripe` servi, ou l'ancien `/v1/billing/stripe/webhook`) |
+| BILL-004 | routes de facturation sans identifiants : 401 + `WWW-Authenticate` | manquant | idem (`/api/v1/orgs/{id}/billing` servi, ou l'ancien `/v1/orgs/…`) |
 | BILL-005 à 007 | checkout Stripe test, 402 au-delà de 5 personnes en Free, 403 sans rôle de facturation | manquant | ostrom-server#15 + identité #18 (lien e-mail) + orgs (invitations) |
 | ISO-001 | B ne lit ni n'écrit rien de A, sur chaque route d'organisation servie | manquant | identité #18 + orgs (une table d'organisation servie) ; la table des routes grandit seule |
 | LOGIN-001, CLAUDE-001/003, GATE-001, YES-001/003, YESCLI-002, RECEIPT-001 | jalon | manquant | ostrom-cli#1 (login, `ostrom claude`) ; portes, oui et reçus côté serveur (GATES) |

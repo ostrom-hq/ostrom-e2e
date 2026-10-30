@@ -3074,7 +3074,7 @@ Servi par ostrom-server#1 (4fe38dd). Testé de l'extérieur sur l'image distrole
 
 ## BILL : Facturation (abonnement Stripe, limites du plan)
 
-Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec `stripe-mock` derrière (`OSTROM_STRIPE_API_BASE`), le banc qui joue les webhooks de Stripe (`src/stripe.ts`), les liens de connexion lus dans `OSTROM_MAIL_DIR` (`src/mail.ts`). Chaque partie s'allume seule le jour où ses routes sont sur main (`src/probe.ts`) : `scenarios/billing.e2e.ts`. Chemins du contrat : `/v1/orgs/{orgId}/billing…` et `/v1/billing/stripe/webhook`, hors du préfixe `/api/v1` (JOURNAL 30/10 05:50).
+Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec `stripe-mock` derrière (`OSTROM_STRIPE_API_BASE`), le banc qui joue les webhooks de Stripe (`src/stripe.ts`), les liens de connexion lus dans `OSTROM_MAIL_DIR` (`src/mail.ts`). Chaque partie s'allume seule le jour où ses routes sont sur main (`src/probe.ts`) : `scenarios/billing.e2e.ts`. Chemins : `/api/v1/orgs/{orgId}/billing…` et le webhook entrant `/webhooks/stripe`, hors préfixe (décision du 30/10 05:55) ; tant que le contrat et ostrom-server#15 gardent `/v1/orgs/{orgId}/billing…` et `/v1/billing/stripe/webhook`, le banc sonde aussi ces chemins et suit celui que le serveur sert.
 
 ### E2E-BILL-001 — Webhook signé : reçu une fois
 
@@ -3105,7 +3105,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 
 ### E2E-BILL-004 — Routes de facturation sans identifiants
 
-- Étapes : les 7 routes `/v1/orgs/{orgId}/billing…` sans jeton ni session.
+- Étapes : les 7 routes `/api/v1/orgs/{orgId}/billing…` sans jeton ni session.
 - Attendu : 401 `unauthorized`, `WWW-Authenticate: Bearer`, sur chacune.
 - Surfaces : serveur (image)
 - Source : ostrom-server#15 `BillingRoutes.kt`
