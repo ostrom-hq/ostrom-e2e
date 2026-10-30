@@ -1,7 +1,7 @@
 # Tableau de bord des tests d'Ostrom
 
 Tenu par l'agent QA. Règle (Lyes, 30/10/2026) : unitaires, intégration, end-to-end et charge, 100 % des lignes et
-des branches imposé par la CI, checks obligatoires sur `main`. Mis à jour le 30/10/2026 à 02:45. « posée » = PR obligatoire, à jour avec `main`, admins compris, ni force-push
+des branches imposé par la CI, checks obligatoires sur `main`. Mis à jour le 30/10/2026 à 10:55. « posée » = PR obligatoire, à jour avec `main`, admins compris, ni force-push
 ni suppression, historique linéaire.
 
 ## Par dépôt
@@ -13,7 +13,7 @@ ni suppression, historique linéaire.
 | ostrom-server | oui (#1, 4fe38dd) | Kover 100 % lignes et branches par module (job `ci`, `koverVerify`) ; `ops/stripe` 100 % | jvmTest + linuxX64Test | PostgreSQL 17 dans `ci` | image distroless testée par le banc (SRV-001 à 004) | k6 `health,instance` sur l'image (banc) | `ci` | posée (`ci`, non stricte) | [40996470171](https://github.com/ostrom-hq/ostrom-server/actions/runs/40996470171) |
 | ostrom-web | oui (#1) | 100 % imposé (Vitest, job `check`) | 21 | — | 3 (Playwright) | — | `check`, `e2e` (puis `ci`) | posée | — |
 | ostrom-app | oui (#4) | 100 % imposé (Jest, job `ci`) | 51 | 15 (MSW) | — (Maestro à brancher) | — | `ci` (Jest 100 %, puis Maestro) | posée | — |
-| ostrom-e2e | oui (#1, #2, #6, #7, #11) | 100 % / 100 % imposé (job `ci`) | 30 | — | 2 (banc) + 4 parcours du jalon codés + 4 SRV sur l'image serveur | 3 scripts k6, smoke dans `ci` | `ci` | posée | [40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849) |
+| ostrom-e2e | oui (#1 à #18 ; #19 rouge sur un bug serveur) | 100 % / 100 % imposé (job `ci`) | 43 | — | 2 (banc) + 4 SRV + 6 AUTH + 7 BILL + 2 ISO sur l'image serveur, 4 parcours du jalon codés | 3 scripts k6, smoke dans `ci` | `ci` | posée | [41011286496](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41011286496) (`main` ; voir le faux vert plus bas) |
 | ostrom-site | oui | 100 % imposé (docs-tools, `node --test`, job `ci`) | 60 | — | blocs de code testés (`--strict`) | — | `ci` | posée | — |
 | ostrom-helm | oui (#1) | — (chart : helm-unittest, kubeconform, ct install sur kind) | helm-unittest | ct install | Docker Compose de bout en bout | — | `ci` | posée | — |
 
@@ -59,13 +59,14 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | HARNESS | 8 | 0 | 0 | 0 | 0 | 8 |
 | DIST | 4 | 0 | 0 | 0 | 0 | 4 |
 | TC | 2 | 0 | 0 | 0 | 0 | 2 |
+| AUTH | 6 | 6 | 5 | 1 | 0 | 0 |
 | LOAD | 11 | 0 | 1 | 3 | 0 | 7 |
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
 | OBS | 3 | 0 | 0 | 0 | 0 | 3 |
 | SRV | 4 | 2 | 4 | 0 | 0 | 0 |
 | BILL | 7 | 0 | 4 | 3 | 0 | 0 |
-| ISO | 1 | 1 | 0 | 1 | 0 | 0 |
-| **Total** | 332 | 43 | 9 | 18 | 0 | 305 |
+| ISO | 2 | 2 | 0 | 2 | 0 | 0 |
+| **Total** | 339 | 50 | 14 | 20 | 0 | 305 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un
@@ -84,11 +85,18 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
 | BILL-002 | signatures absente, fausse, périmée, future, d'un autre corps : 400, rien d'enregistré | vert | [41010125416](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416) (ostrom-server@87f9d14) |
 | BILL-003 | événement > 256 Kio : 413 | vert | [41010125416](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416) |
 | BILL-004 | 7 routes `/api/v1/orgs/{id}/billing…` sans identifiants : 401 + `WWW-Authenticate: Bearer` | vert | [41010125416](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416) |
-| BILL-005 à 007 | checkout Stripe test, 402 au-delà de 5 personnes en Free, 403 sans rôle de facturation | manquant | ostrom-server#15 + identité #18 (lien e-mail) + orgs (invitations) |
-| ISO-001 | B ne lit ni n'écrit rien de A, sur chaque route d'organisation servie | manquant | identité #18 + orgs (une table d'organisation servie) ; la table des routes grandit seule |
+| AUTH-001 | lien par e-mail : une seule connexion, cookie HttpOnly/SameSite, CSRF, profil ; lien réutilisé ou forgé refusé | vert | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057) (PR ostrom-e2e#19, image ostrom-server@a3b551d, rôle `ostrom_app`) |
+| AUTH-002 | GitHub OAuth (faux GitHub du banc) : PKCE S256, `state` lié au navigateur, secret et `code_verifier` à l'échange ; mauvais `state`, code rejoué, refus → `/login?error=` sans session | vert | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057) |
+| AUTH-003 | connexion d'appareil de la CLI (RFC 8628) : oui dans le navigateur, un jeton sans `gates:answer` ni `user:*`, une seule fois ; code refusé → `denied` | vert | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057) |
+| AUTH-004 | jeton révoqué, jeton tourné, déconnexion, « partout » : refusés à l'appel suivant | vert | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057) |
+| AUTH-005 | sans identifiant ou mauvais : 401 + `WWW-Authenticate: Bearer` ; écriture sans CSRF refusée ; jeton sur route navigateur 403 ; portées `gates:answer`, `user:*`, `agent:session` refusées | vert | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057) |
+| AUTH-006 | un jeton CLI ne dit jamais oui (403, `step_up_required`) | manquant | sauté au run [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057) : le jeton reçoit 403 `forbidden` (session navigateur exigée d'abord), sans risque ; le cas `step_up_required` (session de plus de 5 min) reste à jouer |
+| BILL-005 à 007 | checkout Stripe test, 402 au-delà de 5 personnes en Free, 403 sans rôle de facturation | rouge | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057) : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`. `OrgsRepositoryImpl.create` insère hors `inOrg`, et la RLS refuse la ligne. Bug serveur signalé à AUTH-REPRISE (JOURNAL 10:48) ; le banc ne le contourne pas |
+| ISO-001 | B ne lit, n'écrit ni ne liste rien de A : organisation, membres, invitations, facturation, sessions, artefacts, secrets MCP, automations, attentes, budgets, reçus, approbations, comptes, usage | rouge | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057) : même 500 à la création des deux organisations |
+| ISO-002 | pendant console (demande WEB) : rien de A dans ce que la console lit pour B | rouge | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057) : même 500 |
 | LOGIN-001, CLAUDE-001/003, GATE-001, YES-001/003, YESCLI-002, RECEIPT-001 | jalon | manquant | ostrom-cli#1 (login, `ostrom claude`) ; portes, oui et reçus côté serveur (GATES) |
 | BYPASS-001/005/024 | contournements | manquant | idem (porte servie par le serveur, hooks par la CLI) |
-| LOAD-002/006 | portes + oui, course de 100 oui (1 × 200, 99 × 409) | manquant | prêts : `scripts/load-setup.ts` dit ce qui manque à chaque run (portes #8, identité #10/#18, orgs, workflows) ; tournent dès `ready=true` |
+| LOAD-002/006 | portes + oui, course de 100 oui (1 × 200, 99 × 409) | manquant | prêts ; au run [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057), la mise en place des charges est sautée après le rouge des organisations (« gate load : not run ») ; puis il faut ostrom-server#43 (compilateur, `POST /api/v1/workflows`) |
 | LOAD-003 | soak + rampe (nuit) | manquant | idem pour les portes ; `/health` seul la nuit d'ici là |
 
 ## Charge
@@ -96,7 +104,7 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
 | Script | Quand | Seuils | Dernier résultat |
 |---|---|---|---|
 | `load/smoke.js` | chaque PR et `main` du banc (`health,instance` sur l'image serveur) ; chaque PR serveur | p95/p99 : `/health` et `/api/v1/instance` 50/100 ms à 50 req/s, question de hook `POST /api/v1/gates` 50/150 ms, push sur main + oui 150/400 ms ; erreurs < 1 %, checks > 99 % | `health,instance` vert ([40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849), 50 req/s × 60 s chacun) : p95/p99 1,31/2,14 ms et 1,92/3,04 ms, 0 % d'erreurs ; portes : pas encore servies |
-| `load/race.js` | chaque PR et `main` du banc + nuit, dès que `scripts/load-setup.ts` écrit `ready=true` | 100 oui simultanés sur la demande de l'approbateur : 1 × 200, 99 × 409, rien d'autre | prêt, en attente des portes, de l'identité, des orgs et des workflows sur `main` |
+| `load/race.js` | chaque PR et `main` du banc + nuit, dès que `scripts/load-setup.ts` écrit `ready=true` | 100 oui simultanés sur la demande de l'approbateur : 1 × 200, 99 × 409, rien d'autre | prêt ; pas lancé : création d'organisation en 500 (run 41034102057), puis compilateur #43 |
 | `load/soak.js` | nuit | 20 min à 500 questions/s + 50 portes/s, rampe 2 000/s p99 < 500 ms | bloqué : pas encore de serveur |
 
 ## Journal
@@ -126,3 +134,20 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
   webhook à `/api/v1/billing/stripe/webhook` (pas `/webhooks/stripe` : signalé à BILLING). BILL-002 à 004 verts ([41010125416](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416)) ;
   BILL-001 rouge sur une hypothèse du banc (organisation inconnue `processed`), corrigé ; BILL-005 à 007 attendent l'identité et les orgs.
 - 30/10 07:25 — BILL-001 vert ([41011286496](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41011286496)) : BILL-001 à 004 verts contre ostrom-server@87f9d14.
+- 30/10 10:00 — **Faux vert sur `main` du banc** : le run [41028221230](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41028221230) est vert, mais
+  ni le serveur ni la CLI n'y sont construits. GitHub Packages répond 401 sur ostrom-core au jeton d'un autre dépôt, et les
+  constructions étaient facultatives. Correction dans ostrom-e2e#19 : ostrom-core est récupéré par clé de déploiement à
+  `gradle/ostrom-core.ref`, et les constructions deviennent obligatoires.
+- 30/10 10:05 — ostrom-e2e#19 : scénarios AUTH-001 à 006 alignés sur les routes servies (contrat 0.1.140) ; faux GitHub sur
+  :4610 ; routes de #51 (`/api/v1/orgs`, invitations) ; ISO-001 étendu à toutes les ressources servies et ISO-002 (console).
+- 30/10 10:30 — Le serveur de `main` refuse un rôle qui contourne la RLS (run [41030017522](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41030017522)).
+  Le banc et les gabarits appliquent maintenant `ci/database-roles.sql` : `migrate` en `ostrom_owner`, service en `ostrom_app`,
+  comme en production. Le run 41031154110 a été annulé deux fois pendant l'édition de liens de la CLI, faute de mémoire ; les
+  démons Gradle sont maintenant arrêtés entre les deux constructions.
+- 30/10 10:45 — Run [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057), image ostrom-server@a3b551d (#10, #51, #59) :
+  - verts : AUTH-001 à 005, BILL-001 à 004, SRV-001 à 004, banc ;
+  - sauté : AUTH-006 ;
+  - rouges : BILL-005 à 007 et ISO-001/002, sur un bug serveur (`POST /api/v1/orgs` → 500 sous `ostrom_app`), signalé à
+    AUTH-REPRISE.
+
+  ostrom-e2e#19 reste rouge jusqu'au correctif, puis sera relancée et fusionnée.
