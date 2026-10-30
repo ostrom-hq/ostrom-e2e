@@ -25,7 +25,6 @@
   <a href="CONTRIBUTING.md#tests-the-bar"><img alt="Coverage: 100% enforced" src="https://img.shields.io/badge/coverage-100%25%20enforced-8E1B3A"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-8E1B3A"></a>
   <a href="CHANGELOG.md"><img alt="Version: pre-1.0" src="https://img.shields.io/badge/version-pre--1.0-44393C"></a>
-  <a href="https://github.com/ostrom-hq/ostrom-core/blob/main/docs/OPEN-SOURCE.md"><img alt="OpenSSF Scorecard: checked weekly" src="https://img.shields.io/badge/OpenSSF%20Scorecard-checked%20weekly-44393C"></a>
 </p>
 
 ## What this is
