@@ -116,19 +116,20 @@ describe.skipIf(!GITHUB)(`E2E-AUTH: sign-in with GitHub (fake GitHub on :${FAKE_
 });
 
 describe.skipIf(!EMAIL_SIGN_IN || !DEVICE || !ME)('E2E-AUTH: device login of the CLI (RFC 8628)', () => {
-  // Two shapes: main's (200 `{status, accessToken?, scopes?}`), and the contract's of ostrom-server#62 (428 while
-  // pending, 400 `access_denied` / `expired_token` / `slow_down`, 200 `AuthToken {token, login, scopes}`).
-  type Poll = { status: string; accessToken?: string | undefined; scopes?: string[] | undefined };
+  // The contract's poll, served since ostrom-server#62: 428 while pending, 400 `access_denied` / `expired_token` /
+  // `slow_down`, 200 `AuthToken {token, login, scopes}` once. The older 200 `{status}` is still read, and then fails
+  // the `http` checks below.
+  type Poll = { http: number; status: string; accessToken?: string | undefined; scopes?: string[] | undefined; login?: string | undefined };
   const poll = async (deviceCode: string, from: string): Promise<Poll> => {
     const r = await call({ from }, 'POST', '/api/v1/auth/device/token', { deviceCode });
     const b = r.body ?? {};
-    if (r.status === 428) return { status: 'pending' };
+    if (r.status === 428) return { http: 428, status: 'pending' };
     if (r.status === 400) {
       const type = (b['error'] as { type?: string } | undefined)?.type ?? '';
-      return { status: ({ access_denied: 'denied', expired_token: 'expired' } as Record<string, string>)[type] ?? type };
+      return { http: 400, status: ({ access_denied: 'denied', expired_token: 'expired' } as Record<string, string>)[type] ?? type };
     }
-    if (r.status === 200 && typeof b['token'] === 'string') return { status: 'approved', accessToken: b['token'] as string, scopes: b['scopes'] as string[] };
-    return { status: String(b['status'] ?? r.status), accessToken: b['accessToken'] as string | undefined, scopes: b['scopes'] as string[] | undefined };
+    if (r.status === 200 && typeof b['token'] === 'string') return { http: 200, status: 'approved', accessToken: b['token'] as string, scopes: b['scopes'] as string[], login: b['login'] as string };
+    return { http: r.status, status: String(b['status'] ?? r.status), accessToken: b['accessToken'] as string | undefined, scopes: b['scopes'] as string[] | undefined };
   };
 
   it('E2E-AUTH-003 a device code is approved in the signed-in browser, gives one CLI token (no answering scope), once; a denied code gives none', async () => {
@@ -138,7 +139,7 @@ describe.skipIf(!EMAIL_SIGN_IN || !DEVICE || !ME)('E2E-AUTH: device login of the
     expect(started.status).toBe(200);
     const { deviceCode, userCode, verificationUri, interval } = started.body as { deviceCode: string; userCode: string; verificationUri: string; interval: number };
     expect(verificationUri).toBe('http://127.0.0.1:4600/device');
-    expect((await poll(deviceCode, from)).status).toBe('pending');
+    expect(await poll(deviceCode, from)).toMatchObject({ http: 428, status: 'pending' });
     // The console shows what is asking before the person answers.
     const shown = await call(person.caller, 'GET', `/api/v1/auth/device?userCode=${encodeURIComponent(userCode)}`);
     expect(shown.status).toBe(200);
@@ -146,7 +147,8 @@ describe.skipIf(!EMAIL_SIGN_IN || !DEVICE || !ME)('E2E-AUTH: device login of the
     expect((await call(person.caller, 'POST', '/api/v1/auth/device/answer', { userCode, approve: true })).status).toBe(204);
     await sleep(interval * 1000 + 500);
     const approved = await poll(deviceCode, from);
-    expect(approved.status).toBe('approved');
+    expect(approved).toMatchObject({ http: 200, status: 'approved' });
+    expect(approved.login).toBe((await profileOf(person.caller)).login);
     const cliToken = String(approved.accessToken);
     const scopes = approved.scopes ?? [];
     expect(scopes).toContain('profile:read');
@@ -166,7 +168,7 @@ describe.skipIf(!EMAIL_SIGN_IN || !DEVICE || !ME)('E2E-AUTH: device login of the
     expect((await call(person.caller, 'POST', '/api/v1/auth/device/answer', { userCode: denied.userCode, approve: false })).status).toBe(204);
     await sleep(interval * 1000 + 500);
     const refused = await poll(denied.deviceCode, from);
-    expect(refused.status).toBe('denied');
+    expect(refused).toMatchObject({ http: 400, status: 'denied' });
     expect(refused.accessToken ?? null).toBeNull();
   });
 });

@@ -145,7 +145,9 @@ export function userCodeIn(text: string): string | undefined {
 }
 
 /** A CLI token of any kind (`osc_…`, `osp_…`, `osa_…`, TokenKind of the server) or a sign-in link token (`opk_…`). */
-export const SECRET = /\bo(?:sc|sp|sa|pk)_[A-Za-z0-9_-]{8,}/;
+// More than the token's hint: the server shows the first 12 characters (`osc_` + 8, `HINT_LENGTH`, TokenUseCases.kt)
+// in the token list on purpose, so a secret is a prefix followed by at least 9 more characters (run 41054325763).
+export const SECRET = /\bo(?:sc|sp|sa|pk)_[A-Za-z0-9_-]{9,}/;
 
 /**
  * Runs the real `ostrom login` as `p` and plays the browser: reads the one-time code the CLI prints, then says yes with

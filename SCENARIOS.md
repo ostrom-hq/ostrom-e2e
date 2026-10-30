@@ -2894,10 +2894,10 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-AUTH-003 — Connexion d'appareil (RFC 8628) : un jeton CLI, une fois
 
-- Étapes : `POST /api/v1/auth/device` ; poll (`pending`) ; la personne connectée voit la demande (`GET /api/v1/auth/device?userCode`) et l'accepte (`POST …/device/answer`) ; poll après l'intervalle ; poll encore ; une seconde demande refusée.
-- Attendu : `approved` avec un jeton dont les portées n'ont ni `gates:answer` ni `user:*`, `GET /auth/me` avec lui répond 200, et `GET /auth/me/account` (ou `/auth/me` avant le déplacement) donne l'adresse de la même personne ; le code ne donne jamais un second jeton ; la demande refusée rend `denied` sans jeton.
+- Étapes : `POST /api/v1/auth/device` ; poll : 428 tant que personne n'a répondu (contrat, ostrom-server#62) ; la personne connectée voit la demande (`GET /api/v1/auth/device?userCode`) et l'accepte (`POST …/device/answer`) ; poll après l'intervalle ; poll encore ; une seconde demande refusée.
+- Attendu : 200 `AuthToken {token, login, scopes}` au login de la personne, avec un jeton dont les portées n'ont ni `gates:answer` ni `user:*`, `GET /auth/me` avec lui répond 200, et `GET /auth/me/account` (ou `/auth/me` avant le déplacement) donne l'adresse de la même personne ; le code ne donne jamais un second jeton ; la demande refusée rend 400 `access_denied` sans jeton.
 - Surfaces : serveur (image), identité
-- Source : ostrom-server#10 (`IdentityRoutes.kt`, `DeviceUseCases.kt`, `CLI_SCOPES`)
+- Source : ostrom-server#10 (`IdentityRoutes.kt`, `DeviceUseCases.kt`, `CLI_SCOPES`), #62 (sondage du contrat : 428, `AuthToken`)
 - Priorité : jalon
 - Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947 (image ostrom-server@51ad17b, avec #58 : `Origin` de la console sur les écritures de session), `scenarios/identity.e2e.ts`
 
@@ -3580,6 +3580,64 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#47)
 
 
+## ATT : Attestation des checks d'un reçu (décision du 30/10 13:23)
+
+### E2E-ATT-001 — Un check rapporté par le poste est `workstation_declared` dans le reçu signé
+
+- Étapes : un propriétaire crée un workflow accepté avec un nœud check `tests` (`POST /api/v1/workflows`), lit le paquet courant (`GET /api/v1/packages/current`), lance une session (`POST /api/v1/launches`) ; l'agent rapporte le check passé (`POST /api/v1/checks`) ; la session demande son reçu de workflow (`POST /api/v1/sessions/{id}/workflow-receipt`).
+- Attendu : 201 et le check listé pour l'organisation (`GET /api/v1/checks?sessionId`) ; reçu 200 avec `verification.ok` ; chaque nœud `kind = check` du reçu porte `attestation = workstation_declared` (contrat `ReceiptNode.attestation`, requise sur un check, signée avec le nœud).
+- Surfaces : serveur (image), lanceur, reçus
+- Source : JOURNAL 30/10 13:23 (décision sur QUESTIONS « 13:35 CLI-AGENTS ») ; contrat core#40 (`CheckAttestation`, `ReceiptNode.attestation`) ; ostrom-server#78 (checks, reçu de workflow)
+- Priorité : jalon
+- Statut : codé : `scenarios/attestation.e2e.ts`, allumé par les sondes quand `/api/v1/launches`, `/api/v1/checks` et `/api/v1/sessions/{id}/workflow-receipt` sont servies (SRV-LANCEUR, ostrom-server#78)
+
+### E2E-ATT-002 — Le poste ne peut pas se déclarer `ci` ni `isolated_runner`
+
+- Étapes : comme ATT-001, l'agent rapporte le check en ajoutant `attestation: ci`, puis `attestation: isolated_runner` ; la session demande son reçu.
+- Attendu : refus (400 ou 422) ou check enregistré sans la prétention (`workstation_declared`) ; aucun nœud check du reçu ne vaut `ci` ni `isolated_runner` : `ci` ne vient que du check run de l'App vérifié par le serveur, `isolated_runner` que d'un lanceur Ostrom.
+- Surfaces : serveur (image), lanceur, reçus
+- Source : JOURNAL 30/10 13:23 ; contrat core#40 (`CheckAttestation`)
+- Priorité : jalon
+- Statut : codé : `scenarios/attestation.e2e.ts`, mêmes sondes qu'ATT-001
+
+### E2E-ATT-003 — Une porte qui exige un check attesté n'est pas satisfaite par une déclaration
+
+- Étapes : une règle `git` avec une porte push-main sur un dépôt marqué, `checks: [{check: tests, attested: true}]` (`POST /api/v1/rules`) ; l'agent rapporte `tests` passé depuis le poste ; il demande la porte d'un push sur main (`POST /api/v1/gates`).
+- Attendu : la règle garde `attested: true` ; la porte ne laisse pas passer le push sur une déclaration (ni `allow` ni `approved`), et la réponse dit que le check n'est que déclaré. Par défaut (sans `attested`), la déclaration est acceptée et affichée comme telle.
+- Surfaces : serveur (image), règles, portes
+- Source : JOURNAL 30/10 13:23 (l'ajout : une règle ou une porte peut exiger `attestation != workstation_declared`) ; contrat core#40 (`RuleGateCheck.attested`) ; SRV-REGLES-2
+- Priorité : jalon
+- Statut : codé : `scenarios/attestation.e2e.ts`, allumé quand `/api/v1/rules`, `/api/v1/gates`, `/api/v1/launches` et `/api/v1/checks` sont servies
+
+## GHORG : Installation GitHub d'une organisation, `?org` (décision du 30/10 12:55)
+
+### E2E-GHORG-001 — Le propriétaire lance l'installation de son organisation, par id et par slug
+
+- Étapes : un propriétaire et son organisation ; `GET /api/v1/github/app/install/start?org=<id>` puis `?org=<slug>`, sans suivre la redirection.
+- Attendu : 302 vers GitHub avec un `state` ; un `state` différent à chaque lancement (usage unique, lié à la session).
+- Surfaces : serveur (image), intégration GitHub
+- Source : JOURNAL 30/10 13:35 (décision 12:55 codée dans ostrom-server#44 : `FindOrgUseCase`, owner ou admin)
+- Priorité : P1
+- Statut : codé : `scenarios/github-org.e2e.ts`, allumé quand `install/start` est servie (ostrom-server#44) ; passé si le banc n'a pas d'App GitHub (503, ses réglages viennent avec e2e#23)
+
+### E2E-GHORG-002 — Un membre, un étranger et un slug inconnu reçoivent le même 403 ; sans session, 401
+
+- Étapes : le propriétaire invite un membre (rôle `member`) qui accepte ; un étranger se connecte ; chacun lance `install/start?org=<id>`, l'étranger aussi avec un slug qui n'existe pas ; un appel sans session.
+- Attendu : 403 sans redirection pour les trois, avec le même `error.type` et le même message (rien ne distingue un membre d'un étranger, ni une organisation existante d'une absente) ; 401 sans session.
+- Surfaces : serveur (image), intégration GitHub, organisations
+- Source : JOURNAL 30/10 13:35 (« membre, étranger et slug inconnu reçoivent le même ») ; le cas étranger est aussi dans E2E-GH-INSTALL-001 d'e2e#23
+- Priorité : P1
+- Statut : codé : `scenarios/github-org.e2e.ts`, mêmes sondes que GHORG-001
+
+### E2E-GHORG-003 — Un admin lance l'installation ; rétrogradé membre, il est refusé
+
+- Étapes : le propriétaire invite un admin qui accepte ; l'admin lance `install/start?org=<id>` ; le propriétaire le passe `member` (`PATCH /api/v1/orgs/{org}/members/{login}`) ; l'admin relance.
+- Attendu : 302 en admin, 403 une fois membre : le droit se lit à chaque lancement, pas au moment de l'invitation.
+- Surfaces : serveur (image), intégration GitHub, organisations
+- Source : JOURNAL 30/10 13:35 ; contrat `updateOrgMember`
+- Priorité : P1
+- Statut : codé : `scenarios/github-org.e2e.ts`, mêmes sondes que GHORG-001
+
 ## Récapitulatif
 
 | Famille | Intitulé | Scénarios | dont jalon | P1 | P2 |
@@ -3624,6 +3682,8 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | SRV | Socle du serveur (santé, instance, erreurs, en-têtes) | 4 | 2 | 2 | 0 |
 | BILL | Facturation (abonnement Stripe, limites du plan) | 7 | 0 | 6 | 1 |
 | ISO | Isolation entre organisations | 1 | 1 | 0 | 0 |
-| **Total** | | **332** | **43** | **169** | **120** |
+| ATT | Attestation des checks d'un reçu | 3 | 3 | 0 | 0 |
+| GHORG | Installation GitHub d'une organisation, `?org` | 3 | 0 | 3 | 0 |
+| **Total** | | **338** | **46** | **172** | **120** |
 
 Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-BYPASS-020, E2E-BYPASS-021, E2E-BYPASS-023, E2E-BYPASS-024, E2E-BYPASS-026, E2E-BYPASS-028, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.
