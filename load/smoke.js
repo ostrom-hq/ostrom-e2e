@@ -1,18 +1,18 @@
 // Short load test run on every ostrom-server pull request (about 70 s). The thresholds fail the job.
-// Usage: k6 run load/smoke.js  (OSTROM_URL, optional OSTROM_LOAD_TOKEN, OSTROM_ROUTE_*)
+// Usage: k6 run load/smoke.js  (OSTROM_URL, OSTROM_LOAD_TOKEN, OSTROM_LOAD_APPROVER_TOKEN, OSTROM_ROUTE_*)
 // OSTROM_LOAD_SCENARIOS picks the scenarios (default: all) while the server does not serve every route yet.
 import http from 'k6/http';
 import { check } from 'k6';
-import { BASE, ROUTES, command, headers, org, post, sha } from './lib.js';
+import { action, approve, ask, askPushToMain, headers, route } from './lib.js';
 
 const SCENARIOS = {
   health: {
     scenario: { executor: 'constant-arrival-rate', rate: 50, timeUnit: '1s', duration: '60s', preAllocatedVUs: 10, exec: 'health' },
     thresholds: { 'http_req_duration{name:health}': ['p(95)<50', 'p(99)<100'] },
   },
-  checks: {
-    scenario: { executor: 'constant-arrival-rate', rate: 200, timeUnit: '1s', duration: '60s', preAllocatedVUs: 40, exec: 'checks' },
-    thresholds: { 'http_req_duration{name:check}': ['p(95)<50', 'p(99)<150'] },
+  asks: {
+    scenario: { executor: 'constant-arrival-rate', rate: 200, timeUnit: '1s', duration: '60s', preAllocatedVUs: 40, exec: 'asks' },
+    thresholds: { 'http_req_duration{name:ask}': ['p(95)<50', 'p(99)<150'] },
   },
   gates: {
     scenario: { executor: 'constant-arrival-rate', rate: 20, timeUnit: '1s', duration: '60s', preAllocatedVUs: 20, exec: 'gates' },
@@ -31,22 +31,23 @@ export const options = {
 };
 
 export function health() {
-  const r = http.get(BASE + ROUTES.health, { headers: headers(), tags: { name: 'health' } });
+  const r = http.get(route('health'), { headers: headers(''), tags: { name: 'health' } });
   check(r, { 'health 200': (x) => x.status === 200 });
 }
 
-export function checks() {
+// The hook's question on an ordinary boundary action: answered at once, with a gate status.
+export function asks() {
   const i = __VU * 100000 + __ITER;
-  const r = post(ROUTES.check, { org: org(i), repo: 'backend', tool: 'Bash', command: command(i) }, 'check');
-  check(r, { 'check 200 with a decision': (x) => x.status === 200 && ['allow', 'gate', 'deny'].includes(x.json('decision')) });
+  const r = ask(action(i), i, 'ask');
+  check(r, { 'ask 200 with a status': (x) => x.status === 200 && typeof x.json('gate.status') === 'string' });
 }
 
+// A push to main: a pending approval, then a yes from the approver, with a signed receipt.
 export function gates() {
   const i = __VU * 100000 + __ITER;
-  const o = org(i);
-  const g = post(ROUTES.gate, { org: o, repo: 'backend', action: 'push-main', sha: sha(i), asked_by: 'alice', command: 'git push origin main' }, 'gate');
-  check(g, { 'gate 201': (x) => x.status === 201 });
-  if (g.status !== 201) return;
-  const a = post(ROUTES.approve, { org: o, gate_id: g.json('id'), by: g.json('approvers.0'), result: 'approved' }, 'approve');
-  check(a, { 'approve 200 with a signed receipt': (x) => x.status === 200 && String(x.json('receipt.signature')).startsWith('ed25519;') });
+  const g = askPushToMain(i, 'gate');
+  check(g, { 'gate 200 pending with an approval': (x) => x.status === 200 && x.json('gate.status') === 'pending' && !!x.json('approval.id') });
+  if (g.status !== 200 || !g.json('approval.id')) return;
+  const a = approve(g.json('approval'), 'approve');
+  check(a, { 'approve 200 with a signed receipt': (x) => x.status === 200 && x.json('approval.status') === 'approved' && !!x.json('receipt.signature') });
 }

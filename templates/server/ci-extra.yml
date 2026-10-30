@@ -20,7 +20,7 @@ jobs:
         uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
         with:
           path: .
-          database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
+          database-url: postgresql://localhost:5432/ostrom
       - name: ostrom CLI from main
         id: cli
         uses: ostrom-hq/ostrom-e2e/.github/actions/cli@main
@@ -62,7 +62,7 @@ jobs:
         uses: ostrom-hq/ostrom-e2e/.github/actions/server@main
         with:
           path: .
-          database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
+          database-url: postgresql://localhost:5432/ostrom
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-e2e
@@ -72,7 +72,7 @@ jobs:
       - name: k6 smoke (p95/p99 thresholds)
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
-          # Only the routes the server serves today; QA adds checks,gates when the gate routes are on main.
+          # Only the routes the server serves today; QA adds asks,gates when the gate routes are on main.
           OSTROM_LOAD_SCENARIOS: health
         run: k6 run --summary-export smoke-summary.json .ostrom/e2e/load/smoke.js
       - name: k6 race (exactly one yes wins out of 100)

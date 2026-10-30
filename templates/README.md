@@ -46,11 +46,12 @@ l'organisation) construisent les vrais binaires natifs linuxX64, en cache par co
 
 | Script | Quand | Seuils (le job échoue au-delà) |
 |---|---|---|
-| `smoke.js` | chaque PR serveur, ~70 s | `/health` p95 < 50 ms, p99 < 100 ms ; `/check` (200/s) p95 < 50 ms, p99 < 150 ms ; porte et oui (20/s) p95 < 150 ms, p99 < 400 ms ; erreurs < 1 % ; checks > 99 % |
-| `race.js` | chaque PR serveur + nuit | 100 oui simultanés sur la même porte : exactement 1 × 200, 99 × 409, aucun autre code |
-| `soak.js` | nuit (`nightly.yml`, 25 min) | 500 `/check`/s et 50 portes/s pendant 20 min (mêmes p95/p99, erreurs < 0,1 %), puis rampe à 2 000/s : p99 < 500 ms |
+| `smoke.js` | chaque PR serveur, ~70 s | `/health` p95 < 50 ms, p99 < 100 ms ; questions de hook `POST /api/v1/gates` sur des actions ordinaires (200/s) p95 < 50 ms, p99 < 150 ms ; push sur main puis oui `POST /api/v1/approvals/{id}/answer` (20/s) p95 < 150 ms, p99 < 400 ms ; erreurs < 1 % ; checks > 99 % |
+| `race.js` | chaque PR serveur + nuit | 100 oui simultanés sur la même demande : exactement 1 × 200, 99 × 409, aucun autre code |
+| `soak.js` | nuit (`nightly.yml`, 25 min) | 500 questions/s et 50 portes/s pendant 20 min (mêmes p95/p99, erreurs < 0,1 %), puis rampe à 2 000/s : p99 < 500 ms |
 
-Les routes viennent de la spec du serveur de contrôle du prototype (`research/perf-langages/controle/SPEC.md`) ;
-quand ostrom-server fixe les siennes, on les passe par `OSTROM_ROUTE_*` sans toucher aux scénarios. Seuils de
+Les routes sont celles du contrat `ostrom-core/api/openapi.yaml` (`/api/v1/...`, sonde `/health`) ; `OSTROM_ROUTE_*`
+les change sans toucher aux scénarios. Jetons : `OSTROM_LOAD_TOKEN` (le demandeur) et `OSTROM_LOAD_APPROVER_TOKEN`
+(un approbateur de la porte de `OSTROM_LOAD_REPO`, défaut `acme/api`), créés par le job avant k6. Seuils de
 départ, recalés sur la première série verte (le serveur de contrôle du prototype consomme ~0,1 ms de CPU par
 `/check` et ~0,2-0,6 ms par porte : ces seuils laissent large pour un runner partagé).
