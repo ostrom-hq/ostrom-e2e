@@ -1,5 +1,5 @@
-# Extra job for ostrom-cli's .github/workflows/ci.yml, next to `coverage` and `native-tests` of
-# templates/kotlin/ci.yml. Job name = required check on main.
+# Extra job for ostrom-cli's .github/workflows/ci.yml, next to the `linux` job of the CONVENTIONS
+# template (ostrom-core/docs/conventions/.github/workflows/build.yml). Job name = required check on main.
 jobs:
   # THIS commit's native `ostrom` against the real server (ostrom-server main) and PostgreSQL, driving the fake
   # agent of the bench (OSTROM_CLAUDE_BIN / OSTROM_CODEX_BIN), plus the hook start-up budget.
@@ -15,7 +15,7 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: This CLI, built
         id: cli
         uses: ostrom-hq/ostrom-e2e/.github/actions/cli@main
@@ -28,14 +28,14 @@ jobs:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
           required: "false" # flip to "true" once ostrom-server meets the contract (QA does it)
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-e2e
           ssh-key: ${{ secrets.DEPLOY_KEY_E2E }}
           path: .ostrom/e2e
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with: { package_json_file: .ostrom/e2e/package.json }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version-file: .ostrom/e2e/.nvmrc }
       - name: Bench scenarios
         working-directory: .ostrom/e2e

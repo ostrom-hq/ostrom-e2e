@@ -27,7 +27,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | CLAUDE | 19 | 4 | 0 | 0 | 0 | 19 |
 | CODEX | 9 | 0 | 0 | 0 | 0 | 9 |
 | GATE | 15 | 5 | 0 | 0 | 0 | 15 |
-| BYPASS | 19 | 6 | 0 | 0 | 0 | 19 |
+| BYPASS | 33 | 12 | 0 | 0 | 0 | 33 |
 | YES | 13 | 5 | 0 | 0 | 0 | 13 |
 | YESCLI | 4 | 1 | 0 | 0 | 0 | 4 |
 | SLACK | 5 | 0 | 0 | 0 | 0 | 5 |
@@ -58,7 +58,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | TC | 2 | 0 | 0 | 0 | 0 | 2 |
 | LOAD | 10 | 0 | 0 | 3 | 0 | 7 |
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
-| **Total** | 302 | 34 | 0 | 3 | 0 | 299 |
+| **Total** | 316 | 40 | 0 | 3 | 0 | 313 |
 <!-- scenarios:end -->
 
 ## Charge
@@ -71,5 +71,6 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 
 ## Journal
 
-- 30/10 02:00 — banc, gabarits et catalogue (302 scénarios, 34 du jalon) écrits ; clés de déploiement en lecture
+- 30/10 02:00 — ostrom-e2e#1 : banc, gabarits et catalogue (302 scénarios, 34 du jalon) ; clés de déploiement en lecture
   seule et secrets d'org posés ; actions composites ouvertes aux dépôts de l'org.
+- 30/10 02:15 — 14 contournements de l'audit de la porte ajoutés (BYPASS-020 à 033 : A1, A2, A3, A7b, A9, A10, A12 à A20, A24), dont 6 au jalon ; actions épinglées par SHA (CONVENTIONS § 11) ; pour Kotlin, le gabarit de CONVENTIONS (job `linux`) fait foi.

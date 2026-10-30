@@ -825,6 +825,133 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Statut : bloqué : ostrom-server
 
 
+
+### E2E-BYPASS-020 — Contournement A1 : recréer le compte d'un approbateur sans authentification
+
+- Étapes : `POST` de création de compte/opérateur pour le login `rev-b` sans jeton, puis avec le jeton d'appareil de `dev-a` ; tenter ensuite de dire oui avec le jeton rendu.
+- Attendu : 401/403 dans les deux cas ; le compte et les jetons de `rev-b` restent inchangés ; aucun oui « approved by rev-b » ; une tentative est tracée.
+- Surfaces : serveur, faux agent
+- Source : audit/COORD/AUDIT-PORTE.md A1 ; audit/server/src/bridge/audit-gate.test.ts P8 ; JOURNAL 30/10 « EXIGENCES » point 1
+- Priorité : jalon
+- Statut : bloqué : ostrom-server (AUTH)
+
+### E2E-BYPASS-021 — Contournement A2 : écrire dans la console (workflows, politique, gate-actions, règles, membres) sans session utilisateur
+
+- Étapes : Sans jeton, puis avec le jeton d'appareil ou de session d'agent : `PUT/PATCH` du workflow pour retirer la porte, passer la politique en ombre, modifier `gate-actions`, règles, membres, réglages.
+- Attendu : 401 sans session, 403 avec un jeton d'agent ; rien ne change en base ; la porte s'applique toujours au push suivant.
+- Surfaces : serveur, web, faux agent
+- Source : audit/COORD/AUDIT-PORTE.md A2 ; audit-gate.test.ts P9 ; JOURNAL 30/10 « EXIGENCES » point 2
+- Priorité : jalon
+- Statut : bloqué : ostrom-server (AUTH)
+
+### E2E-BYPASS-022 — Contournement A3 : décider une porte sans jeton
+
+- Étapes : `POST` de décision sur une porte ouverte sans aucun jeton.
+- Attendu : 401 ; la porte reste ouverte ; aucun reçu.
+- Surfaces : serveur
+- Source : audit/COORD/AUDIT-PORTE.md A3
+- Priorité : P1
+- Statut : bloqué : ostrom-server (AUTH, GATES)
+
+### E2E-BYPASS-023 — Contournement A7b : déplacer la ref distante locale pour réduire le diff montré
+
+- Étapes : L'agent fait `git update-ref refs/remotes/origin/main HEAD~1` puis demande le push de 3 commits.
+- Attendu : Le diff montré à l'approbateur est calculé côté serveur depuis le distant réel (GitHub ou dépôt nu du banc) et contient les 3 commits ; le reçu signe la liste des commits.
+- Surfaces : CLI, serveur, faux agent
+- Source : audit/COORD/AUDIT-PORTE.md A7b ; JOURNAL 30/10 « EXIGENCES » point 5
+- Priorité : jalon
+- Statut : bloqué : ostrom-cli (hook) + ostrom-server (GATES)
+
+### E2E-BYPASS-024 — Contournement A9 : push qui atterrit sur main sans la nommer
+
+- Étapes : Depuis main : `git push origin HEAD` ; `git push` nu avec amont main ; `push.default=matching` ; `remote.origin.push` ; distant miroir ; `pushurl` et `pushInsteadOf` différents de l'URL de fetch.
+- Attendu : Chaque cas ouvre la porte de main (ou est refusé si piloté par la config) ; le oui nomme l'URL de push réelle ; aucun cas ne part sans oui.
+- Surfaces : CLI, faux agent
+- Source : audit/COORD/AUDIT-PORTE.md A9 ; audit/bridge/test/audit-push.test.mjs (4 cas) ; audit/launcher/tests/audit_push_refs.rs
+- Priorité : jalon
+- Statut : bloqué : ostrom-cli (hook)
+
+### E2E-BYPASS-025 — Contournement A10 : écrire dans une session sans en être le propriétaire
+
+- Étapes : Avec le jeton d'un autre dev ou sans jeton : fin de session avec coût/modèle choisis, check « passé » posé, notification au nom d'un dev, consommation du oui d'un autre.
+- Attendu : 403 partout ; la session, ses checks et ses oui sont inchangés.
+- Surfaces : serveur
+- Source : audit/COORD/AUDIT-PORTE.md A10 ; JOURNAL 30/10 « EXIGENCES » point 3
+- Priorité : P1
+- Statut : bloqué : ostrom-server (GATES)
+
+### E2E-BYPASS-026 — A12 : le jeton de l'agent ne lui donne que sa session
+
+- Étapes : Depuis le faux agent, avec le jeton présent dans son environnement : déclarer un check passé, `node_done` d'un autre nœud, `alive` d'une autre session, fixer le coût ou le code de sortie, fermer/rouvrir la session d'un autre.
+- Attendu : Refus pour tout ce qui sort de sa session ; les résultats de check sont signés ou recalculés par le serveur ; le reçu ne contient que ce que le serveur a vérifié.
+- Surfaces : CLI, serveur, faux agent
+- Source : audit/COORD/AUDIT-PORTE.md A12 ; JOURNAL 30/10 « EXIGENCES » point 3 ; VERIF-LANCEUR
+- Priorité : jalon
+- Statut : bloqué : ostrom-server (GATES) + ostrom-cli
+
+### E2E-BYPASS-027 — A13 : altérer les fichiers de session du hook
+
+- Étapes : Le faux agent réécrit le cache de check (« déjà passé »), `session-env.json` (`OSTROM_GATE_FAIL=open`, autre `OSTROM_URL`), les scripts du plugin.
+- Attendu : Le hook détecte l'altération (cache signé, liste blanche des variables, empreintes) et refuse l'action ; rien ne passe ouvert.
+- Surfaces : CLI, faux agent
+- Source : audit/COORD/AUDIT-PORTE.md A13
+- Priorité : P1
+- Statut : bloqué : ostrom-cli (hook)
+
+### E2E-BYPASS-028 — A14 : le reçu de porte dit ce qui a été approuvé
+
+- Étapes : Push approuvé, puis `ostrom verify` du reçu hors ligne.
+- Attendu : Le sujet signé contient les refs et shas poussés, le distant, `force`, l'empreinte du diff montré (et pour une PR, `sha` et `base`) ; `verify` les affiche.
+- Surfaces : CLI, serveur
+- Source : audit/COORD/AUDIT-PORTE.md A14
+- Priorité : jalon
+- Statut : bloqué : ostrom-core (reçus) + ostrom-server
+
+### E2E-BYPASS-029 — A15 : push direct sur main détecté sans faux positif
+
+- Étapes : Webhook de push sur main après une fusion approuvée, puis après un vrai push hors porte.
+- Attendu : La fusion approuvée n'est pas marquée « bypass » ; le vrai contournement l'est et donne un reçu signé de contournement.
+- Surfaces : serveur
+- Source : audit/COORD/AUDIT-PORTE.md A15 ; GATE-GITHUB
+- Priorité : P1
+- Statut : bloqué : ostrom-server (GATES, GitHub)
+
+### E2E-BYPASS-030 — A16 : fusion GraphQL par requête lue depuis un fichier
+
+- Étapes : `gh api graphql -F query=@q.graphql` contenant `mergePullRequest`.
+- Attendu : La porte de fusion s'applique (lecture du fichier ou classe `gh api graphql` gardée) ; à défaut, le check GitHub tient et le scénario le prouve.
+- Surfaces : CLI, serveur, faux agent
+- Source : audit/COORD/AUDIT-PORTE.md A16
+- Priorité : P2
+- Statut : bloqué : ostrom-cli (classement des commandes)
+
+### E2E-BYPASS-031 — A17 et A18 : remplacer la session d'un autre, se faire passer pour le lanceur
+
+- Étapes : Créer une session avec l'id d'une session existante d'un autre dev ; tuer le lanceur puis envoyer des `alive` avec le jeton.
+- Attendu : Création refusée (propriétaire) ; un `alive` qui ne vient pas du lanceur ne masque pas la perte : la session est close « launcher lost » avec le code de sortie connu.
+- Surfaces : serveur, CLI
+- Source : audit/COORD/AUDIT-PORTE.md A17, A18
+- Priorité : P2
+- Statut : bloqué : ostrom-server (sessions)
+
+### E2E-BYPASS-032 — A19 et A20 : reçu exact sur la réouverture, pas de repli ouvert
+
+- Étapes : Segment rouvert par un hook ; serveur qui répond 404 au paquet.
+- Attendu : Le reçu dit `reopenedBy: hook` ou `launcher` ; un 404 de paquet ne lance rien en mode ouvert (refus clair).
+- Surfaces : CLI, serveur
+- Source : audit/COORD/AUDIT-PORTE.md A19, A20 ; VERIF-LANCEUR bug 9
+- Priorité : P2
+- Statut : bloqué : ostrom-cli + ostrom-server
+
+### E2E-BYPASS-033 — A24 : deux appels d'outil parallèles sur le même oui
+
+- Étapes : Dans une même session, deux `git push` parallèles après un seul oui.
+- Attendu : Le oui n'est consommé qu'une fois (transaction) : un seul push part, l'autre redemande.
+- Surfaces : CLI, serveur, faux agent
+- Source : audit/COORD/AUDIT-PORTE.md A24 ; JOURNAL 30/10 « EXIGENCES » point 5
+- Priorité : P1
+- Statut : bloqué : ostrom-server (GATES)
+
 ## YES : Oui lié au SHA, au dépôt, aux commits montrés ; auteur et approbateurs
 
 ### E2E-YES-001 — Un oui sur un SHA ne vaut pas pour un autre
@@ -2876,7 +3003,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 | CLAUDE | `ostrom claude` : lancement, hooks, budget du hook | 19 | 4 | 9 | 6 |
 | CODEX | `ostrom codex` et les autres agents | 9 | 0 | 4 | 5 |
 | GATE | Porte qui bloque un push | 15 | 5 | 9 | 1 |
-| BYPASS | Contournements de la porte (audit du 30/10 et trous connus) | 19 | 6 | 13 | 0 |
+| BYPASS | Contournements de la porte (audit du 30/10 et trous connus) | 33 | 12 | 18 | 3 |
 | YES | Oui lié au SHA, au dépôt, aux commits montrés ; auteur et approbateurs | 13 | 5 | 6 | 2 |
 | YESCLI | Oui depuis le terminal | 4 | 1 | 2 | 1 |
 | SLACK | Oui depuis Slack | 5 | 0 | 4 | 1 |
@@ -2907,6 +3034,6 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 | TC | Migration depuis le prototype et compatibilité TeamCode | 2 | 0 | 0 | 2 |
 | LOAD | Charge (k6) | 10 | 0 | 1 | 9 |
 | DOGFOOD | Le harnais ControlResell en workflows Ostrom | 3 | 0 | 3 | 0 |
-| **Total** | | **302** | **34** | **153** | **115** |
+| **Total** | | **316** | **40** | **158** | **118** |
 
-Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.
+Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-BYPASS-020, E2E-BYPASS-021, E2E-BYPASS-023, E2E-BYPASS-024, E2E-BYPASS-026, E2E-BYPASS-028, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.

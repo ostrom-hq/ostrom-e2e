@@ -20,7 +20,7 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Real Ostrom server
         id: server
         uses: ./.github/actions/server
@@ -28,7 +28,7 @@ jobs:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
           required: "false"
-      - uses: grafana/setup-k6-action@v1
+      - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
         if: steps.server.outputs.available == 'true'
       - name: k6 soak (25 min) and ramp
         if: steps.server.outputs.available == 'true'
@@ -43,7 +43,7 @@ jobs:
       - name: No server yet
         if: steps.server.outputs.available != 'true'
         run: echo "ostrom-server does not meet the bench contract yet; load tests are blocked (RAPPORT.md)." >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: k6-nightly
