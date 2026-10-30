@@ -51,7 +51,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, serveur, faux GitHub
 - Source : cli/COORD/CLI.md §1a (`ostrom login`), §3.1 écran 3 ; proto/COORD/GATE-GITHUB.md « Ce qui manque » 3 (device flow jamais testé contre une vraie app)
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (login) + ostrom-server (AUTH))
+- Statut : codé : `scenarios/jalon.e2e.ts`, CLI réelle contre l'image réelle, allumé par sondes (bloqué : ostrom-server#62, sondage d'appareil du contrat ; ostrom-cli#40 est sur main)
 
 ### E2E-LOGIN-002 — Repli sur le jeton `gh` du poste
 
@@ -264,7 +264,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, serveur, faux agent
 - Source : proto/COORD/VERIF-LANCEUR.md §1 (c1) et §2 « Isolation » ; proto/COORD/PONT.md « Le parcours »
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (lanceur) + ostrom-server (paquet))
+- Statut : codé : `scenarios/jalon.e2e.ts`, CLI réelle contre l'image réelle, allumé par sondes (bloqué : ostrom-server#43 compilateur et paquets, #26 sessions, #62)
 
 ### E2E-CLAUDE-002 — Une seule entrée de hook par événement
 
@@ -522,7 +522,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, serveur, web (oui), faux agent
 - Source : proto/COORD/VERIF-LANCEUR.md §1 (passage c1) ; proto/COORD/APPROBATION.md §5 (film à deux personnes) ; cli/COORD/CLI.md §3.3
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/jalon.e2e.ts`, CLI réelle contre l'image réelle, allumé par sondes (bloqué : ostrom-server#43 et #26, #62)
 
 ### E2E-GATE-002 — Le oui est consommé : un oui, un push
 
@@ -961,7 +961,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, CLI, faux agent
 - Source : proto/server/src/bridge/gate-integrity.test.ts « bug 2: a yes to a push holds for the commit it was given for; a new commit asks again » ; proto/COORD/VERIF-LANCEUR.md §3 bug 2 ; proto/COORD/CORRECTIFS.md passe 2 (passage réel, `ea600203` / `d8908d39`)
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-server (GATES))
+- Statut : codé : `scenarios/jalon.e2e.ts`, CLI réelle contre l'image réelle, allumé par sondes : le oui de l'approbateur passe par sa session navigateur fraîche, avec `shownDigest` (bloqué : ostrom-server#43 et #26, #62 ; #41 pour le step-up)
 
 ### E2E-YES-002 — Le oui montre les commits, le dépôt réel et le diff
 
@@ -979,7 +979,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, web
 - Source : proto/server/src/yes/approval.test.ts « the author cannot say yes to their own request when another approver exists (server-side, 403) » ; proto/COORD/APPROBATION.md §1
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-server (GATES))
+- Statut : codé : `scenarios/jalon.e2e.ts`, CLI réelle contre l'image réelle, allumé par sondes : le demandeur ne dit pas oui à sa propre porte, 403 qui nomme l'autre approbateur (bloqué : comme YES-001)
 
 ### E2E-YES-004 — Seul approbateur déclaré : son oui passe et le dit partout
 
@@ -1090,7 +1090,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, serveur
 - Source : cli/COORD/CLI.md §3.3 (dernière variante) ; proto/COORD/APPROBATION.md §8 (message du hook)
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (approve))
+- Statut : codé : `scenarios/jalon.e2e.ts`, CLI réelle contre l'image réelle, allumé par sondes : la CLI de main n'a pas d'`ostrom approve` qui dise oui (il ouvre la console), donc le scénario vérifie qu'un jeton du demandeur reçoit 403 (bloqué : comme YES-001)
 
 ### E2E-YESCLI-003 — `ostrom wait` : codes et texte lu par les modèles
 
@@ -1414,7 +1414,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI
 - Source : proto/COORD/GATE-GITHUB.md (t = 50,3 s) ; proto/COORD/VERIF-LANCEUR.md §1 (gate → hook + oui + reçu) ; cli/COORD/CLI.md §1a (verify)
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (verify) + ostrom-server (reçus))
+- Statut : codé : `scenarios/jalon.e2e.ts`, CLI réelle contre l'image réelle, allumé par sondes : le reçu est lu par `GET /api/v1/receipts/{id}` dans le parcours ; la vérification hors ligne est sautée tant que la CLI n'a pas de commande `verify` (bloqué : ostrom-cli `verify`, ostrom-server#43 et #26)
 
 ### E2E-RECEIPT-002 — `ostrom verify` d'un reçu de workflow et de son paquet
 
@@ -2881,7 +2881,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (image), identité
 - Source : ostrom-server#10 (`SignInRoutes.kt`) ; contrat 0.1.140 `requestMagicLink`, `verifyMagicLink`
 - Priorité : jalon
-- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057 (PR ostrom-e2e#19, image ostrom-server@a3b551d), `scenarios/identity.e2e.ts`
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947 (image ostrom-server@51ad17b, avec #58 : `Origin` de la console sur les écritures de session), `scenarios/identity.e2e.ts`
 
 ### E2E-AUTH-002 — Connexion GitHub (faux GitHub), PKCE et `state` liés au navigateur
 
@@ -2890,7 +2890,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (image), identité, faux GitHub (`src/fake-github.ts`)
 - Source : ostrom-server#10 (`OAuthProviders.kt`, `SignInRoutes.kt`)
 - Priorité : jalon
-- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057 (PR ostrom-e2e#19, image ostrom-server@a3b551d), `scenarios/identity.e2e.ts`
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947 (image ostrom-server@51ad17b, avec #58 : `Origin` de la console sur les écritures de session), `scenarios/identity.e2e.ts`
 
 ### E2E-AUTH-003 — Connexion d'appareil (RFC 8628) : un jeton CLI, une fois
 
@@ -2899,7 +2899,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (image), identité
 - Source : ostrom-server#10 (`IdentityRoutes.kt`, `DeviceUseCases.kt`, `CLI_SCOPES`)
 - Priorité : jalon
-- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057 (PR ostrom-e2e#19, image ostrom-server@a3b551d), `scenarios/identity.e2e.ts`
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947 (image ostrom-server@51ad17b, avec #58 : `Origin` de la console sur les écritures de session), `scenarios/identity.e2e.ts`
 
 ### E2E-AUTH-004 — Révocation : jeton supprimé ou tourné, déconnexion, « partout »
 
@@ -2908,7 +2908,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (image), identité
 - Source : ostrom-server#10 (`TokenUseCases.kt`, `IdentityRoutes.kt`)
 - Priorité : jalon
-- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057 (PR ostrom-e2e#19, image ostrom-server@a3b551d), `scenarios/identity.e2e.ts`
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947 (image ostrom-server@51ad17b, avec #58 : `Origin` de la console sur les écritures de session), `scenarios/identity.e2e.ts`
 
 ### E2E-AUTH-005 — Sans identifiant, pas d'accès ; CSRF ; portées interdites
 
@@ -2917,7 +2917,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (image), identité, noyau (authentification)
 - Source : ostrom-server#10 (`TokenAuthentication.kt`, `NEVER_ON_A_TOKEN`) ; S2-04, S2-31
 - Priorité : jalon
-- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057 (PR ostrom-e2e#19, image ostrom-server@a3b551d), `scenarios/identity.e2e.ts`
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947 (image ostrom-server@51ad17b, avec #58 : `Origin` de la console sur les écritures de session), `scenarios/identity.e2e.ts`
 
 ### E2E-AUTH-006 — un jeton ne dit jamais oui
 
@@ -2926,7 +2926,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (image), identité, portes
 - Source : consigne QA du 30/10 10:00 et 11:00 ; S2-54 ; ostrom-server#41, #51
 - Priorité : jalon
-- Statut : codé : `scenarios/identity.e2e.ts` (sauté au run 41034102057 par l'ancienne version, qui attendait `step_up_required` ; joué vert dès le prochain run)
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947 (image ostrom-server@51ad17b, avec #58 : `Origin` de la console sur les écritures de session), `scenarios/identity.e2e.ts`
 
 ### E2E-AUTH-007 — StepUp : une session de plus de 5 min ne dit pas oui, reconnectée elle le peut
 
@@ -3184,7 +3184,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image), stripe-mock, identité, organisations
 - Source : ostrom-server#15 ; contrat `startBillingCheckout`
 - Priorité : P1
-- Statut : codé : `scenarios/billing.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48)
+- Statut : codé : `scenarios/billing.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48 ; toujours rouge au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947)
 
 ### E2E-BILL-006 — Au-delà du plan : 402
 
@@ -3193,7 +3193,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image), identité, organisations, facturation
 - Source : ostrom-server#15 `CheckEntitlementUseCaseImpl` (`AddPerson`)
 - Priorité : P1
-- Statut : codé : `scenarios/billing.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48)
+- Statut : codé : `scenarios/billing.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48 ; toujours rouge au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947)
 
 ### E2E-BILL-007 — Un membre sans rôle de facturation
 
@@ -3202,7 +3202,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image), identité, organisations
 - Source : ostrom-server#15 (`BILLING_READ` / `BILLING_MANAGE`)
 - Priorité : P1
-- Statut : codé : `scenarios/billing.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48)
+- Statut : codé : `scenarios/billing.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48 ; toujours rouge au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947)
 
 ## ISO : Isolation entre organisations
 
@@ -3213,7 +3213,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image), identité, organisations, chaque module
 - Source : consigne QA du 30/10 10:00 ; S2-01 (`withOrganization`) ; ostrom-server#51 (`OrgsApi.kt`, `MembershipOrgResolver`) ; `src/isolation.ts`
 - Priorité : jalon
-- Statut : codé : `scenarios/isolation.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48)
+- Statut : codé : `scenarios/isolation.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48 ; toujours rouge au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947)
 
 ### E2E-ISO-002 — La console de B ne montre rien de A
 
@@ -3222,7 +3222,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image), console (réponses lues par ostrom-web)
 - Source : demande WEB relayée par l'orchestrateur le 30/10 10:00
 - Priorité : jalon
-- Statut : codé : `scenarios/isolation.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48)
+- Statut : codé : `scenarios/isolation.e2e.ts` (rouge : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`, insertion hors `inOrg`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057, signalé à AUTH-REPRISE le 30/10 10:48 ; toujours rouge au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947)
 
 ## Récapitulatif
 
