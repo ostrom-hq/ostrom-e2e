@@ -12,7 +12,7 @@ import { FakeGitHub } from '../src/fake-github.ts';
 import { GIT_ENV } from '../src/git.ts';
 import { isServed } from '../src/probe.ts';
 import { CLI_BIN, FAKE_CLAUDE, FAKE_CODEX, SERVER_URL } from './env.ts';
-import { type Person as Browser, address, call, email, invite, join, orgOf, orgsUnavailable, profileOf, signIn, url } from './org.ts';
+import { type Person as Browser, address, call, email, invite, join as joinOrg, orgOf, orgsUnavailable, profileOf, signIn, url } from './org.ts';
 
 export interface Run {
   readonly code: number | null;
@@ -294,7 +294,7 @@ export async function realWorld(repo = 'acme/api'): Promise<RealWorld> {
   const revEmail = email('rev-b');
   const invited = await invite(dev.browser, org.id, [revEmail], 'admin');
   if (invited.status !== 200) throw new Error(`invite → ${invited.status} ${JSON.stringify(invited.body)}`);
-  const joined = await join(revEmail);
+  const joined = await joinOrg(revEmail);
   if (joined.accepted.status !== 200) throw new Error(`rev-b join → ${joined.accepted.status} ${JSON.stringify(joined.accepted.body)}`);
   const rev = await member(joined.person);
   await cliLogin(dev);
