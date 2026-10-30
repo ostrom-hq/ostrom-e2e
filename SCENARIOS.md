@@ -3078,12 +3078,12 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 
 ### E2E-BILL-001 — Webhook signé : reçu une fois
 
-- Étapes : événement `customer.subscription.updated` d'une organisation inconnue, signé `t=…,v1=HMAC-SHA256(whsec, "t.corps")` ; le même identifiant d'événement renvoyé.
+- Étapes : événement `customer.subscription.updated` sans client ni `org_id`, signé `t=…,v1=HMAC-SHA256(whsec, "t.corps")` ; le même identifiant d'événement renvoyé.
 - Attendu : 200 `{"received":true,"outcome":"ignored"}`, puis 200 `outcome: "duplicate"`.
 - Surfaces : serveur (image), PostgreSQL, faux Stripe
 - Source : ostrom-server#15 `StripeWebhooks.kt`, `HandleStripeEventUseCaseImpl`
 - Priorité : P1
-- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15)
+- Statut : codé : `scenarios/billing.e2e.ts` (rouge au run 41010125416 : une organisation inconnue est « processed », le test attendait « ignored » ; test corrigé sur un événement sans organisation, comportement signalé à BILLING)
 
 ### E2E-BILL-002 — Webhook : signature absente, fausse, périmée ou d'un autre corps
 
@@ -3092,7 +3092,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image), PostgreSQL
 - Source : ostrom-server#15 `StripeSignatureVerifier` (tolérance 5 min)
 - Priorité : P1
-- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15)
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416 (image ostrom-server@87f9d14, webhook servi à `/api/v1/billing/stripe/webhook`), `scenarios/billing.e2e.ts`
 
 ### E2E-BILL-003 — Webhook trop gros
 
@@ -3101,7 +3101,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image)
 - Source : ostrom-server#15 `MAX_WEBHOOK_BYTES`
 - Priorité : P2
-- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15)
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416 (image ostrom-server@87f9d14, webhook servi à `/api/v1/billing/stripe/webhook`), `scenarios/billing.e2e.ts`
 
 ### E2E-BILL-004 — Routes de facturation sans identifiants
 
@@ -3110,7 +3110,7 @@ Servi par ostrom-server#15 (pas encore sur main). Banc : l'image du serveur avec
 - Surfaces : serveur (image)
 - Source : ostrom-server#15 `BillingRoutes.kt`
 - Priorité : P1
-- Statut : codé : `scenarios/billing.e2e.ts` (bloqué : ostrom-server#15)
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416 (image ostrom-server@87f9d14, webhook servi à `/api/v1/billing/stripe/webhook`), `scenarios/billing.e2e.ts`
 
 ### E2E-BILL-005 — Checkout Stripe en mode test
 

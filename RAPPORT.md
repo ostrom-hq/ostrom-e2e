@@ -63,9 +63,9 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
 | OBS | 3 | 0 | 0 | 0 | 0 | 3 |
 | SRV | 4 | 2 | 4 | 0 | 0 | 0 |
-| BILL | 7 | 0 | 0 | 7 | 0 | 0 |
+| BILL | 7 | 0 | 3 | 4 | 0 | 0 |
 | ISO | 1 | 1 | 0 | 1 | 0 | 0 |
-| **Total** | 332 | 43 | 5 | 22 | 0 | 305 |
+| **Total** | 332 | 43 | 8 | 19 | 0 | 305 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un
@@ -80,8 +80,10 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
 | SRV-003 | erreurs 404/405 en `{"error":{type,message}}` | vert | [40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849) |
 | SRV-004 | `X-Request-Id` gardé ou remplacé | vert | [40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849) |
 | LOAD-011 | k6 `health,instance`, p95 < 50 ms, p99 < 100 ms | vert | [40999403849](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849) : `/health` p95 1,31 ms / p99 2,14 ms ; `/api/v1/instance` p95 1,92 ms / p99 3,04 ms ; 0 erreur sur 6 002 requêtes |
-| BILL-001 à 003 | webhook Stripe signé : reçu une fois, signatures refusées (400), > 256 Kio (413) | manquant | s'allume seul quand ostrom-server#15 est sur `main` (`/webhooks/stripe` servi, ou l'ancien `/v1/billing/stripe/webhook`) |
-| BILL-004 | routes de facturation sans identifiants : 401 + `WWW-Authenticate` | manquant | idem (`/api/v1/orgs/{id}/billing` servi, ou l'ancien `/v1/orgs/…`) |
+| BILL-001 | webhook signé reçu une fois (`ignored` puis `duplicate`) | rouge → corrigé | [41010125416](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416) : une organisation inconnue est `processed` (billing crée sa ligne à la volée) ; test refait sur un événement sans organisation, vert attendu au run de ostrom-e2e#16 |
+| BILL-002 | signatures absente, fausse, périmée, future, d'un autre corps : 400, rien d'enregistré | vert | [41010125416](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416) (ostrom-server@87f9d14) |
+| BILL-003 | événement > 256 Kio : 413 | vert | [41010125416](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416) |
+| BILL-004 | 7 routes `/api/v1/orgs/{id}/billing…` sans identifiants : 401 + `WWW-Authenticate: Bearer` | vert | [41010125416](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416) |
 | BILL-005 à 007 | checkout Stripe test, 402 au-delà de 5 personnes en Free, 403 sans rôle de facturation | manquant | ostrom-server#15 + identité #18 (lien e-mail) + orgs (invitations) |
 | ISO-001 | B ne lit ni n'écrit rien de A, sur chaque route d'organisation servie | manquant | identité #18 + orgs (une table d'organisation servie) ; la table des routes grandit seule |
 | LOGIN-001, CLAUDE-001/003, GATE-001, YES-001/003, YESCLI-002, RECEIPT-001 | jalon | manquant | ostrom-cli#1 (login, `ostrom claude`) ; portes, oui et reçus côté serveur (GATES) |
@@ -120,3 +122,6 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
   isolation entre organisations ISO-001 (`src/isolation.ts`). Charge des portes prête : `scripts/load-setup.ts` crée
   jeton du demandeur et session de l'approbateur, la course et `gates` tournent dès `ready=true` (fin de la variable
   `OSTROM_LOAD_GATES` dans le banc).
+- 30/10 07:10 — ostrom-server#15 fusionnée (87f9d14) : facturation servie sous `/api/v1/orgs/{orgId}/billing` (décision 05:55),
+  webhook à `/api/v1/billing/stripe/webhook` (pas `/webhooks/stripe` : signalé à BILLING). BILL-002 à 004 verts ([41010125416](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416)) ;
+  BILL-001 rouge sur une hypothèse du banc (organisation inconnue `processed`), corrigé ; BILL-005 à 007 attendent l'identité et les orgs.
