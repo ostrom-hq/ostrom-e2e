@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Disposable git sandboxes for the scenarios: a bare `origin` on disk and a working clone, so that a real `git push`
 // goes somewhere the scenario can inspect, and never to the network. The clone's `origin` reads as a GitHub
 // repository (`https://github.com/<slug>.git`, what `git remote get-url origin` shows and Ostrom maps to a repository

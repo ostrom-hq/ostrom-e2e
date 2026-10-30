@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Bypass attempts from the audit of the gate (SCENARIOS.md, family BYPASS, priority « jalon »): each one is a real
 // command the fake agent runs in a git sandbox; the assertion is on what reached the bare origin, not on a message.
 // They run with the milestone journeys (OSTROM_E2E_JALON=1).

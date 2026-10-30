@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Prepares the gate load tests (load/smoke.js `gates`, load/race.js) on the running server, through its own routes:
 // a requester (dev-a, owner) with a `gates:ask` token, an approver (rev-b, admin of the same organization) signed in
 // by its e-mailed link (only a browser session may say yes), and rev-b made approver of pushes to main of the repo.

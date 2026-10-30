@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Isolation between organizations: every route an organization's member can call, called by a member of another
 // organization with the first one's ids. Nothing may succeed, crash, or echo anything of the first organization.
 export interface Caller {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 100 simultaneous "yes" on the same approval: exactly one 200, 99 × 409, one receipt (conformance « 100 approbations
 // simultanées » of the control-server spec; YES-006). Run on every ostrom-server PR and every night.
 import exec from 'k6/execution';

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Every scenario of SCENARIOS.md that has no test yet appears as a todo, with its status, so the CI report shows the
 // whole catalogue: implemented ones (status « codé » or « vert ») live in their family's file.
 import { readFileSync } from 'node:fs';

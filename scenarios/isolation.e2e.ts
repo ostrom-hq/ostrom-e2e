@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // E2E-ISO : isolation between organizations. Organization B's owner calls every organization route with A's ids:
 // nothing succeeds, nothing crashes, nothing of A comes back, and A's state is the same afterwards. The route table
 // grows with the server: a route that is not served yet is left out (and listed), it never fails the scenario.

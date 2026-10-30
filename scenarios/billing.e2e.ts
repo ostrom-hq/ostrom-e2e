@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // E2E-BILL : billing (ostrom-server#15) from outside, on the server image, with stripe-mock behind it and the bench
 // playing Stripe's webhooks. Each part switches itself on when its routes are on main (src/probe.ts).
 import { randomUUID } from 'node:crypto';

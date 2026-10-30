@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // The milestone journeys (SCENARIOS.md, priority « jalon »): `ostrom claude` under the fake agent, a gate that blocks
 // a push to main, a yes from a second account bound to the SHA, a receipt verified offline.
 // They run once the server and the CLI serve the journey (OSTROM_E2E_JALON=1, set by QA in the workflows when both

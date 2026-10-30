@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // People and organizations of the scenarios, made through the server's own routes: e-mailed sign-in (the link is read
 // from OSTROM_MAIL_DIR), the current organization, invitations. Each helper says why it cannot run yet, so a scenario
 // that needs them stays skipped with the reason until the routes are on main.

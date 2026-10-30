@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Is a route served yet? The server answers an unknown path with its router's generic 404
 // (`{"error":{"type":"not_found","message":"Not found."}}`); any other answer (401, 405, a domain 404…) means a route
 // is there. Lets a scenario switch itself on the day its route lands on main, without editing the bench.

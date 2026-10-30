@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Long load test, nightly (.github/workflows/nightly.yml): 20 minutes at a steady rate, then a ramp to find where p99
 // breaks. The thresholds fail the run and the nightly report shows it in RAPPORT.md.
 // OSTROM_LOAD_SCENARIOS picks health, asks, gates (the ramp goes with asks) while the server does not serve every route.

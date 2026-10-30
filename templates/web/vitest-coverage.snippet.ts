@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Coverage block for vite.config.ts (test.coverage). 100 % on all four metrics; the run fails below.
 // Exclusions are files that contain no logic (entry point mounting React, generated API client) and each one carries
 // its justification here. Anything else is tested. `/* v8 ignore next */` needs a `// coverage: <why>` line above it.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Shared helpers of the k6 load tests of the Ostrom server, written against the contract ostrom-core/api/openapi.yaml
 // (`/api/v1/...`; the server's liveness probe stays `/health`). Override a route with OSTROM_ROUTE_* in the workflow
 // rather than editing the scenarios.
