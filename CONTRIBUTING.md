@@ -51,7 +51,7 @@ A bug fix starts with a test that fails without the fix.
 - The pull request title follows [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
   `feat(gates): bind an approval to the commits it showed`, `fix(cli): …`, `docs: …`. Allowed types: `feat`, `fix`,
   `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `style`, `revert`. A breaking change adds `!` after the type and
-  explains the migration in the body. The `pr-title` check verifies it.
+  explains the migration in the body. The `community` check verifies it.
 - We squash merge: the pull request title becomes the commit on `main`, and the changelog line.
 - Fill the pull request template: what changes for a person, how you tested it.
 - Every check must be green. Nobody, maintainers included, merges around a red check.
@@ -66,14 +66,14 @@ git commit -s -m "fix(cli): keep the exit code of the agent"
 ```
 
 This adds `Signed-off-by: Your Name <you@example.com>` to the message. Forgot it? `git rebase --signoff main` then
-push with `--force-with-lease`. The `dco` check verifies every commit of a pull request from a contributor
+push with `--force-with-lease`. The `community` check verifies every commit of a pull request from a contributor
 without write access; maintainers signed it once for all.
 
 Contributions are made under the [Apache License 2.0](LICENSE) (inbound = outbound).
 
 ## License headers
 
-Every source file starts with its SPDX identifier, checked in CI by the `spdx` job:
+Every source file starts with its SPDX identifier, checked in CI by the `community` job:
 
 ```text
 // SPDX-License-Identifier: Apache-2.0
