@@ -1,8 +1,8 @@
-// 100 simultaneous "yes" on the same gate: exactly one 200, 99 × 409, one receipt (SPEC of the control server,
-// conformance « 100 approbations simultanées »). Run on every ostrom-server PR and every night.
+// 100 simultaneous "yes" on the same approval: exactly one 200, 99 × 409, one receipt (conformance « 100 approbations
+// simultanées » of the control-server spec; YES-006). Run on every ostrom-server PR and every night.
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
-import { ROUTES, post, sha } from './lib.js';
+import { approve, askPushToMain, requireTokens } from './lib.js';
 
 const ok = new Counter('race_ok');
 const conflict = new Counter('race_conflict');
@@ -14,15 +14,15 @@ export const options = {
 };
 
 export function setup() {
-  const g = post(ROUTES.gate, { org: 'org-0001', repo: 'backend', action: 'push-main', sha: sha(Date.now()), asked_by: 'alice', command: 'git push origin main' }, 'gate');
-  if (g.status !== 201) exec.test.abort(`gate not created: ${g.status} ${g.body}`);
-  return { id: g.json('id'), by: g.json('approvers.0') };
+  requireTokens('race');
+  const g = askPushToMain(Date.now(), 'gate');
+  if (g.status !== 200 || !g.json('approval.id')) exec.test.abort(`no pending approval: ${g.status} ${g.body}`);
+  return g.json('approval');
 }
 
-export default function (d) {
-  const r = post(ROUTES.approve, { org: 'org-0001', gate_id: d.id, by: d.by, result: 'approved' }, 'approve-race');
+export default function (approval) {
+  const r = approve(approval, 'approve-race');
   if (r.status === 200) ok.add(1);
   else if (r.status === 409) conflict.add(1);
   else other.add(1);
 }
-

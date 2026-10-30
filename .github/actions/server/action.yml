@@ -2,8 +2,10 @@ name: Ostrom server (real native binary)
 description: >
   Builds the native linuxX64 binary of ostrom-server at a given ref (cached by commit), starts it against the given
   PostgreSQL and waits for GET /health. Used by the CI of ostrom-web, ostrom-app, ostrom-cli and ostrom-e2e.
-  Contract (ostrom-e2e/templates/README.md): ostrom-server has `ci/build-linux.sh` that leaves `dist/ostrom-server`;
-  the binary reads OSTROM_DATABASE_URL and OSTROM_PORT, applies its migrations at start and answers GET /health.
+  Contract (ostrom-e2e/templates/README.md): the binary comes from `ci/build-linux.sh` (→ `dist/ostrom-server`) when
+  the repository has it, else from `./gradlew :app:linkReleaseExecutableLinuxX64`; it reads OSTROM_DATABASE_URL,
+  OSTROM_DATABASE_USER, OSTROM_DATABASE_PASSWORD and OSTROM_PORT, applies its migrations at start and answers
+  GET /health.
 inputs:
   deploy-key:
     description: Read-only deploy key of ostrom-server (org secret DEPLOY_KEY_SERVER). Empty when called from ostrom-server itself.
@@ -18,8 +20,16 @@ inputs:
     required: false
     default: ""
   database-url:
-    description: PostgreSQL URL for the server.
+    description: PostgreSQL URL for the server (postgresql://host:port/db).
     required: true
+  database-user:
+    description: PostgreSQL user.
+    required: false
+    default: ostrom
+  database-password:
+    description: PostgreSQL password.
+    required: false
+    default: ostrom
   port:
     description: Port to listen on.
     required: false
@@ -35,7 +45,7 @@ inputs:
 outputs:
   available:
     description: "true when the binary was built (or restored) and, for the server, is running."
-    value: ${{ steps.src.outputs.available }}
+    value: ${{ steps.start.outputs.up == 'true' && 'true' || 'false' }}
   url:
     description: Base URL of the running server.
     value: http://127.0.0.1:${{ inputs.port }}
@@ -68,8 +78,8 @@ runs:
         echo "dir=$dir" >> "$GITHUB_OUTPUT"
         echo "sha=$(git -C "$dir" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
         echo "bin=$RUNNER_TEMP/ostrom-bin/ostrom-server" >> "$GITHUB_OUTPUT"
-        if [ ! -x "$dir/ci/build-linux.sh" ]; then
-          echo "::${{ inputs.required == 'true' && 'error' || 'warning' }} title=ostrom-server contract::ostrom-server@$(git -C "$dir" rev-parse --short HEAD) has no executable ci/build-linux.sh yet (contract in ostrom-e2e/templates/README.md)"
+        if [ ! -x "$dir/ci/build-linux.sh" ] && [ ! -f "$dir/app/build.gradle.kts" ]; then
+          echo "::${{ inputs.required == 'true' && 'error' || 'warning' }} title=ostrom-server contract::ostrom-server@$(git -C "$dir" rev-parse --short HEAD) has neither ci/build-linux.sh nor the :app module yet (contract in ostrom-e2e/templates/README.md)"
           if [ "${{ inputs.required }}" = "true" ]; then exit 1; fi
           echo "available=false" >> "$GITHUB_OUTPUT"
         else
@@ -99,28 +109,48 @@ runs:
         key: konan-${{ runner.os }}-server-${{ hashFiles('.ostrom/server/gradle/libs.versions.toml') }}
         restore-keys: konan-${{ runner.os }}-
     - name: Build the native server
+      id: build
       if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
       working-directory: ${{ steps.src.outputs.dir }}
+      env:
+        LEVEL: ${{ inputs.required == 'true' && 'error' || 'warning' }}
+        REQUIRED: ${{ inputs.required }}
       run: |
-        ./ci/build-linux.sh
         mkdir -p "$RUNNER_TEMP/ostrom-bin"
-        cp dist/ostrom-server "$RUNNER_TEMP/ostrom-bin/ostrom-server"
+        if [ -x ci/build-linux.sh ]; then
+          out=dist/ostrom-server; ./ci/build-linux.sh && ok=1 || ok=0
+        else
+          out=app/build/bin/linuxX64/releaseExecutable/ostrom-server.kexe; ./gradlew --no-daemon :app:linkReleaseExecutableLinuxX64 && ok=1 || ok=0
+        fi
+        if [ "$ok" = 1 ] && [ -f "$out" ]; then
+          cp "$out" "$RUNNER_TEMP/ostrom-bin/ostrom-server"; echo "built=true" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+        echo "::$LEVEL title=ostrom-server contract::the build failed or did not produce $out (contract in ostrom-e2e/templates/README.md)"
+        echo "built=false" >> "$GITHUB_OUTPUT"
+        [ "$REQUIRED" = "true" ] && exit 1 || exit 0
     - name: Start the server and wait for /health
-      if: steps.src.outputs.available == 'true'
+      id: start
+      if: steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false'
       shell: bash
       env:
         OSTROM_DATABASE_URL: ${{ inputs.database-url }}
+        OSTROM_DATABASE_USER: ${{ inputs.database-user }}
+        OSTROM_DATABASE_PASSWORD: ${{ inputs.database-password }}
         OSTROM_PORT: ${{ inputs.port }}
+        OSTROM_SIGNING_KEY_FILE: ${{ runner.temp }}/ostrom-instance-key-${{ inputs.port }}.pem
         EXTRA_ENV: ${{ inputs.extra-env }}
+        LEVEL: ${{ inputs.required == 'true' && 'error' || 'warning' }}
+        REQUIRED: ${{ inputs.required }}
       run: |
         set -a; [ -n "$EXTRA_ENV" ] && eval "$(printf '%s\n' "$EXTRA_ENV" | sed 's/^/export /')"; set +a
         chmod +x "${{ steps.src.outputs.bin }}"
         nohup "${{ steps.src.outputs.bin }}" > "$RUNNER_TEMP/ostrom-server.log" 2>&1 &
         echo $! > "$RUNNER_TEMP/ostrom-server.pid"
         for i in $(seq 1 120); do
-          if curl -fsS "http://127.0.0.1:${OSTROM_PORT}/health" >/dev/null 2>&1; then echo "server up after ${i}×0.5 s"; exit 0; fi
+          if curl -fsS "http://127.0.0.1:${OSTROM_PORT}/health" >/dev/null 2>&1; then echo "server up after ${i}×0.5 s"; echo "up=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           if ! kill -0 "$(cat "$RUNNER_TEMP/ostrom-server.pid")" 2>/dev/null; then break; fi
           sleep 0.5
         done
-        echo "::error title=ostrom-server::did not answer /health within 60 s"; cat "$RUNNER_TEMP/ostrom-server.log"; exit 1
+        echo "::$LEVEL title=ostrom-server::did not answer /health within 60 s"; cat "$RUNNER_TEMP/ostrom-server.log"
+        [ "$REQUIRED" = "true" ] && exit 1 || exit 0

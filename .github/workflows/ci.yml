@@ -13,10 +13,19 @@ permissions:
   contents: read
 
 jobs:
-  lint:
-    name: lint
+  # One job on purpose: the organisation's runners are scarce (JOURNAL 30/10), so the bench takes one slot per PR.
+  # Order: cheap checks first (types, lint of the workflows, k6 parse, unit tests at 100 %), then the full stack.
+  ci:
+    name: ci
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:18
+        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -31,41 +40,16 @@ jobs:
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
       - name: k6 scripts parse (k6 inspect)
         run: for f in load/smoke.js load/race.js load/soak.js; do k6 inspect "$f" > /dev/null; done
-
-  coverage:
-    name: coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version-file: .nvmrc, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
       - name: Unit tests of the bench, 100 % thresholds
         run: pnpm test:coverage
-
-  # Full stack: the real server and the real `ostrom` built from the main branches of ostrom-server and ostrom-cli.
-  # A repository that does not meet the contract yet leaves its scenarios as todos (« bloqué »), it does not fail.
-  e2e:
-    name: e2e
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    services:
-      postgres:
-        image: postgres:18
-        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Full stack: the real server and the real `ostrom` built from the main branches of ostrom-server and ostrom-cli.
+      # A repository that does not meet the contract yet leaves its scenarios as todos (« bloqué »), it does not fail.
       - name: Real Ostrom server
         id: server
         uses: ./.github/actions/server
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
-          database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
+          database-url: postgresql://localhost:5432/ostrom
           required: "false"
       - name: Real ostrom CLI
         id: cli
@@ -73,10 +57,6 @@ jobs:
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_CLI }}
           required: "false"
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version-file: .nvmrc, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
       - name: Scenarios
         env:
           OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.url || '' }}
