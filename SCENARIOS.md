@@ -51,7 +51,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, serveur, faux GitHub
 - Source : cli/COORD/CLI.md §1a (`ostrom login`), §3.1 écran 3 ; proto/COORD/GATE-GITHUB.md « Ce qui manque » 3 (device flow jamais testé contre une vraie app)
 - Priorité : jalon
-- Statut : bloqué : ostrom-server + ostrom-cli (lien GitHub, device flow)
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (login) + ostrom-server (AUTH))
 
 ### E2E-LOGIN-002 — Repli sur le jeton `gh` du poste
 
@@ -264,7 +264,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, serveur, faux agent
 - Source : proto/COORD/VERIF-LANCEUR.md §1 (c1) et §2 « Isolation » ; proto/COORD/PONT.md « Le parcours »
 - Priorité : jalon
-- Statut : bloqué : ostrom-cli (lanceur) + ostrom-server (paquet)
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (lanceur) + ostrom-server (paquet))
 
 ### E2E-CLAUDE-002 — Une seule entrée de hook par événement
 
@@ -282,7 +282,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, faux agent
 - Source : proto/COORD/HOOK-DISPATCH.md §3 (lignes `ls`) et §4 ; proto/launcher/dev/dispatch-bench/bench.py
 - Priorité : jalon
-- Statut : bloqué : ostrom-cli
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks))
 
 ### E2E-CLAUDE-004 — Action gardée dont les checks sont déjà passés : coût constant
 
@@ -522,7 +522,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, serveur, web (oui), faux agent
 - Source : proto/COORD/VERIF-LANCEUR.md §1 (passage c1) ; proto/COORD/APPROBATION.md §5 (film à deux personnes) ; cli/COORD/CLI.md §3.3
 - Priorité : jalon
-- Statut : bloqué : ostrom-server (portes sur waits) + ostrom-cli (lanceur)
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
 
 ### E2E-GATE-002 — Le oui est consommé : un oui, un push
 
@@ -961,7 +961,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, CLI, faux agent
 - Source : proto/server/src/bridge/gate-integrity.test.ts « bug 2: a yes to a push holds for the commit it was given for; a new commit asks again » ; proto/COORD/VERIF-LANCEUR.md §3 bug 2 ; proto/COORD/CORRECTIFS.md passe 2 (passage réel, `ea600203` / `d8908d39`)
 - Priorité : jalon
-- Statut : bloqué : ostrom-server
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-server (GATES))
 
 ### E2E-YES-002 — Le oui montre les commits, le dépôt réel et le diff
 
@@ -979,7 +979,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, web
 - Source : proto/server/src/yes/approval.test.ts « the author cannot say yes to their own request when another approver exists (server-side, 403) » ; proto/COORD/APPROBATION.md §1
 - Priorité : jalon
-- Statut : bloqué : ostrom-server
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-server (GATES))
 
 ### E2E-YES-004 — Seul approbateur déclaré : son oui passe et le dit partout
 
@@ -1090,7 +1090,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, serveur
 - Source : cli/COORD/CLI.md §3.3 (dernière variante) ; proto/COORD/APPROBATION.md §8 (message du hook)
 - Priorité : jalon
-- Statut : bloqué : ostrom-cli
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (approve))
 
 ### E2E-YESCLI-003 — `ostrom wait` : codes et texte lu par les modèles
 
@@ -1414,7 +1414,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI
 - Source : proto/COORD/GATE-GITHUB.md (t = 50,3 s) ; proto/COORD/VERIF-LANCEUR.md §1 (gate → hook + oui + reçu) ; cli/COORD/CLI.md §1a (verify)
 - Priorité : jalon
-- Statut : bloqué : ostrom-cli
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (verify) + ostrom-server (reçus))
 
 ### E2E-RECEIPT-002 — `ostrom verify` d'un reçu de workflow et de son paquet
 
