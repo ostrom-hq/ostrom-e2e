@@ -18,10 +18,10 @@ jobs:
     services:
       postgres:
         image: postgres:18
-        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+        env: { POSTGRES_PASSWORD: postgres }
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
       stripe-mock:
         image: stripe/stripe-mock@sha256:aeb96b83e87a893d2ac005e363ac01ffa6e59a5ad85b49c155dfc9129de02e78 # latest, 2026-10-01 (as ostrom-server)
         ports: ["12111:12111"]
@@ -38,6 +38,8 @@ jobs:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           core-key: ${{ secrets.DEPLOY_KEY_CORE }}
           database-url: postgresql://localhost:5432/ostrom
+          # The superuser of the service only creates the roles; the server migrates as ostrom_owner, serves as ostrom_app.
+          database-admin-url: postgresql://postgres:postgres@localhost:5432/postgres
           image: "true"
           # Test values of the bench, never real ones: stripe-mock behind billing, sign-in mails written to a directory.
           extra-env: |

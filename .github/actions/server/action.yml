@@ -31,6 +31,14 @@ inputs:
   database-url:
     description: PostgreSQL URL for the server (postgresql://host:port/db).
     required: true
+  database-admin-url:
+    description: >
+      A superuser URL of the same PostgreSQL (postgresql://user:password@host:port/postgres). When the sources have
+      `ci/database-roles.sql`, the roles are created as deployed (docs/tenancy.md): `ostrom_owner` migrates the
+      database (`ostrom-server migrate`) and the server serves as `ostrom_app`, which owns nothing and cannot bypass
+      row-level security (the server refuses a role that can, S2-01). The database of `database-url` must not exist.
+    required: false
+    default: ""
   database-user:
     description: PostgreSQL user.
     required: false
@@ -195,14 +203,36 @@ runs:
         echo "::$LEVEL title=ostrom-server image::no Dockerfile, or docker build failed"
         echo "built=false" >> "$GITHUB_OUTPUT"
         [ "$REQUIRED" = "true" ] && exit 1 || exit 0
+    - name: Database roles and migrations, as deployed (ci/database-roles.sql)
+      id: db
+      if: inputs.database-admin-url != '' && steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false' && steps.image.outputs.built != 'false'
+      shell: bash
+      env:
+        DIR: ${{ steps.src.outputs.dir }}
+        ADMIN_URL: ${{ inputs.database-admin-url }}
+        DATABASE_URL: ${{ inputs.database-url }}
+        IMAGE: ${{ inputs.image }}
+        BIN: ${{ steps.src.outputs.bin }}
+      run: |
+        if [ ! -f "$DIR/ci/database-roles.sql" ]; then echo "no ci/database-roles.sql: the server serves as the given user"; exit 0; fi
+        # psql of the same PostgreSQL image as the service, on the host network: nothing installed on the runner.
+        docker run --rm -i --network host postgres:18 psql "$ADMIN_URL" -v ON_ERROR_STOP=1 < "$DIR/ci/database-roles.sql"
+        # postgresql://host:port/db → the owner's URL for `migrate`.
+        owner="postgresql://ostrom_owner:ostrom_owner@${DATABASE_URL#postgresql://}"
+        if [ "$IMAGE" = "true" ]; then
+          docker run --rm --network host -e OSTROM_DATABASE_MIGRATION_URL="$owner" ostrom-server:e2e migrate
+        else
+          chmod +x "$BIN"; OSTROM_DATABASE_MIGRATION_URL="$owner" "$BIN" migrate
+        fi
+        echo "roles=true" >> "$GITHUB_OUTPUT"
     - name: Start the server and wait for /health
       id: start
       if: steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false' && steps.image.outputs.built != 'false'
       shell: bash
       env:
         OSTROM_DATABASE_URL: ${{ inputs.database-url }}
-        OSTROM_DATABASE_USER: ${{ inputs.database-user }}
-        OSTROM_DATABASE_PASSWORD: ${{ inputs.database-password }}
+        OSTROM_DATABASE_USER: ${{ steps.db.outputs.roles == 'true' && 'ostrom_app' || inputs.database-user }}
+        OSTROM_DATABASE_PASSWORD: ${{ steps.db.outputs.roles == 'true' && 'ostrom_app' || inputs.database-password }}
         OSTROM_PORT: ${{ inputs.port }}
         KEY_FILE: ${{ runner.temp }}/ostrom-instance-key-${{ inputs.port }}.pem
         EXTRA_ENV: ${{ inputs.extra-env }}
