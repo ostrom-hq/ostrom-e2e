@@ -9,3 +9,8 @@ rules:
   github-env:
     ignore:
       - action.yml
+  # Temporary: ci.yml (the single `ci` job of the QA template) caches dependencies in a workflow that also runs on
+  # release tags. Drop the cache on tag runs, or split the release job, then remove this exception.
+  cache-poisoning:
+    ignore:
+      - ci.yml
