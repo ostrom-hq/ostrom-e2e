@@ -3,7 +3,7 @@
 // OSTROM_LOAD_SCENARIOS picks the scenarios (default: all) while the server does not serve every route yet.
 import http from 'k6/http';
 import { check } from 'k6';
-import { action, approve, ask, askPushToMain, headers, route } from './lib.js';
+import { action, approve, ask, askPushToMain, headers, pick, requireTokens, route } from './lib.js';
 
 const SCENARIOS = {
   health: {
@@ -20,15 +20,16 @@ const SCENARIOS = {
   },
 };
 
-const picked = (__ENV.OSTROM_LOAD_SCENARIOS || Object.keys(SCENARIOS).join(','))
-  .split(',')
-  .map((s) => s.trim())
-  .filter((s) => s in SCENARIOS);
+const picked = pick(Object.keys(SCENARIOS));
 
 export const options = {
   scenarios: Object.fromEntries(picked.map((k) => [k, SCENARIOS[k].scenario])),
   thresholds: Object.assign({ http_req_failed: ['rate<0.01'], checks: ['rate>0.99'] }, ...picked.map((k) => SCENARIOS[k].thresholds)),
 };
+
+export function setup() {
+  if (picked.some((k) => k !== 'health')) requireTokens(`smoke (${picked.join(',')})`);
+}
 
 export function health() {
   const r = http.get(route('health'), { headers: headers(''), tags: { name: 'health' } });

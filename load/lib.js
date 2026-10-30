@@ -3,6 +3,7 @@
 // rather than editing the scenarios.
 // Tokens: OSTROM_LOAD_TOKEN asks the gates (a device token of the requester), OSTROM_LOAD_APPROVER_TOKEN says yes
 // (a person who approves the gate of OSTROM_LOAD_REPO and is not the requester). The workflow creates both before k6.
+import exec from 'k6/execution';
 import http from 'k6/http';
 
 export const BASE = (__ENV.OSTROM_URL || 'http://127.0.0.1:4600').replace(/\/$/, '');
@@ -64,4 +65,15 @@ export function askPushToMain(n, tag) {
 export function approve(approval, tag) {
   const body = { answer: 'approve', shownDigest: approval.shownDigest };
   return http.post(route('answer', approval.id), JSON.stringify(body), { headers: headers(APPROVER), tags: { name: tag } });
+}
+
+/** Stops the run at once, with the reason, when a scenario that asks gates has no tokens (else: 401s and vague thresholds). */
+export function requireTokens(why) {
+  const missing = [['OSTROM_LOAD_TOKEN', ASKER], ['OSTROM_LOAD_APPROVER_TOKEN', APPROVER]].filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) exec.test.abort(`${why} needs ${missing.join(' and ')} (a requester and an approver of ${REPO}; templates/README.md)`);
+}
+
+/** The scenarios named by OSTROM_LOAD_SCENARIOS (all of `known` when unset). */
+export function pick(known) {
+  return (__ENV.OSTROM_LOAD_SCENARIOS || known.join(',')).split(',').map((s) => s.trim()).filter((s) => known.includes(s));
 }

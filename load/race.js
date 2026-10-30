@@ -2,7 +2,7 @@
 // simultanées » of the control-server spec; YES-006). Run on every ostrom-server PR and every night.
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
-import { approve, askPushToMain } from './lib.js';
+import { approve, askPushToMain, requireTokens } from './lib.js';
 
 const ok = new Counter('race_ok');
 const conflict = new Counter('race_conflict');
@@ -14,6 +14,7 @@ export const options = {
 };
 
 export function setup() {
+  requireTokens('race');
   const g = askPushToMain(Date.now(), 'gate');
   if (g.status !== 200 || !g.json('approval.id')) exec.test.abort(`no pending approval: ${g.status} ${g.body}`);
   return g.json('approval');

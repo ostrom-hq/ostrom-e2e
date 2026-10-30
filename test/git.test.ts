@@ -17,7 +17,15 @@ describe('git sandbox', () => {
     expect(originSha(sb, 'feature')).toBe(sha);
   });
 
-  it('never reaches the network: https and ssh remotes are rewritten to a missing path', () => {
+  it('shows a GitHub origin while pushes land in the bare origin', () => {
+    const sb = sandbox('api', 'acme/api');
+    expect(sb.slug).toBe('acme/api');
+    expect(git(sb.work, 'remote', 'get-url', 'origin')).toBe('https://github.com/acme/api.git');
+    expect(git(sb.work, 'remote', 'get-url', '--push', 'origin')).toBe(sb.origin);
+    expect(sandbox('web').slug).toBe('acme/web');
+  });
+
+  it('never pushes to the network: other https and ssh remotes are rewritten to a missing path', () => {
     const sb = sandbox();
     git(sb.work, 'remote', 'add', 'gh', 'https://github.com/ostrom-hq/ostrom-e2e.git');
     expect(git(sb.work, 'remote', 'get-url', '--push', 'gh')).toBe(`${sb.root}/no-network/github.com/ostrom-hq/ostrom-e2e.git`);

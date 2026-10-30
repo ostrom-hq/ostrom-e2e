@@ -44,6 +44,7 @@ export class FakeGitHub {
   readonly requests: Recorded[] = [];
   readonly checkRuns: CheckRun[] = [];
   private readonly tokens = new Map<string, FakeUser>();
+  private readonly ids = new Map<string, number>();
   private readonly pulls = new Map<string, FakePull>();
   private readonly compares = new Map<string, readonly string[]>();
   private readonly devices = new Map<string, DeviceCode>();
@@ -59,12 +60,15 @@ export class FakeGitHub {
 
   /** Registers a user; returns the token that identifies them. */
   user(login: string, token = `gho_${login}`): string {
-    this.tokens.set(token, { login, id: 1000 + this.tokens.size });
+    const id = this.ids.get(login) ?? 1000 + this.ids.size;
+    this.ids.set(login, id);
+    this.tokens.set(token, { login, id });
     return token;
   }
 
-  /** The next device flow will be approved by this login. */
+  /** The next device flow will be approved by this login; a prepared flow nobody started is dropped. */
   deviceLogin(login: string): string {
+    for (const [code, d] of this.devices) if (d.polls === 0) this.devices.delete(code);
     const code = `dev_${this.nextId++}`;
     this.devices.set(code, { login, polls: 0 });
     return code;
@@ -114,12 +118,18 @@ export class FakeGitHub {
     const raw = Buffer.concat(chunks).toString('utf8');
     const type = req.headers['content-type'] ?? '';
     let body: unknown = raw;
-    if (type.includes('json') && raw) body = JSON.parse(raw);
-    else if (type.includes('x-www-form-urlencoded')) body = Object.fromEntries(new URLSearchParams(raw));
-    const path = String(req.url).split('?')[0] as string;
+    let status: number;
+    let out: unknown;
+    const path = decodeURIComponent(String(req.url).split('?')[0] as string);
     const method = String(req.method);
+    try {
+      if (type.includes('json') && raw) body = JSON.parse(raw);
+      else if (type.includes('x-www-form-urlencoded')) body = Object.fromEntries(new URLSearchParams(raw));
+      [status, out] = this.route(method, path, body, req);
+    } catch (e) {
+      [status, out] = [400, { message: `Problems parsing JSON: ${(e as Error).message}` }];
+    }
     this.requests.push({ method, path, body, authorization: req.headers.authorization ?? '' });
-    const [status, out] = this.route(method, path, body, req);
     res.writeHead(status, { 'content-type': 'application/json' });
     res.end(JSON.stringify(out));
   }

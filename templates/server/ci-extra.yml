@@ -72,11 +72,11 @@ jobs:
       - name: k6 smoke (p95/p99 thresholds)
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
-          # Only the routes the server serves today; QA adds asks,gates when the gate routes are on main.
-          OSTROM_LOAD_SCENARIOS: health
+          OSTROM_LOAD_SCENARIOS: ${{ vars.OSTROM_LOAD_GATES == 'true' && 'health,asks,gates' || 'health' }}
         run: k6 run --summary-export smoke-summary.json .ostrom/e2e/load/smoke.js
       - name: k6 race (exactly one yes wins out of 100)
-        if: false # QA turns it on when the gate routes are on main
+        # Org variable OSTROM_LOAD_GATES, set to true by QA once the gate routes and the two tokens are on main.
+        if: vars.OSTROM_LOAD_GATES == 'true'
         env: { OSTROM_URL: "${{ steps.server.outputs.url }}" }
         run: k6 run --summary-export race-summary.json .ostrom/e2e/load/race.js
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

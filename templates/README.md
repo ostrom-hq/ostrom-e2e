@@ -52,6 +52,8 @@ l'organisation) construisent les vrais binaires natifs linuxX64, en cache par co
 
 Les routes sont celles du contrat `ostrom-core/api/openapi.yaml` (`/api/v1/...`, sonde `/health`) ; `OSTROM_ROUTE_*`
 les change sans toucher aux scénarios. Jetons : `OSTROM_LOAD_TOKEN` (le demandeur) et `OSTROM_LOAD_APPROVER_TOKEN`
-(un approbateur de la porte de `OSTROM_LOAD_REPO`, défaut `acme/api`), créés par le job avant k6. Seuils de
+(un approbateur de la porte de `OSTROM_LOAD_REPO`, défaut `acme/api`), créés par le job avant k6. Tant que la variable d'organisation `OSTROM_LOAD_GATES` n'est pas `true` (QA la pose quand
+les routes des portes et ces jetons sont sur `main`), seul `/health` est mesuré et la course ne tourne pas ; un
+scénario de porte lancé sans jetons s'arrête aussitôt en le disant. Seuils de
 départ, recalés sur la première série verte (le serveur de contrôle du prototype consomme ~0,1 ms de CPU par
 `/check` et ~0,2-0,6 ms par porte : ces seuils laissent large pour un runner partagé).

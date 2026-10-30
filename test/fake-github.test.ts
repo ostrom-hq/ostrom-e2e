@@ -35,8 +35,20 @@ describe('FakeGitHub', () => {
     expect((await call('GET', '/orgs/x', { token: `token ${t}` })).status).toBe(404);
   });
 
+  it('keeps one GitHub id per login, decodes paths and answers 400 to malformed JSON', async () => {
+    const first = gh.user('same');
+    const id = (await call('GET', '/user', { token: `token ${first}` })).json['id'];
+    const second = gh.user('same', 'gho_other');
+    expect((await call('GET', '/user', { token: `token ${second}` })).json['id']).toBe(id);
+    gh.compare('acme/api', 'main', 'feat/x', ['c9']);
+    expect((await call('GET', '/repos/acme/api/compare/main...feat%2Fx', { token: `token ${first}` })).json['total_commits']).toBe(1);
+    const bad = await fetch(`${url}/user`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
+    expect(bad.status).toBe(400);
+  });
+
   it('runs the device flow: pending, then a token for the prepared login', async () => {
     expect((await call('POST', '/login/device/code', { form: { client_id: 'c' } })).status).toBe(404);
+    gh.deviceLogin('stale');
     const code = gh.deviceLogin('dev-a');
     const start = await call('POST', '/login/device/code', { form: { client_id: 'c' } });
     expect(start.json).toMatchObject({ device_code: code, interval: 0 });
@@ -44,6 +56,8 @@ describe('FakeGitHub', () => {
     const done = await call('POST', '/login/oauth/access_token', { form: { device_code: code } });
     expect((await call('GET', '/user', { token: `token ${String(done.json['access_token'])}` })).json['login']).toBe('dev-a');
     expect((await call('POST', '/login/oauth/access_token', { text: 'device_code=x' })).json).toEqual({ error: 'expired_token' });
+    gh.deviceLogin('later');
+    expect((await call('POST', '/login/oauth/access_token', { json: { device_code: code } })).json['access_token']).toBe('gho_dev-a');
   });
 
   it('serves pull requests, compare and check runs, and records every request', async () => {

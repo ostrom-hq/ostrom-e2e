@@ -26,7 +26,7 @@ jobs:
         uses: ./.github/actions/server
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
-          database-url: postgresql://ostrom:ostrom@localhost:5432/ostrom
+          database-url: postgresql://localhost:5432/ostrom
           required: "false"
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
         if: steps.server.outputs.available == 'true'
@@ -34,9 +34,11 @@ jobs:
         if: steps.server.outputs.available == 'true'
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
+          OSTROM_LOAD_SCENARIOS: ${{ vars.OSTROM_LOAD_GATES == 'true' && 'health,asks,gates' || 'health' }}
         run: k6 run --summary-export soak-summary.json load/soak.js
       - name: k6 race (100 simultaneous yes)
-        if: steps.server.outputs.available == 'true'
+        # Org variable OSTROM_LOAD_GATES, set to true by QA once the gate routes and the two tokens are on main.
+        if: vars.OSTROM_LOAD_GATES == 'true' && steps.server.outputs.available == 'true'
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
         run: k6 run --summary-export race-summary.json load/race.js
