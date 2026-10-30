@@ -28,6 +28,9 @@ jobs:
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) latest .
           ./actionlint -color .github/workflows/*.yml templates/*/ci.yml
+      - uses: grafana/setup-k6-action@v1
+      - name: k6 scripts parse (k6 inspect)
+        run: for f in load/smoke.js load/race.js load/soak.js; do k6 inspect "$f" > /dev/null; done
 
   coverage:
     name: coverage
