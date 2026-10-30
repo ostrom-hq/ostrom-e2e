@@ -6,8 +6,7 @@
 name: Chart load
 on:
   push:
-    # ci/chart-load: TEMPORARY, proves the workflow before merge (dispatch needs it on main); removed before merge.
-    branches: [main, ci/chart-load]
+    branches: [main]
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
