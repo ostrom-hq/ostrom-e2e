@@ -70,7 +70,8 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | ATT | 3 | 3 | 2 | 0 | 0 | 1 |
 | GHORG | 3 | 0 | 3 | 0 | 0 | 0 |
 | BUDGET | 2 | 0 | 0 | 2 | 0 | 0 |
-| **Total** | 391 | 69 | 34 | 51 | 0 | 306 |
+| SWEEP | 6 | 0 | 0 | 6 | 0 | 0 |
+| **Total** | 397 | 69 | 34 | 57 | 0 | 306 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un

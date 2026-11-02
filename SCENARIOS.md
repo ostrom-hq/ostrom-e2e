@@ -3720,6 +3720,61 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Source : `demo/PARCOURS.md` 3.5 ; JOURNAL 02/11 23:43 (SPEND-GUARD, recette du parcours réel) ; ostrom-server#133 (96ae0554) ; contrat core#55 (`InferenceRefused`)
 - Priorité : P1
 - Statut : codé : `scenarios/budget.e2e.ts`
+## SWEEP : Balayage d'isolation entre organisations, généré depuis le contrat
+
+### E2E-SWEEP-001 — Chaque route servie a un cas
+
+- Étapes : les routes servies : `served-routes.txt` d'ostrom-core plus celles que `scripts/served-routes.py` lit dans le serveur testé ; pour chacune, l'opération OpenAPI (`security: []` public, en-tête `Ostrom-Org`, paramètres de chemin, corps échantillonné depuis le schéma) et le type de ressource de chaque paramètre (`PARAM_KINDS`, par préfixe).
+- Attendu : aucune route servie sans cas : une route absente du contrat, un paramètre de type inconnu, ou une écriture sur le compte de l'appelant sans raison écrite (`SKIPPED`) fait échouer le scénario et nomme ce qu'il faut ajouter.
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+
+### E2E-SWEEP-002 — Une session navigateur de B n'obtient rien de A, sur chaque route servie
+
+- Étapes : B se connecte par lien e-mailé. A (propriétaire) crée ce qu'il peut : invitation, jeton, clé de service, appareil, workflow, paquet, session, porte, approbation, reçu, règle, automation, attente, serveur MCP et sa politique, secret, runner, session cloud, artefact, compte partagé (ce qu'il n'a pas pu créer est listé au run). Pour chaque cas, B appelle la route avec les identifiants réels de A et `Ostrom-Org: A`, puis, si la route agit dans une organisation, avec `Ostrom-Org: B` ; chaque appel est refait avec une ressource absente de même forme (`mimic`). Les GET d'abord, les suppressions en dernier.
+- Attendu : jamais de 2xx sur une ressource de A ; la même réponse qu'une ressource absente (statut, et corps une fois retirés les identifiants envoyés et `requestId`) : 404, ou 403 si la route le prévoit pour les deux ; jamais de 5xx ; aucun corps qui contienne l'id, le slug, le nom, l'e-mail, le login de A, l'invité ou une de ses ressources. Une fuite absente de `KNOWN` fait échouer le scénario, et une fuite connue qui ne se produit plus aussi (comme un `it.fails`).
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+
+### E2E-SWEEP-003 — Un jeton personnel de B n'obtient rien de A, sur chaque route servie
+
+- Étapes : B crée un jeton avec toutes les portées que `GET /api/v1/tokens/scopes` propose (hors `gates:answer`, `agent:session`, `*`). A (propriétaire) crée ce qu'il peut : invitation, jeton, clé de service, appareil, workflow, paquet, session, porte, approbation, reçu, règle, automation, attente, serveur MCP et sa politique, secret, runner, session cloud, artefact, compte partagé (ce qu'il n'a pas pu créer est listé au run). Pour chaque cas, B appelle la route avec les identifiants réels de A et `Ostrom-Org: A`, puis, si la route agit dans une organisation, avec `Ostrom-Org: B` ; chaque appel est refait avec une ressource absente de même forme (`mimic`). Les GET d'abord, les suppressions en dernier.
+- Attendu : jamais de 2xx sur une ressource de A ; la même réponse qu'une ressource absente (statut, et corps une fois retirés les identifiants envoyés et `requestId`) : 404, ou 403 si la route le prévoit pour les deux ; jamais de 5xx ; aucun corps qui contienne l'id, le slug, le nom, l'e-mail, le login de A, l'invité ou une de ses ressources. Une fuite absente de `KNOWN` fait échouer le scénario, et une fuite connue qui ne se produit plus aussi (comme un `it.fails`).
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+
+### E2E-SWEEP-004 — Un jeton CLI de B n'obtient rien de A, sur chaque route servie
+
+- Étapes : connexion d'appareil de B approuvée dans son navigateur. A (propriétaire) crée ce qu'il peut : invitation, jeton, clé de service, appareil, workflow, paquet, session, porte, approbation, reçu, règle, automation, attente, serveur MCP et sa politique, secret, runner, session cloud, artefact, compte partagé (ce qu'il n'a pas pu créer est listé au run). Pour chaque cas, B appelle la route avec les identifiants réels de A et `Ostrom-Org: A`, puis, si la route agit dans une organisation, avec `Ostrom-Org: B` ; chaque appel est refait avec une ressource absente de même forme (`mimic`). Les GET d'abord, les suppressions en dernier.
+- Attendu : jamais de 2xx sur une ressource de A ; la même réponse qu'une ressource absente (statut, et corps une fois retirés les identifiants envoyés et `requestId`) : 404, ou 403 si la route le prévoit pour les deux ; jamais de 5xx ; aucun corps qui contienne l'id, le slug, le nom, l'e-mail, le login de A, l'invité ou une de ses ressources. Une fuite absente de `KNOWN` fait échouer le scénario, et une fuite connue qui ne se produit plus aussi (comme un `it.fails`).
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+
+### E2E-SWEEP-005 — Le jeton élevé `osg_` de B n'obtient rien de A, sur chaque route servie
+
+- Étapes : connexion d'appareil avec les trois portées de gouvernance (`ostrom login --admin`), approuvée par B propriétaire ; sauté tant que le serveur ne rend pas de jeton `osg_` (attend ostrom-server#137). A (propriétaire) crée ce qu'il peut : invitation, jeton, clé de service, appareil, workflow, paquet, session, porte, approbation, reçu, règle, automation, attente, serveur MCP et sa politique, secret, runner, session cloud, artefact, compte partagé (ce qu'il n'a pas pu créer est listé au run). Pour chaque cas, B appelle la route avec les identifiants réels de A et `Ostrom-Org: A`, puis, si la route agit dans une organisation, avec `Ostrom-Org: B` ; chaque appel est refait avec une ressource absente de même forme (`mimic`). Les GET d'abord, les suppressions en dernier.
+- Attendu : jamais de 2xx sur une ressource de A ; la même réponse qu'une ressource absente (statut, et corps une fois retirés les identifiants envoyés et `requestId`) : 404, ou 403 si la route le prévoit pour les deux ; jamais de 5xx ; aucun corps qui contienne l'id, le slug, le nom, l'e-mail, le login de A, l'invité ou une de ses ressources. Une fuite absente de `KNOWN` fait échouer le scénario, et une fuite connue qui ne se produit plus aussi (comme un `it.fails`).
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, sauté sur le run 41541422573 (le login donne un `osc_`) : attend ostrom-server#137 (`ostrom login --admin`)
+
+### E2E-SWEEP-006 — Une clé de service de B n'obtient rien de A, sur chaque route servie
+
+- Étapes : B crée une clé de service de son organisation avec toutes les portées proposées. A (propriétaire) crée ce qu'il peut : invitation, jeton, clé de service, appareil, workflow, paquet, session, porte, approbation, reçu, règle, automation, attente, serveur MCP et sa politique, secret, runner, session cloud, artefact, compte partagé (ce qu'il n'a pas pu créer est listé au run). Pour chaque cas, B appelle la route avec les identifiants réels de A et `Ostrom-Org: A`, puis, si la route agit dans une organisation, avec `Ostrom-Org: B` ; chaque appel est refait avec une ressource absente de même forme (`mimic`). Les GET d'abord, les suppressions en dernier.
+- Attendu : jamais de 2xx sur une ressource de A ; la même réponse qu'une ressource absente (statut, et corps une fois retirés les identifiants envoyés et `requestId`) : 404, ou 403 si la route le prévoit pour les deux ; jamais de 5xx ; aucun corps qui contienne l'id, le slug, le nom, l'e-mail, le login de A, l'invité ou une de ses ressources. Une fuite absente de `KNOWN` fait échouer le scénario, et une fuite connue qui ne se produit plus aussi (comme un `it.fails`).
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
 
 ## Récapitulatif
 
@@ -3768,6 +3823,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | ATT | Attestation des checks d'un reçu | 3 | 3 | 0 | 0 |
 | GHORG | Installation GitHub d'une organisation, `?org` | 3 | 0 | 3 | 0 |
 | BUDGET | Budgets appliqués par le gateway | 2 | 0 | 2 | 0 |
-| **Total** | | **343** | **46** | **177** | **120** |
+| SWEEP | Balayage d'isolation entre organisations, généré depuis le contrat | 6 | 0 | 6 | 0 |
+| **Total** | | **349** | **46** | **183** | **120** |
 
 Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-BYPASS-020, E2E-BYPASS-021, E2E-BYPASS-023, E2E-BYPASS-024, E2E-BYPASS-026, E2E-BYPASS-028, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.
