@@ -353,13 +353,14 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
 
   it.skipIf(W013 !== '')(named('E2E-PARC-013 — 3.2 the gate catalogue of the org, and its signed form the hook reads', W013), async () => {
     const a = await owner('parc-013');
-    const catalog = await call(a.c, 'GET', '/api/v1/gates/catalog');
-    expect(catalog.status).toBe(200);
+    // The catalogue is a repository's (`GateCatalogApi(repo)`): without `?repo=` the server answers 400.
+    const catalog = await call(a.c, 'GET', '/api/v1/gates/catalog?repo=acme%2Fparc');
+    expect(catalog.status, JSON.stringify(catalog.body)).toBe(200);
     expect(typeof catalog.body).toBe('object');
-    const signed = await call(a.c, 'GET', '/api/v1/gates/catalog/signed');
-    expect(signed.status).toBe(200);
+    const signed = await call(a.c, 'GET', '/api/v1/gates/catalog/signed?repo=acme%2Fparc');
+    expect(signed.status, JSON.stringify(signed.body)).toBe(200);
     expect(JSON.stringify(signed.body)).toMatch(/sig|signature|kid/i);
-    await needsCredential('GET', '/api/v1/gates/catalog');
+    await needsCredential('GET', '/api/v1/gates/catalog?repo=acme%2Fparc');
   }, T);
 
   it.skipIf(W014 !== '')(named('E2E-PARC-014 — 3.3 the approvers graph: approvers, unanswered gates, ungated repositories', W014), async () => {
@@ -465,7 +466,8 @@ describe('E2E-PARC: 4. workflows and automations', () => {
   it.skipIf(W021 !== '')(named('E2E-PARC-021 — 4.1 a workflow is created, edited with its version, listed, deleted; the current package reads', W021), async () => {
     const a = await owner('parc-021');
     const wid = `parc-${randomUUID().slice(0, 8)}`;
-    const made = await call(a.c, 'POST', '/api/v1/workflows', { workflow: workflow(wid, 'Parc 021') });
+    // POST takes the workflow itself; PUT takes `{workflow, expectedVersion}` (`SaveWorkflowRequest`, CompilerApi.kt).
+    const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(wid, 'Parc 021'));
     expect(made.status, JSON.stringify(made.body)).toBeLessThan(300);
     expect(JSON.stringify(made.body)).toContain(wid);
     const version = (made.body['version'] ?? (made.body['workflow'] as Record<string, unknown> | undefined)?.['version']) as number;
@@ -570,12 +572,13 @@ describe('E2E-PARC: 5. the CLI, gates, receipts (server side)', () => {
     expect(launch.status, JSON.stringify(launch.body)).toBe(201);
     for (const k of ['launchId', 'agentToken', 'expiresAt']) expect(typeof launch.body[k], k).toBe('string');
     const agent: Caller = { token: launch.body['agentToken'] as string, org: a.org.id, ...(a.c.from ? { from: a.c.from } : {}) };
-    const sessions = itemsOf((await call(a.c, 'GET', '/api/v1/sessions')).body);
-    const s = sessions.find((x) => JSON.stringify(x).includes(launch.body['launchId'] as string)) ?? sessions[0];
-    expect(s, 'the launch opened no session').toBeTruthy();
-    const sid = (s as Record<string, unknown>)['id'] as string;
+    // A launch opens no session by itself: the agent's first hook does (`POST /api/v1/sessions`, StartSessionRequest).
+    const sid = randomUUID();
+    const opened = await call(agent, 'POST', '/api/v1/sessions', { id: sid, launchId: launch.body['launchId'], repo: 'acme/parc', agent: 'claude' });
+    expect(opened.status, JSON.stringify(opened.body)).toBeLessThan(300);
+    expect(JSON.stringify((await call(a.c, 'GET', '/api/v1/sessions')).body)).toContain(sid);
     expect((await call(agent, 'POST', `/api/v1/sessions/${sid}/alive`)).status).toBeLessThan(300);
-    expect((await call(agent, 'POST', `/api/v1/sessions/${sid}/seen`, { kind: 'mcp', name: 'ostrom', via: 'hook' })).status).toBeLessThan(300);
+    expect((await call(agent, 'POST', `/api/v1/sessions/${sid}/seen`, { kind: 'skill', name: 'ostrom', via: 'hook' })).status).toBeLessThan(300);
     const end = await call(agent, 'POST', `/api/v1/sessions/${sid}/end`, {});
     expect(end.body?.['session']).toMatchObject({ id: sid });
     expect(end.body['receipt']).toBeTruthy();

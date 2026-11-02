@@ -80,8 +80,10 @@ async function sessionWithCheck(who: string) {
   const launch = await call(a.c, 'POST', '/api/v1/launches', { agent: 'claude', repo: 'acme/att' });
   expect(launch.status, JSON.stringify(launch.body)).toBe(201);
   const agent: Caller = { token: String(launch.body['agentToken']), org: a.org.id, ...(a.c.from ? { from: a.c.from } : {}) };
-  const sessionId = String(launch.body['sessionId'] ?? '') || String(itemsOf((await call(a.c, 'GET', '/api/v1/sessions')).body)[0]?.['id'] ?? '');
-  expect(sessionId).not.toBe('');
+  // The agent's first hook opens the session of the launch (`POST /api/v1/sessions`, StartSessionRequest).
+  const sessionId = randomUUID();
+  const opened = await call(agent, 'POST', '/api/v1/sessions', { id: sessionId, launchId: launch.body['launchId'], repo: 'acme/att', agent: 'claude', packageDigest: digest });
+  expect(opened.status, JSON.stringify(opened.body)).toBeLessThan(300);
   return { a, agent, digest, sessionId };
 }
 
