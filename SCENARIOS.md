@@ -455,6 +455,15 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P2
 - Statut : bloqué : ostrom-cli + ostrom-server
 
+### E2E-CLAUDE-020 — Sans `--repo`, le dépôt est lu sur `origin`
+
+- Étapes : `ostrom claude` sans `--repo`, dans un clone de `https://github.com/acme/<nom>.git` rangé dans un dossier `api`.
+- Attendu : la session est enregistrée pour `acme/<nom>` (propriétaire/nom lus sur `origin`, comme le dit l'aide de `--repo`), et le paquet servi est celui de ce dépôt : une porte posée sur `acme/<nom>` s'y applique.
+- Surfaces : CLI réelle, serveur (image), faux agent
+- Source : run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393 (session enregistrée pour `api`, paquet à 0 workflow) ; `AgentLaunchUseCase.kt` prend `folderName(top)` ; JOURNAL 02/11 → CLI-AGENTS
+- Priorité : P1
+- Statut : rouge connu : `scenarios/jalon.e2e.ts` en `it.fails` (retirer `.fails` quand la CLI lit `origin`)
+
 
 ## CODEX : `ostrom codex` et les autres agents
 
@@ -3645,7 +3654,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), intégration GitHub
 - Source : JOURNAL 30/10 13:35 (décision 12:55 codée dans ostrom-server#44 : `FindOrgUseCase`, owner ou admin)
 - Priorité : P1
-- Statut : codé : `scenarios/github-org.e2e.ts`. #44 est sur main (44fc2fde), mais au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41467580197 le lancement répond 403 « This credential belongs to no organization », au propriétaire aussi : `actorOf` passe par `GateActorResolver`, et seul `NoGateActors` est lié sur main. Allumé par sonde dès ostrom-server#84 (`LaunchGateActors`, `POST /api/v1/launches`).
+- Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
 
 ### E2E-GHORG-002 — Un membre, un étranger et un slug inconnu reçoivent le même 403 ; sans session, 401
 
@@ -3654,7 +3663,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), intégration GitHub, organisations
 - Source : JOURNAL 30/10 13:35 (« membre, étranger et slug inconnu reçoivent le même ») ; le cas étranger est aussi dans E2E-GH-INSTALL-001 d'e2e#23
 - Priorité : P1
-- Statut : codé : `scenarios/github-org.e2e.ts`. #44 est sur main (44fc2fde), mais au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41467580197 le lancement répond 403 « This credential belongs to no organization », au propriétaire aussi : `actorOf` passe par `GateActorResolver`, et seul `NoGateActors` est lié sur main. Allumé par sonde dès ostrom-server#84 (`LaunchGateActors`, `POST /api/v1/launches`).
+- Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
 
 ### E2E-GHORG-003 — Un admin lance l'installation ; rétrogradé membre, il est refusé
 
@@ -3663,7 +3672,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), intégration GitHub, organisations
 - Source : JOURNAL 30/10 13:35 ; contrat `updateOrgMember`
 - Priorité : P1
-- Statut : codé : `scenarios/github-org.e2e.ts`. #44 est sur main (44fc2fde), mais au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41467580197 le lancement répond 403 « This credential belongs to no organization », au propriétaire aussi : `actorOf` passe par `GateActorResolver`, et seul `NoGateActors` est lié sur main. Allumé par sonde dès ostrom-server#84 (`LaunchGateActors`, `POST /api/v1/launches`).
+- Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
 
 ## Récapitulatif
 
@@ -3671,7 +3680,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 |---|---|---|---|---|---|
 | LOGIN | Login et premier lancement | 9 | 1 | 7 | 1 |
 | CONN | Connexion GitHub et Slack (onboarding) | 15 | 0 | 7 | 8 |
-| CLAUDE | `ostrom claude` : lancement, hooks, budget du hook | 19 | 4 | 9 | 6 |
+| CLAUDE | `ostrom claude` : lancement, hooks, budget du hook | 20 | 4 | 10 | 6 |
 | CODEX | `ostrom codex` et les autres agents | 9 | 0 | 4 | 5 |
 | GATE | Porte qui bloque un push | 15 | 5 | 9 | 1 |
 | BYPASS | Contournements de la porte (audit du 30/10 et trous connus) | 33 | 12 | 18 | 3 |
@@ -3711,6 +3720,6 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | ISO | Isolation entre organisations | 1 | 1 | 0 | 0 |
 | ATT | Attestation des checks d'un reçu | 3 | 3 | 0 | 0 |
 | GHORG | Installation GitHub d'une organisation, `?org` | 3 | 0 | 3 | 0 |
-| **Total** | | **339** | **46** | **173** | **120** |
+| **Total** | | **340** | **46** | **174** | **120** |
 
 Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-BYPASS-020, E2E-BYPASS-021, E2E-BYPASS-023, E2E-BYPASS-024, E2E-BYPASS-026, E2E-BYPASS-028, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.

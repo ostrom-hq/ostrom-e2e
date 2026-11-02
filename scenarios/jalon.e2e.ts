@@ -127,7 +127,7 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
   it('E2E-CLAUDE-001 — ostrom claude launches the agent under the session package, writing nothing in the repo or ~/.claude', async () => {
     const sb = sandbox('api', w.repo);
     const before = git(sb.work, 'status', '--porcelain', '--ignored');
-    const { run, log } = await w.dev.cli.claude(sb.work, { steps: [{ event: 'SessionStart', source: 'startup' }, { event: 'tool', tool: 'Bash', input: { command: 'ls' }, run: true }, { event: 'SessionEnd' }] });
+    const { run, log } = await w.dev.cli.claude(sb.work, { steps: [{ event: 'SessionStart', source: 'startup' }, { event: 'tool', tool: 'Bash', input: { command: 'ls' }, run: true }, { event: 'SessionEnd' }] }, ['--repo', w.repo]);
     expect(run.code, run.stderr).toBe(0);
     expect(log?.steps.map((s) => s.blocked)).toEqual([false, false, false]);
     expect(log?.steps[1]?.hooks.length).toBeGreaterThan(0);
@@ -151,7 +151,7 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     const push = bash('git push origin main');
 
     // 1. The push is refused before it runs; the refusal names the request to wait for.
-    const first = await w.dev.cli.claude(sb.work, push);
+    const first = await w.dev.cli.claude(sb.work, push, ['--repo', w.repo]);
     const refused = first.log?.steps[0];
     expect(refused?.blocked, first.run.stderr).toBe(true);
     expect(refused?.reason).toMatch(/waiting for a yes/i);
@@ -184,14 +184,14 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     expect(theirs).toBeDefined();
     const yes = await answer(w.rev.browser, theirs);
     expect(yes.status, JSON.stringify(yes.body)).toBe(200);
-    const second = await w.dev.cli.claude(sb.work, push);
+    const second = await w.dev.cli.claude(sb.work, push, ['--repo', w.repo]);
     expect(second.log?.steps[0]?.blocked, second.log?.steps[0]?.reason).toBe(false);
     expect(originSha(sb, 'main')).toBe(shaA);
     receipt = receiptIdIn(yes.body) ?? receiptIdIn(second.log?.steps[0]?.reason ?? '');
 
     // 5. E2E-YES-001: a new commit is a new request: the yes for shaA does not cover shaB.
     const shaB = commit(sb.work, 'b.txt', 'b\n', 'feat: b');
-    const third = await w.dev.cli.claude(sb.work, push);
+    const third = await w.dev.cli.claude(sb.work, push, ['--repo', w.repo]);
     expect(third.log?.steps[0]?.blocked).toBe(true);
     expect(gateIdIn(third.log?.steps[0]?.reason ?? '')).not.toBe(gate);
     expect(originSha(sb, 'main')).toBe(shaA);
@@ -221,5 +221,18 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     expect(ms.length).toBe(20);
     // Prototype measure: 5.5 ms wall on a loaded Mac (28/10). CI budget with a ×3 margin and process start: 50 ms median.
     expect(ms[10]).toBeLessThan(50);
+  }, 120_000);
+
+  // Known gap (run 41480063393): `--repo` says « Repository (else read from origin) », but AgentLaunchUseCase takes the
+  // folder's name (`folderName(top)`), so a gate set on `acme/api` never reaches a session in a clone named `api`. The
+  // journey above passes `--repo`; this one stays `it.fails` until the CLI reads origin: remove `.fails` then.
+  it.fails('E2E-CLAUDE-020 — without --repo, ostrom claude names the repository from origin (owner/name), not from the folder', async () => {
+    const slug = `acme/from-origin-${Date.now().toString(36)}`;
+    const sb = sandbox('api', slug);
+    const { run } = await w.dev.cli.claude(sb.work, { steps: [{ event: 'SessionStart', source: 'startup' }, { event: 'SessionEnd' }] });
+    expect(run.code, run.stderr).toBe(0);
+    const sessions = await call(w.dev.browser.caller, 'GET', '/api/v1/sessions');
+    const repos = ((sessions.body['items'] as Record<string, unknown>[] | undefined) ?? []).map((s) => s['repo']);
+    expect(repos, JSON.stringify(repos)).toContain(slug);
   }, 120_000);
 });
