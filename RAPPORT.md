@@ -25,7 +25,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 <!-- scenarios:begin -->
 | Famille | Scénarios | dont jalon | vert | codé | écrit | bloqué |
 |---|---|---|---|---|---|---|
-| LOGIN | 9 | 1 | 0 | 1 | 0 | 8 |
+| LOGIN | 9 | 1 | 0 | 2 | 0 | 7 |
 | CONN | 16 | 0 | 0 | 1 | 0 | 15 |
 | CLAUDE | 20 | 4 | 1 | 2 | 0 | 17 |
 | CODEX | 9 | 0 | 0 | 0 | 0 | 9 |
@@ -69,7 +69,8 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | PARC | 37 | 15 | 6 | 31 | 0 | 0 |
 | ATT | 3 | 3 | 2 | 0 | 0 | 1 |
 | GHORG | 3 | 0 | 3 | 0 | 0 | 0 |
-| **Total** | 389 | 69 | 34 | 48 | 0 | 307 |
+| SWEEP | 6 | 0 | 0 | 6 | 0 | 0 |
+| **Total** | 395 | 69 | 34 | 55 | 0 | 306 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un

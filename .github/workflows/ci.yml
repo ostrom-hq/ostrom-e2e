@@ -139,6 +139,26 @@ jobs:
           deploy-key: ${{ secrets.DEPLOY_KEY_CLI }}
           core-key: ${{ secrets.DEPLOY_KEY_CORE }}
           required: "true"
+      # E2E-SWEEP: the contract of ostrom-core main (OpenAPI, api/contract/served-routes.txt) and the routes the server
+      # under test serves (core's scripts/served-routes.py read on its sources): a served route without a case fails the
+      # sweep, so a new route cannot be forgotten. A missing checkout fails the job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ostrom-hq/ostrom-core
+          ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
+          path: .ostrom/core-contract
+          sparse-checkout: |
+            api/openapi.yaml
+            api/contract
+            scripts/served-routes.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Contract of the sweep (served routes, OpenAPI as JSON)
+        run: |
+          python3 .ostrom/core-contract/scripts/served-routes.py .ostrom/server > "$RUNNER_TEMP/served-by-server.txt"
+          cat .ostrom/core-contract/api/contract/served-routes.txt "$RUNNER_TEMP/served-by-server.txt" > "$RUNNER_TEMP/served-routes.txt"
+          yq -o=json .ostrom/core-contract/api/openapi.yaml > "$RUNNER_TEMP/openapi.json"
+          wc -l "$RUNNER_TEMP/served-by-server.txt" "$RUNNER_TEMP/served-routes.txt" "$RUNNER_TEMP/openapi.json"
       - name: Scenarios
         env:
           OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.url || '' }}
@@ -156,6 +176,9 @@ jobs:
           OSTROM_E2E_TEAMCODE_PASSWORD: teamcode-ro
           OSTROM_E2E_TEAMCODE_KEY_FILE: ${{ github.workspace }}/.ostrom/helm/compose/demo/teamcode/key.txt
           OSTROM_E2E_FAKE_TOKENS_PORT: "4620"
+          # E2E-SWEEP: the routes to sweep and the operations they come from (step above).
+          OSTROM_E2E_SERVED_ROUTES: ${{ runner.temp }}/served-routes.txt
+          OSTROM_E2E_OPENAPI: ${{ runner.temp }}/openapi.json
         run: pnpm e2e --reporter=default --reporter=json --outputFile=e2e-results.json
       # Short load test on the served public routes; the thresholds of load/smoke.js fail the job.
       - name: k6 smoke against the server image (health, instance)
