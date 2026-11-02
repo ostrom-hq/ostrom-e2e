@@ -3674,12 +3674,12 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
 
-### E2E-GHORG-002 — Un membre, un étranger et un slug inconnu reçoivent le même 403 ; sans session, 401
+### E2E-GHORG-002 — Un membre reçoit 403 ; un étranger et un slug inconnu reçoivent le même 404 ; sans session, 401
 
 - Étapes : le propriétaire invite un membre (rôle `member`) qui accepte ; un étranger se connecte ; chacun lance `install/start?org=<id>`, l'étranger aussi avec un slug qui n'existe pas ; un appel sans session.
-- Attendu : 403 sans redirection pour les trois, avec le même `error.type` et le même message (rien ne distingue un membre d'un étranger, ni une organisation existante d'une absente) ; 401 sans session.
+- Attendu : sans redirection, 403 pour le membre (pas propriétaire ni admin) ; 404 pour l'étranger et pour le slug inconnu, avec le même `error.type` et le même message (rien ne distingue une organisation où l'on n'est pas d'une organisation absente) ; 401 sans session.
 - Surfaces : serveur (image), intégration GitHub, organisations
-- Source : JOURNAL 30/10 13:35 (« membre, étranger et slug inconnu reçoivent le même ») ; le cas étranger est aussi dans E2E-GH-INSTALL-001 d'e2e#23
+- Source : JOURNAL 30/10 13:35 ; JOURNAL 02/11 20:48 (ostrom-server#143 : une org dont on n'est pas membre répond 404) ; le cas étranger est aussi dans E2E-GH-INSTALL-001 d'e2e#23
 - Priorité : P1
 - Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
 
