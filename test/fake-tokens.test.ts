@@ -85,6 +85,27 @@ describe('FakeTokens', () => {
     expect((await post(tokens.url, JSON.stringify({ grant_type: 'refresh_token', refresh_token: 'rt-2' }))).status).toBe(200);
   });
 
+  it("answers the Messages API with a message that bills the chosen usage, apart from the refreshes", async () => {
+    tokens = await new FakeTokens().start();
+    const messages = tokens.url.replace('/v1/oauth/token', '/v1/messages');
+    const call = (body: unknown) => fetch(messages, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer fake-access-9' }, body: JSON.stringify(body) });
+    const first = await call({ model: 'claude-opus-5', max_tokens: 1, messages: [] });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({
+      id: 'msg_fake_1', type: 'message', role: 'assistant', model: 'claude-opus-5', content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 },
+    });
+    tokens.usage = { input_tokens: 300_000, output_tokens: 1 };
+    const second = (await (await call({ messages: [] })).json()) as { usage: unknown; model?: unknown };
+    expect(second.usage).toEqual({ input_tokens: 300_000, output_tokens: 1 });
+    expect(second.model).toBeUndefined();
+    expect(tokens.calls).toEqual([
+      { model: 'claude-opus-5', maxTokens: 1, authorization: 'Bearer fake-access-9' },
+      { model: undefined, maxTokens: undefined, authorization: 'Bearer fake-access-9' },
+    ]);
+    expect(tokens.refreshes).toEqual([]);
+  });
+
   it('listens on the port it is given, refuses one already taken, and stops once', async () => {
     tokens = await new FakeTokens().start();
     await expect(tokens.start(), 'started twice').rejects.toThrow('already listening');

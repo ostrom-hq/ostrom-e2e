@@ -69,8 +69,9 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | PARC | 37 | 15 | 6 | 31 | 0 | 0 |
 | ATT | 3 | 3 | 2 | 0 | 0 | 1 |
 | GHORG | 3 | 0 | 3 | 0 | 0 | 0 |
+| BUDGET | 2 | 0 | 0 | 2 | 0 | 0 |
 | SWEEP | 6 | 0 | 0 | 6 | 0 | 0 |
-| **Total** | 395 | 69 | 34 | 55 | 0 | 306 |
+| **Total** | 397 | 69 | 34 | 57 | 0 | 306 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un
