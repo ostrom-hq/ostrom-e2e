@@ -479,9 +479,12 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect(JSON.stringify((await call(a.c, 'GET', '/api/v1/workflows')).body)).toContain('Parc 021 bis');
     const b = await owner('parc-021-b');
     await hidden(b.c, '/api/v1/workflows', wid);
-    expect([200, 404]).toContain((await call(a.c, 'GET', '/api/v1/packages/current')).status);
-    expect((await call(a.c, 'DELETE', `/api/v1/workflows/${wid}`)).status).toBeLessThan(300);
+    // Deleted before the package is read: reading `packages/current` pins a package, and a workflow a pinned package
+    // compiles is kept (409 `workflow_in_use`, WorkflowsUseCases.kt; run 41477443350).
+    const deleted = await call(a.c, 'DELETE', `/api/v1/workflows/${wid}`);
+    expect(deleted.status, JSON.stringify(deleted.body)).toBeLessThan(300);
     expect(JSON.stringify((await call(a.c, 'GET', '/api/v1/workflows')).body)).not.toContain(wid);
+    expect([200, 404]).toContain((await call(a.c, 'GET', '/api/v1/packages/current')).status);
     await needsCredential('GET', '/api/v1/workflows');
   }, T);
 

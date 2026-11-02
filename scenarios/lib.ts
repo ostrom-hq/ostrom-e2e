@@ -4,7 +4,7 @@
 // fake GitHub, OSTROM_E2E_JALON=1) kept for bypass.e2e.ts, and the real one (`realWorld()`): people signed in by their
 // e-mailed link in the browser, the real `ostrom login` approved from that browser, the gate made by a workflow.
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentLog, Script } from '../src/fake-agent.ts';
@@ -45,11 +45,14 @@ export const CONSOLE_URL = process.env['OSTROM_E2E_CONSOLE_URL'] ?? 'http://127.
 export function person(login: string, github?: FakeGitHub): Person {
   const home = mkdtempSync(join(tmpdir(), `ostrom-e2e-${login}-`));
   // The real `ostrom claude` finds its agent on PATH only (`finder.find(agent.executable)`, AgentLaunchUseCase.kt):
-  // the fake agents go first on this person's PATH under the names `claude` and `codex` (run 41474679433).
+  // the fake agents go first on this person's PATH under the names `claude` and `codex` (run 41474679433). A wrapper,
+  // not a link: bin/fake-claude finds fake-agent.ts next to its own path (run 41477443350).
   const agents = join(home, 'agents');
   mkdirSync(agents);
-  symlinkSync(FAKE_CLAUDE, join(agents, 'claude'));
-  symlinkSync(FAKE_CODEX, join(agents, 'codex'));
+  for (const [name, target] of [['claude', FAKE_CLAUDE], ['codex', FAKE_CODEX]] as const) {
+    writeFileSync(join(agents, name), `#!/bin/sh\nexec '${target}' "$@"\n`);
+    chmodSync(join(agents, name), 0o755);
+  }
   const env: Record<string, string> = {
     PATH: `${agents}:${String(process.env['PATH'])}`,
     HOME: home,
