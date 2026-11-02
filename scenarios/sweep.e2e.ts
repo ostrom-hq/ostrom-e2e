@@ -278,7 +278,7 @@ async function makeWorld(): Promise<World> {
   const sha = 'a'.repeat(8) + tag.replace(/[^0-9a-f]/g, '0').padEnd(32, '0');
   await make('gate', async () => {
     if (!agent) throw new Error('no session');
-    const r = await call(agent, 'POST', '/api/v1/gates', { repo: 'acme/sweep', class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
+    const r = await call(agent, 'POST', '/api/v1/gates', { sessionId: values['session'], repo: 'acme/sweep', class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
     return made(r, ['gate', 'id'], ['id']);
   });
   await make('approval', async () => {
@@ -296,7 +296,7 @@ async function makeWorld(): Promise<World> {
     return id;
   });
   await make('rule', () => post('/api/v1/rules', { statement: `Sweep rule ${tag}`, group: 'git' }, 'createRule', ['id']));
-  await make('automation', () => post('/api/v1/automations', { name: `sweep ${tag}`, trigger: { kind: 'schedule', cron: '0 3 * * *' }, steps: [] }, 'createAutomation', ['id']));
+  await make('automation', () => post('/api/v1/automations', { name: `sweep ${tag}`, trigger: { kind: 'cron', cron: '0 21 * * *', timezone: 'Europe/Paris' }, action: { prompt: `Sweep ${tag} {{run.date}}` } }, 'createAutomation', ['id']));
   await make('wait', () => post('/api/v1/waits', { question: `Sweep question ${tag}` }, 'createWait', ['id']));
   await make('mcpServer', () => post('/api/v1/mcp/servers', { name: `sweep-${tag}`, url: 'https://mcp.example.test/mcp', transport: 'http', tools: ['search'] }, 'createMcpServer', ['name']));
   await make('mcpPolicy', async () => {
