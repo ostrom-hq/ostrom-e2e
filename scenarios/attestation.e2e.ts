@@ -57,6 +57,14 @@ function checkNodes(receipt: unknown): Record<string, unknown>[] {
   return found;
 }
 
+/** A rule whose gate on pushes to main of [repo] asks for the `tests` check, attested (contract RuleGate.checks). */
+const ruleAskingAttested = (repo: string) => ({
+  statement: 'Tests run by Ostrom or the CI before a push to main',
+  group: 'git',
+  scope: [repo],
+  gate: { actions: [{ class: 'push-main', label: 'Push to main', patterns: [], repos: [repo] }], approvers: [], checks: [{ check: 'tests', attested: true }] },
+});
+
 /** The id the compiler gave the script of check node `nodeId` (`s-<node>`, PackageCompiler.kt), read in the package. */
 function scriptOf(body: unknown, nodeId: string): string {
   const seen: unknown[] = [body];
@@ -140,20 +148,28 @@ describe('E2E-ATT: the attestation of a check run (decision 30/10 13:23, contrac
     for (const node of checkNodes(receipt.body['receipt'])) expect(node['attestation']).not.toMatch(/^(ci|isolated_runner)$/);
   }, T);
 
-  // Known gap (run 41491873101): the rules route keeps the rule's gate without `checks` (contract RuleGateCheck,
-  // `attested`), so no gate can ask for an attested run yet. `it.fails` until the rules keep it (JOURNAL 02/11 →
-  // SRV-REGLES-2; no server PR open for it yet, #79 does not touch it): remove `.fails` then.
-  (W003 !== '' ? it.skip : it.fails)(named('E2E-ATT-003 a rule gate asking for an attested check is not satisfied by a declared run', W003), async () => {
-    const { a, agent, digest, sessionId, scriptId } = await sessionWithCheck('att-003');
+  // E2E-ATT-003 is split (JOURNAL 02/11 22:27). a: the rule keeps its gate's `checks` (RuleGateCheck, `attested`), since
+  // ostrom-server#145 (b462063).
+  it.skipIf(W003 !== '')(named('E2E-ATT-003a a rule gate keeps the checks it needs and their attestation', W003), async () => {
+    const a = await owner('att-003a');
     const repo = `acme/att-${randomUUID().slice(0, 6)}`;
-    const rule = await call(a.c, 'POST', '/api/v1/rules', {
-      statement: 'Tests run by Ostrom or the CI before a push to main',
-      group: 'git',
-      scope: [repo],
-      gate: { actions: [{ class: 'push-main', label: 'Push to main', patterns: [], repos: [repo] }], approvers: [], checks: [{ check: 'tests', attested: true }] },
-    });
+    const rule = await call(a.c, 'POST', '/api/v1/rules', ruleAskingAttested(repo));
     expect(rule.status, JSON.stringify(rule.body)).toBeLessThan(300);
-    expect(JSON.stringify(rule.body)).toContain('"attested":true');
+    expect((rule.body['gate'] as Record<string, unknown> | undefined)?.['checks']).toEqual([{ check: 'tests', attested: true }]);
+    const listed = await call(a.c, 'GET', '/api/v1/rules');
+    expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+    const kept = itemsOf(listed.body).find((r) => r['id'] === rule.body['id']);
+    expect((kept?.['gate'] as Record<string, unknown> | undefined)?.['checks'], JSON.stringify(kept)).toEqual([{ check: 'tests', attested: true }]);
+  }, T);
+
+  // b: the gate refuses a check the workstation only declared. Known gap: the gate does not enforce the attestation yet;
+  // it waits for the SRV-REGLES-2 PR that makes it (JOURNAL 02/11 22:27, after server#81; no PR open yet). `it.fails`
+  // until then: remove `.fails` when it merges.
+  (W003 !== '' ? it.skip : it.fails)(named('E2E-ATT-003b a rule gate asking for an attested check is not satisfied by a declared run', W003), async () => {
+    const { a, agent, digest, sessionId, scriptId } = await sessionWithCheck('att-003b');
+    const repo = `acme/att-${randomUUID().slice(0, 6)}`;
+    const rule = await call(a.c, 'POST', '/api/v1/rules', ruleAskingAttested(repo));
+    expect(rule.status, JSON.stringify(rule.body)).toBeLessThan(300);
     expect((await call(agent, 'POST', '/api/v1/checks', { sessionId, digest, nodeId: 'tests', scriptId, exit: 0, outcome: 'passed' })).status).toBe(201);
     const sha = randomUUID().replaceAll('-', '').padEnd(40, '0').slice(0, 40);
     const asked = await call(agent, 'POST', '/api/v1/gates', { repo, class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
