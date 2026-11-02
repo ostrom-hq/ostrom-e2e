@@ -181,7 +181,9 @@ jobs:
                       - { name: FAKE_MCP_SLOW_MS, value: "1000" }
                     ports: [{ containerPort: 8080 }, { containerPort: 8443 }]
                     readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 2 }
-                    resources: { requests: { cpu: 200m, memory: 128Mi }, limits: { memory: 512Mi } }
+                    # A small CPU request: the kind node has 2 CPUs, and since ostrom-helm#36 the chart asks 250m per
+                    # server replica and 250m for PostgreSQL; 200m here left PostgreSQL unscheduled (run 41542985718).
+                    resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 512Mi } }
                     securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
                     volumeMounts:
                       - { name: code, mountPath: /app }
