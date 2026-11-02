@@ -232,6 +232,9 @@ export async function journeyUnavailable(): Promise<string> {
     ['POST', `/api/v1/sessions/${sample}/end`, '#26'],
     ['POST', '/api/v1/gates', 'gates'],
     ['POST', `/api/v1/approvals/${sample}/answer`, 'gates'],
+    // A person's current org (the only membership, or `Ostrom-Org`) on the current-org routes such as POST
+    // /api/v1/workflows: before it, "This credential belongs to no organization" (run 41459755344).
+    ['GET', '/api/v1/me/organizations', '#64'],
   ];
   const missing: string[] = [];
   for (const [method, path, pr] of needed) if (!(await isServed(SERVER_URL, path, method))) missing.push(`${method} ${path.replace(sample, '{id}')} (${pr})`);

@@ -82,8 +82,9 @@ describe.skipIf(LOGIN_OFF !== '')(`jalon: real ostrom login${skipped(LOGIN_OFF)}
     expect(JSON.stringify(tokens.body)).toMatch(/"kind":"cli"/i);
     expect(JSON.stringify(tokens.body)).not.toMatch(SECRET);
 
-    // The token speaks for the person: `whoami` names them where the CLI has it; else a command that calls the server
-    // with the token (`ostrom inbox`, GET /api/v1/approvals) succeeds.
+    // The token speaks for the person: `whoami` names them where the CLI has it; else `ostrom inbox` (GET
+    // /api/v1/approvals) reaches the server signed in. A refusal that names a scope is the server knowing who calls
+    // (403), never the 401 of a missing or unknown token. Whether inbox then lists anything is E2E-LOGIN-009.
     if (HAS_WHOAMI) {
       const who = await m.cli.ostrom(['whoami']);
       expect(who.code, who.stderr).toBe(0);
@@ -91,9 +92,26 @@ describe.skipIf(LOGIN_OFF !== '')(`jalon: real ostrom login${skipped(LOGIN_OFF)}
       expect(who.stdout + who.stderr).not.toMatch(SECRET);
     } else {
       const inbox = await m.cli.ostrom(['inbox']);
-      expect(inbox.code, inbox.stderr + inbox.stdout).toBe(0);
-      expect(inbox.stdout + inbox.stderr).not.toMatch(SECRET);
+      const said = inbox.stdout + inbox.stderr;
+      expect(said).not.toMatch(SECRET);
+      if (inbox.code !== 0) {
+        expect(said, said).toMatch(/does not allow [a-z]+:[a-z*]+/);
+        expect(said).not.toMatch(/sign in|log ?in|unauthori[sz]ed|401/i);
+      }
     }
+  }, 180_000);
+
+  // Known server gap, reported in the JOURNAL (02/11, → AUTH-REPRISE, GATES): the token of `ostrom login` holds
+  // CLI_SCOPES (profile:read, orgs:read, workflows:read, sessions:write), and `GET /api/v1/approvals` needs gates:read
+  // (`GateScopes.readingApprovals`), so `ostrom inbox` always ends in 77 after a login. `it.fails` keeps the bench
+  // green while the gap stands and turns red the day it is fixed: then drop `.fails`.
+  it.fails('E2E-LOGIN-009 — after `ostrom login`, `ostrom inbox` lists the approvals waiting for the person', async () => {
+    const m = await member(await signIn(email('dev-inbox')));
+    const { run } = await deviceLogin(m.cli, m.browser);
+    expect(run.code, run.stderr).toBe(0);
+    const inbox = await m.cli.ostrom(['inbox']);
+    expect(inbox.code, inbox.stderr + inbox.stdout).toBe(0);
+    expect(inbox.stdout + inbox.stderr).not.toMatch(SECRET);
   }, 180_000);
 });
 

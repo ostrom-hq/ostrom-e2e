@@ -1,7 +1,7 @@
 # Tableau de bord des tests d'Ostrom
 
 Tenu par l'agent QA. Règle (Lyes, 30/10/2026) : unitaires, intégration, end-to-end et charge, 100 % des lignes et
-des branches imposé par la CI, checks obligatoires sur `main`. Mis à jour le 30/10/2026 à 11:20. « posée » = PR obligatoire, à jour avec `main`, admins compris, ni force-push
+des branches imposé par la CI, checks obligatoires sur `main`. Mis à jour le 02/11/2026. « posée » = PR obligatoire, à jour avec `main`, admins compris, ni force-push
 ni suppression, historique linéaire.
 
 ## Par dépôt
@@ -25,8 +25,8 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 <!-- scenarios:begin -->
 | Famille | Scénarios | dont jalon | vert | codé | écrit | bloqué |
 |---|---|---|---|---|---|---|
-| LOGIN | 8 | 1 | 0 | 1 | 0 | 7 |
-| CONN | 15 | 0 | 0 | 0 | 0 | 15 |
+| LOGIN | 9 | 1 | 0 | 1 | 0 | 8 |
+| CONN | 16 | 0 | 0 | 1 | 0 | 15 |
 | CLAUDE | 19 | 4 | 0 | 2 | 0 | 17 |
 | CODEX | 9 | 0 | 0 | 0 | 0 | 9 |
 | GATE | 15 | 5 | 0 | 1 | 0 | 14 |
@@ -64,9 +64,12 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
 | OBS | 3 | 0 | 0 | 0 | 0 | 3 |
 | SRV | 4 | 2 | 4 | 0 | 0 | 0 |
-| BILL | 7 | 0 | 4 | 3 | 0 | 0 |
-| ISO | 2 | 2 | 0 | 2 | 0 | 0 |
-| **Total** | 340 | 51 | 15 | 20 | 0 | 305 |
+| BILL | 7 | 0 | 7 | 0 | 0 | 0 |
+| ISO | 2 | 2 | 2 | 0 | 0 | 0 |
+| PARC | 37 | 15 | 6 | 31 | 0 | 0 |
+| ATT | 3 | 3 | 0 | 3 | 0 | 0 |
+| GHORG | 3 | 0 | 0 | 3 | 0 | 0 |
+| **Total** | 385 | 69 | 26 | 53 | 0 | 306 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un
@@ -87,15 +90,19 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
 | BILL-004 | 7 routes `/api/v1/orgs/{id}/billing…` sans identifiants : 401 + `WWW-Authenticate: Bearer` | vert | [41010125416](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41010125416) |
 | AUTH-001 | lien par e-mail : une seule connexion, cookie HttpOnly/SameSite, CSRF, profil ; lien réutilisé ou forgé refusé | vert | [41037581947](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947) (PR ostrom-e2e#19, image ostrom-server@51ad17b, rôle `ostrom_app`, `Origin` de #58) |
 | AUTH-002 | GitHub OAuth (faux GitHub du banc) : PKCE S256, `state` lié au navigateur, secret et `code_verifier` à l'échange ; mauvais `state`, code rejoué, refus → `/login?error=` sans session | vert | [41037581947](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947) (PR ostrom-e2e#19, image ostrom-server@51ad17b, rôle `ostrom_app`, `Origin` de #58) |
-| AUTH-003 | connexion d'appareil de la CLI (RFC 8628) : oui dans le navigateur, un jeton sans `gates:answer` ni `user:*`, une seule fois ; code refusé → `denied` | vert | [41037581947](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947) (PR ostrom-e2e#19, image ostrom-server@51ad17b, rôle `ostrom_app`, `Origin` de #58) |
+| AUTH-003 | connexion d'appareil de la CLI (RFC 8628), sondage du contrat (#62) : 428 tant qu'en attente, puis `AuthToken {token, login, scopes}` au login de la personne ; jeton sans `gates:answer` ni `user:*`, une seule fois ; code refusé → 400 `access_denied` | vert | [41456816659](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41456816659) (image ostrom-server@fa6755b8) |
 | AUTH-004 | jeton révoqué, jeton tourné, déconnexion, « partout » : refusés à l'appel suivant | vert | [41037581947](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947) (PR ostrom-e2e#19, image ostrom-server@51ad17b, rôle `ostrom_app`, `Origin` de #58) |
 | AUTH-005 | sans identifiant ou mauvais : 401 + `WWW-Authenticate: Bearer` ; écriture sans CSRF refusée ; jeton sur route navigateur 403 ; portées `gates:answer`, `user:*`, `agent:session` refusées | vert | [41037581947](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947) (PR ostrom-e2e#19, image ostrom-server@51ad17b, rôle `ostrom_app`, `Origin` de #58) |
 | AUTH-006 | un jeton CLI ne dit jamais oui : 403, seule une session navigateur répond (canal BROWSER) | vert | [41037581947](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947) |
-| BILL-005 à 007 | checkout Stripe test, 402 au-delà de 5 personnes en Free, 403 sans rôle de facturation | rouge | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057), encore au run [41037581947](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947) : `POST /api/v1/orgs` → 500 sous le rôle déployé `ostrom_app`. `OrgsRepositoryImpl.create` insère hors `inOrg`, et la RLS refuse la ligne. Bug serveur signalé à AUTH-REPRISE (JOURNAL 10:48) ; le banc ne le contourne pas |
-| ISO-001 | B ne lit, n'écrit ni ne liste rien de A : organisation, membres, invitations, facturation, sessions, artefacts, secrets MCP, automations, attentes, budgets, reçus, approbations, comptes, usage | rouge | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057), encore au run [41037581947](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947) : même 500 à la création des deux organisations |
-| ISO-002 | pendant console (demande WEB) : rien de A dans ce que la console lit pour B | rouge | [41034102057](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41034102057), encore au run [41037581947](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41037581947) : même 500 |
-| LOGIN-001 | `ostrom login` réel contre l'image réelle : code lu sur la sortie de la CLI, oui depuis la session navigateur, fichier 0600 sans secret, jeton `cli` listé | manquant | codé, allumé par sonde dès ostrom-server#62 (sondage 428 du contrat) ; ostrom-cli#40 est sur `main` |
+| BILL-005 à 007 | checkout Stripe test, refus du 6e en Free (402), 403 sans rôle de facturation | vert | [41456816659](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41456816659) (image ostrom-server@fa6755b8, #67 : organisations sous `ostrom_app`) |
+| ISO-001 | B ne lit, n'écrit ni ne liste rien de A : organisation, membres, invitations, facturation, sessions, artefacts, secrets MCP, automations, attentes, budgets, reçus, approbations, comptes, usage | vert | [41456816659](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41456816659) (31 routes ; A ne crée pas encore sessions cloud, artefacts, secrets, automations : routes de l'org courante, #64) |
+| ISO-002 | pendant console (demande WEB) : rien de A dans ce que la console lit pour B | vert | [41456816659](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41456816659) |
+| LOGIN-001 | `ostrom login` réel contre l'image réelle : code lu sur la sortie de la CLI, oui depuis la session navigateur, fichier 0600 sans secret, jeton `cli` listé, jeton authentifié | rouge, corrigé dans le banc | [41456816659](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41456816659) : la connexion réelle passe ; `ostrom inbox` sort en 77 (trou du serveur, LOGIN-009). Avant, au run 41054325763, le banc refusait à tort l'indice de 12 caractères du jeton |
 | CLAUDE-001, GATE-001, YES-001, YES-003, YESCLI-002, RECEIPT-001 | jalon : `ostrom claude`, porte sur le push, oui de l'approbateur en session fraîche lié au SHA, auto-approbation refusée, jeton refusé, reçu | manquant | codés contre la CLI et l'image réelles ; s'allument avec ostrom-server#43 (flux, catalogue signé, paquets) et #26 (sessions). La vérification hors ligne attend une commande `verify` de la CLI |
+| LOGIN-009 | `ostrom inbox` après `ostrom login` | rouge connu (`it.fails`) | `CLI_SCOPES` sans `gates:read`, que demande `GET /api/v1/approvals` ; → AUTH-REPRISE, GATES (JOURNAL 02/11) |
+| ATT-001 à 003 | attestation d'un check : `workstation_declared` dans le reçu signé, le poste ne peut se dire `ci` ni `isolated_runner`, porte `attested` non satisfaite par une déclaration | manquant | codés, allumés par sondes (`/launches`, `/checks`, reçu de workflow : #84, #78 ; règles : SRV-REGLES-2) |
+| GHORG-001 à 003 | `install/start?org` : propriétaire et admin oui (id, slug) ; membre, étranger, slug inconnu : même 403 ; 401 sans session ; admin rétrogradé refusé | manquant | codés, allumés par sonde dès ostrom-server#44 |
+| PARC-001/003/005/006/010/028 | parcours client contre le vrai serveur | vert | [41456816659](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41456816659) ; les 31 autres attendent #64 (org courante), #43/#84/#78 |
 | AUTH-007 | une session de plus de 5 min ne dit pas oui (403 `step_up_required`), reconnectée elle le peut | manquant | codé (session vieillie en base) ; s'allume avec #43, demande #41 pour passer |
 | APP (Maestro) | flux Maestro de l'app sur émulateur Android | vert, dans ostrom-app | [41026295995](https://github.com/ostrom-hq/ostrom-app/actions/runs/41026295995) (`main` d'ostrom-app@8b38da1, flux `login.yaml`, sans serveur Ostrom). Pas dans le job `ci` du banc : un émulateur de plus après deux constructions natives dépasse le budget runner ; les flux contre l'image réelle iront dans le nightly |
 | BYPASS-001/005/024 | contournements | manquant | idem (porte servie par le serveur, hooks par la CLI) |
@@ -162,3 +169,10 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
     LOGIN-001, CLAUDE-001, GATE-001, YES-001/003, YESCLI-002 et RECEIPT-001, réécrits contre la CLI et l'image
     réelles et allumés par sondes (#62, #43, #26) ;
   - Maestro : runs de l'app cités, pas dans le banc.
+- 02/11 — Run [41456816659](https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41456816659), image ostrom-server@fa6755b8 (#45, #62, #67), après la pause :
+  - verts : SRV-001 à 004, AUTH-001 à 006 (AUTH-003 sur le sondage du contrat : 428 puis `AuthToken`), BILL-001 à 007,
+    ISO-001/002, PARC-001/003/005/006/010/028 ;
+  - LOGIN-001 : la connexion réelle de la CLI passe ; `ostrom inbox` après connexion sort en 77, le jeton de la CLI n'a pas
+    `gates:read` (LOGIN-009, rouge connu, signalé à AUTH-REPRISE et GATES) ;
+  - codés et allumés par sondes : ATT-001 à 003 (attestation, décision du 30/10 13:23) et GHORG-001 à 003 (`?org`,
+    décision du 30/10 12:55) ; le parcours « porte, oui du second membre, reçu » attend #64, #84 et #78.
