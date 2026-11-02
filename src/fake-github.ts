@@ -192,11 +192,12 @@ export class FakeGitHub {
       return [200, { device_code: code, user_code: 'ABCD-1234', verification_uri: `${this.url}/login/device`, expires_in: 900, interval: 0 }];
     }
     if (method === 'POST' && path === '/login/oauth/access_token' && fields['code'] !== undefined) {
-      // A sign-in code (`oauthCode`) is good once, like GitHub's; any other code is the install's (`webCode`).
+      // A code of the install's return (`webCode`) goes to the App's client; a sign-in code (`oauthCode`) is good once,
+      // like GitHub's; anything else, or a code already used, is `bad_verification_code`.
+      if (this.webCodes.has(String(fields['code']))) return this.exchange(fields);
       const login = this.codes.get(String(fields['code']));
-      if (login === undefined) return this.exchange(fields);
       this.codes.delete(String(fields['code']));
-      return [200, { access_token: `gho_${login}`, token_type: 'bearer', scope: 'read:user,user:email' }];
+      return login ? [200, { access_token: `gho_${login}`, token_type: 'bearer', scope: 'read:user,user:email' }] : [200, { error: 'bad_verification_code' }];
     }
     if (method === 'POST' && path === '/login/oauth/access_token') {
       const d = this.devices.get(String(fields['device_code']));
@@ -248,8 +249,7 @@ export class FakeGitHub {
       return [200, { error: 'incorrect_client_credentials' }];
     }
     const code = String(fields['code']);
-    const login = this.webCodes.get(code);
-    if (login === undefined) return [200, { error: 'bad_verification_code' }];
+    const login = this.webCodes.get(code) as string; // `handle` only sends a known code here
     this.webCodes.delete(code);
     return [200, { access_token: this.user(login, `ghu_${login}_${this.nextId++}`), token_type: 'bearer', scope: '' }];
   }
