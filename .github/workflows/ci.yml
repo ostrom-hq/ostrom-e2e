@@ -8,12 +8,21 @@ on:
     tags: ["[0-9]*"]
   merge_group:
   workflow_dispatch:
+    inputs:
+      server_image:
+        description: >
+          A published image of ostrom-server to run the scenarios against, instead of building main
+          (ghcr.io/ostrom-hq/ostrom-server:sha-<7>): the run a PARCOURS cell cites (JOURNAL 03/11 00:06).
+        required: false
+        default: ""
 # One run per workflow and ref; a new push cancels the previous run, except on main (every main commit is checked).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 permissions:
   contents: read
+  # pulls a published image of ostrom-server when a dispatch names one (server_image)
+  packages: read
 
 jobs:
   # One job on purpose: the organisation's runners are scarce (JOURNAL 30/10), so the bench takes one slot per PR.
@@ -104,6 +113,7 @@ jobs:
           # The superuser of the service only creates the roles; the server migrates as ostrom_owner, serves as ostrom_app.
           database-admin-url: postgresql://postgres:postgres@localhost:5432/postgres
           image: "true"
+          published-image: ${{ inputs.server_image }}
           # Test values of the bench, never real ones: stripe-mock behind billing, sign-in mails written to a directory.
           extra-env: |
             OSTROM_STRIPE_SECRET_KEY=sk_test_e2e
