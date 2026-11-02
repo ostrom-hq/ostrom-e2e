@@ -241,6 +241,8 @@ jobs:
           OSTROM_URL: ${{ env.API_URL }}
           OSTROM_LOAD_SCENARIOS: gates
           OSTROM_LOAD_APPROVER_ORIGIN: http://app.ostrom.test
+          # ostrom-server#127: the answer to a yes carries the signed receipt; the check is on.
+          OSTROM_E2E_ANSWER_RECEIPT: "1"
         run: |
           # The race runs even when a check of the gates fails: its own thresholds (1 × 200, 99 × 409) are
           # another question, and its numbers would be lost. The step fails if either run fails.
