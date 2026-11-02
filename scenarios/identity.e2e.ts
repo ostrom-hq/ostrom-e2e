@@ -312,7 +312,7 @@ describe.skipIf(!STEP_UP_READY)(`E2E-AUTH: step-up of a yes${STEP_UP_READY ? '' 
     const gateId = (gate.body['gate'] as { id?: string } | undefined)?.id;
     const pending = await call(approver.caller, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
     const mine = ((pending.body['items'] as { id: string; group?: string; shownDigest: string }[] | undefined) ?? []).find((a) => a.group === gateId);
-    expect(mine, JSON.stringify(pending.body)).toBeDefined();
+    expect(mine, JSON.stringify({ gate: gate.body, pending: pending.body })).toBeDefined();
     const answer = (who: typeof approver) => call(who.caller, 'POST', `/api/v1/approvals/${mine?.id}/answer`, { answer: 'approve', shownDigest: mine?.shownDigest });
 
     ageSessions(who.id, 6);
