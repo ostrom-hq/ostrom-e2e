@@ -67,6 +67,10 @@ async function needsCredential(method: string, path: string, body?: unknown) {
 // membership or the `Ostrom-Org` header: ostrom-server#64. Before it, a person gets 403 « belongs to no organization »
 // or 404 « Organization not found » there (run 41052130887; JOURNAL 10:00). Marker: `GET /api/v1/me/organizations`.
 const ORG64 = (await needs(['GET', '/api/v1/me/organizations'])) === '' ? '' : 'needs the current org of a person, ostrom-server#64';
+// The gates, compiler, sessions and GitHub routes resolve their caller by `GateActorResolver`: on server main only
+// `NoGateActors` is bound (always null, 403 "belongs to no organization") until `LaunchGateActors` of ostrom-server#84
+// (JOURNAL 02/11 16:20, run 41467580197). `POST /api/v1/launches` comes with it.
+const ACTORS = ORG64 || ((await needs(['POST', '/api/v1/launches'])) === '' ? '' : 'needs a real GateActorResolver, ostrom-server#84');
 const W001 = await needs(['POST', '/api/v1/orgs'], ['GET', '/api/v1/orgs/{id}']);
 const W002 = await needs(['GET', '/api/v1/me/organizations']);
 const W003 = await needs(['GET', '/api/v1/orgs/{id}']);
@@ -224,8 +228,10 @@ describe('E2E-PARC: 2. organization setup', () => {
     expect(made.status, JSON.stringify(made.body)).toBeLessThan(300);
     expect(made.body).toMatchObject({ name, transport: 'http', enabled: true });
     expect(itemsOf((await call(a.c, 'GET', '/api/v1/mcp/servers')).body).map((s) => s['name'])).toContain(name);
-    const edited = await call(a.c, 'PUT', `/api/v1/mcp/servers/${name}`, { name, url: 'https://mcp.example.test/v2', transport: 'http', enabled: false, version: made.body['version'] });
-    expect(edited.body).toMatchObject({ name, url: 'https://mcp.example.test/v2', enabled: false });
+    // A server stays enabled (`McpServerDto.enabled`: "Always true"); an edit changes its URL and bumps its version.
+    const edited = await call(a.c, 'PUT', `/api/v1/mcp/servers/${name}`, { name, url: 'https://mcp.example.test/v2', transport: 'http', version: made.body['version'] });
+    expect(edited.body, JSON.stringify(edited.body)).toMatchObject({ name, url: 'https://mcp.example.test/v2', enabled: true });
+    expect(Number(edited.body['version'])).toBeGreaterThan(Number(made.body['version']));
     const calls = await call(a.c, 'GET', '/api/v1/mcp/calls');
     expect(calls.status).toBe(200);
     expect(itemsOf(calls.body)).toEqual([]);
@@ -307,8 +313,8 @@ describe('E2E-PARC: 2. organization setup', () => {
 // --------------------------------------------------------------------------------------------------------- 3. Rules
 
 const W012 = await needs(['GET', '/api/v1/rules'], ['PATCH', '/api/v1/rules/{id}'], ['POST', '/api/v1/rules/bulk'], ['GET', '/api/v1/analysis/state'], ['POST', '/api/v1/analysis/start']);
-const W013 = (await needs(['GET', '/api/v1/gates/catalog'], ['GET', '/api/v1/gates/catalog/signed'])) || ORG64;
-const W014 = (await needs(['GET', '/api/v1/gates/approvers'])) || ORG64;
+const W013 = (await needs(['GET', '/api/v1/gates/catalog'], ['GET', '/api/v1/gates/catalog/signed'])) || ACTORS;
+const W014 = (await needs(['GET', '/api/v1/gates/approvers'])) || ACTORS;
 const W015 = await needs(['GET', '/api/v1/gates/policy'], ['PUT', '/api/v1/gates/policy']);
 const W016 = (await needs(['GET', '/api/v1/policy/models'], ['PUT', '/api/v1/policy/models'], ['GET', '/api/v1/inference/settings'], ['PUT', '/api/v1/inference/settings'])) || ORG64;
 const W017 = await needs(['GET', '/api/v1/policy/agents']);
@@ -447,7 +453,7 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
 
 // --------------------------------------------------------------------------------------- 4. Workflows and automations
 
-const W021 = (await needs(['GET', '/api/v1/workflows'], ['POST', '/api/v1/workflows'], ['PUT', '/api/v1/workflows/{id}'], ['DELETE', '/api/v1/workflows/{id}'], ['GET', '/api/v1/packages/current'])) || ORG64;
+const W021 = (await needs(['GET', '/api/v1/workflows'], ['POST', '/api/v1/workflows'], ['PUT', '/api/v1/workflows/{id}'], ['DELETE', '/api/v1/workflows/{id}'], ['GET', '/api/v1/packages/current'])) || ACTORS;
 const W022 = await needs(['GET', '/api/v1/workflows/{id}/runs'], ['POST', '/api/v1/workflows/{id}/runs'], ['GET', '/api/v1/runs']);
 const W023 = (await needs(['POST', '/api/v1/automations'], ['POST', '/api/v1/automations/{id}/enable'], ['PUT', '/api/v1/automations/{id}'], ['POST', '/api/v1/automations/{id}/run'], ['POST', '/api/v1/automations/{id}/webhook/rotate-secret'], ['DELETE', '/api/v1/automations/{id}'])) || ORG64;
 const W024 = (await needs(['POST', '/api/v1/waits'], ['GET', '/api/v1/waits/{id}'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/waits/{id}/cancel'])) || ORG64;
@@ -505,7 +511,9 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect((await call(a.c, 'POST', `/api/v1/automations/${id}/disable`)).body?.['enabled']).toBe(false);
     const dry = await call(a.c, 'POST', `/api/v1/automations/${id}/run`, { dryRun: true });
     expect(dry.status, JSON.stringify(dry.body)).toBeLessThan(300);
-    expect(dry.body).toMatchObject({ automationId: id });
+    // The server's dry run (`DryRunResponse`): the prompt as it would run, its variables and next runs.
+    expect(String(dry.body['renderedPrompt'])).toContain('Summarise');
+    expect(Array.isArray(dry.body['nextRuns'])).toBe(true);
     expect(itemsOf((await call(a.c, 'GET', `/api/v1/automations/${id}/runs`)).body).length).toBeGreaterThanOrEqual(0);
     const hook = await call(a.c, 'POST', '/api/v1/automations', { name: 'Parc 023 hook', trigger: { kind: 'webhook' }, action: { prompt: 'Triage' } });
     expect(typeof hook.body?.['webhookUrl']).toBe('string');
@@ -656,12 +664,12 @@ describe('E2E-PARC: 5. the CLI, gates, receipts (server side)', () => {
 
 // ------------------------------------------------------------------------- 6. Sessions, cloud, activity, usage, app
 
-const W031 = (await needs(['GET', '/api/v1/sessions'], ['GET', '/api/v1/sessions/{id}'])) || ORG64;
+const W031 = (await needs(['GET', '/api/v1/sessions'], ['GET', '/api/v1/sessions/{id}'])) || ACTORS;
 const W032 = await needs(['GET', '/api/v1/cloud/sessions'], ['GET', '/api/v1/runners']);
 const W033 = await needs(['GET', '/api/v1/activity']);
 const W034 = (await needs(['GET', '/api/v1/usage'], ['GET', '/api/v1/usage/summary'], ['GET', '/api/v1/usage/events'])) || ORG64;
 const W035 = (await needs(['POST', '/api/v1/import/teamcode'])) || ORG64;
-const W036 = await needs(['POST', '/api/v1/auth/mobile/token'], ['GET', '/api/v1/approvals/queue'], ['GET', '/api/v1/approvals/{id}/view'], ['GET', '/api/v1/me/notifications'], ['PUT', '/api/v1/me/notifications']);
+const W036 = (await needs(['POST', '/api/v1/auth/mobile/token'], ['GET', '/api/v1/approvals/queue'], ['GET', '/api/v1/approvals/{id}/view'], ['GET', '/api/v1/me/notifications'], ['PUT', '/api/v1/me/notifications'])) || ACTORS;
 const W037 = await needs(['POST', '/api/v1/push-devices'], ['DELETE', '/api/v1/push-devices/{id}']);
 
 describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => {

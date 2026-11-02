@@ -16,7 +16,12 @@ const T = 90_000;
 async function unavailable(): Promise<string> {
   const orgs = await orgsUnavailable();
   if (orgs !== '') return orgs;
-  return (await isServed(SERVER_URL, START)) ? '' : `not served yet: GET ${START}, ostrom-server#44`;
+  if (!(await isServed(SERVER_URL, START))) return `not served yet: GET ${START}, ostrom-server#44`;
+  // The start resolves the caller's organization first (`actorOf`, GitHubRoutes.kt): a person needs the current org of
+  // ostrom-server#64, else every start, the owner's too, is 403 "This credential belongs to no organization".
+  if (!(await isServed(SERVER_URL, '/api/v1/me/organizations'))) return 'needs the current org of a person, ostrom-server#64';
+  // `actorOf` goes through `GateActorResolver`, only `NoGateActors` on main until `LaunchGateActors` of #84.
+  return (await isServed(SERVER_URL, '/api/v1/launches', 'POST')) ? '' : 'needs a real GateActorResolver, ostrom-server#84';
 }
 const WHY = await unavailable();
 
@@ -62,7 +67,9 @@ describe.skipIf(WHY !== '')(`E2E-GHORG: who starts the GitHub install of an orga
     expect((await invite(owner, org.id, [memberEmail], 'member')).status).toBeLessThan(300);
     const { person: member, accepted } = await join(memberEmail);
     expect(accepted.status, JSON.stringify(accepted.body)).toBeLessThan(300);
+    // A stranger is someone of another organization: a person in none is refused before the org is even read.
     const stranger = await signIn(email('gh-org-002-stranger'));
+    await orgOf(stranger);
 
     const asMember = await start(member.caller, org.id);
     const asStranger = await start(stranger.caller, org.id);
