@@ -3661,7 +3661,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), règles, portes
 - Source : JOURNAL 30/10 13:23 (l'ajout : une règle ou une porte peut exiger `attestation != workstation_declared`) ; contrat core#40 (`RuleGateCheck.attested`) ; SRV-REGLES-2
 - Priorité : jalon
-- Statut : rouge connu : `scenarios/attestation.e2e.ts` en `it.fails`. Au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41491873101, `POST /api/v1/rules` rend la règle sans `gate.checks` (contrat `RuleGateCheck`, `attested`) : aucune porte ne peut encore exiger un run attesté. JOURNAL 02/11 → SRV-REGLES-2 ; retirer `.fails` quand les règles le gardent
+- Statut : scindé (JOURNAL 02/11 22:27). **ATT-003a**, l'aller-retour de la règle avec `gate.checks` : codé, à vert depuis ostrom-server#145 (b462063). **ATT-003b**, la porte qui refuse un check seulement déclaré : rouge connu, `it.fails` jusqu'à la PR de SRV-REGLES-2 qui fait respecter l'attestation (après server#81, pas encore ouverte)
 
 ## GHORG : Installation GitHub d'une organisation, `?org` (décision du 30/10 12:55)
 
