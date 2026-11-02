@@ -98,7 +98,8 @@ overhead against the fake provider called directly, at p50, p95 and p99 of the f
 stream (`load/inference.js`, under 15 ms at p95); 50 then 200 streams open at once and the memory each costs, with no
 server restart (`load/streams.js`); a client that leaves mid-stream, whose upstream connection and usage must be
 released within 2 s (`load/cut.js`); and MCP servers that answer at once, late, never or not at all, at the same time
-(`load/mcp.js`). `scripts/relay-summary.ts` writes the overhead and memory tables.
+(`load/mcp.js`). `scripts/relay-summary.ts` writes the overhead and memory tables. Each of these phases starts on Ready
+server pods and fails on a restart of its own, with the crashed container's last lines (`scripts/server-pods.sh`).
 
 ## Documentation
 

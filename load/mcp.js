@@ -7,13 +7,16 @@
 //   the load pass) with a tool error, never a hung request.
 // - down: `echo` on a server nothing listens on: a tool error at once.
 // Usage: k6 run load/mcp.js  (OSTROM_URL, OSTROM_LOAD_RELAY_TOKEN; OSTROM_LOAD_MCP_DEADLINE_MS, the relay's deadline)
-import { check } from 'k6';
+import { check, sleep } from 'k6';
 import { Counter } from 'k6/metrics';
 import { callTool, requireRelayToken, rpcResult } from './relay-lib.js';
 
 const DURATION = __ENV.OSTROM_LOAD_MCP_DURATION || '60s';
 const DEADLINE_MS = Number(__ENV.OSTROM_LOAD_MCP_DEADLINE_MS || 5000);
 const unexpected = new Counter('mcp_unexpected');
+// The first unexpected answers of each VU are printed; past them, only counted (run 41539188060 printed 61 000).
+const WARNINGS = 5;
+let warned = 0;
 
 export const options = {
   scenarios: {
@@ -43,7 +46,9 @@ function echo(server, ok) {
   const good = result !== null && (ok ? result.isError !== true && JSON.stringify(result.content).includes('k6') : result.isError === true);
   if (!check(r, { [`mcp ${server} ${ok ? 'answers' : 'fails as a tool error'}`]: () => good })) {
     unexpected.add(1, { server });
-    console.warn(`mcp ${server}: ${r.status} ${String(r.body).slice(0, 300)}`);
+    if (warned++ < WARNINGS) console.warn(`mcp ${server}: ${r.status} ${String(r.body).slice(0, 300)}`);
+    // A constant-VU scenario that fails at once would otherwise spin.
+    sleep(0.5);
   }
 }
 
