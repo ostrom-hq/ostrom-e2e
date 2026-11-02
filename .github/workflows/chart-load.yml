@@ -4,7 +4,8 @@
 # summary gives p95/p99, error rate and requests/s per script, and the peak CPU and memory of every pod (what the
 # chart's `resources` are set from). The server sends its metrics to an OpenTelemetry Collector and a Prometheus in the
 # cluster, where the queries of ostrom-infra's alerts and product dashboard are run (scripts/observability-check.ts).
-# By hand, `server_ref` builds another server. Not on pull requests: the organisation runs a single `ci` job per PR.
+# By hand, `server_ref` builds another server and `helm_ref` installs another chart. Not on pull requests: the
+# organisation runs a single `ci` job per PR.
 name: Chart load
 on:
   push:
@@ -15,6 +16,10 @@ on:
     inputs:
       server_ref:
         description: "ostrom-server branch, tag or commit to build (default: main)"
+        required: false
+        default: main
+      helm_ref:
+        description: "ostrom-helm branch, tag or commit whose chart is installed (default: main)"
         required: false
         default: main
       observability_required:
@@ -83,11 +88,11 @@ jobs:
             echo "::error title=server image::ostrom-server@$SHA did not build (see the step above)"; exit 1
           fi
           docker images ostrom-server:e2e --format 'ostrom-server:e2e {{.Size}} (ostrom-server@'"$SHA"')'
-      - name: Checkout ostrom-helm main
+      - name: Checkout ostrom-helm (main, or the dispatch's helm_ref)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-helm
-          ref: main
+          ref: ${{ inputs.helm_ref || 'main' }}
           ssh-key: ${{ secrets.DEPLOY_KEY_HELM }}
           path: .ostrom/helm
           persist-credentials: false
@@ -193,6 +198,27 @@ jobs:
             sleep 1
           done
           curl -sS -i "$API_URL/health" || true; exit 1
+      # The chart's body sizes (ingress.bodySizes, S2-46): the ingress refuses a body over the route's size with its own
+      # HTML 413 before the server sees it, and passes a body under it (the server answers itself: no credentials).
+      - name: Body sizes at the ingress (inference 32m, import 8m, every other API route 16m)
+        run: |
+          head -c $((20 * 1024 * 1024)) /dev/zero > "$RUNNER_TEMP/20m"
+          head -c $((9 * 1024 * 1024)) /dev/zero > "$RUNNER_TEMP/9m"
+          head -c $((2 * 1024 * 1024)) /dev/zero > "$RUNNER_TEMP/2m"
+          fail=0
+          probe() { # path, body file, expected: ingress (its 413) or server (anything else)
+            code=$(curl -sS -o "$RUNNER_TEMP/probe.out" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+              --data-binary "@$RUNNER_TEMP/$2" "$API_URL$1")
+            by=server; if [ "$code" = 413 ] && grep -qi nginx "$RUNNER_TEMP/probe.out"; then by=ingress; fi
+            echo "POST $1 ($2): $code, refused by the $by"
+            if [ "$by" != "$3" ]; then echo "::error title=body size::POST $1 with $2: expected the $3, got $code from the $by"; fail=1; fi
+          }
+          probe /api/v1/inference/v1/messages 20m server
+          probe /api/v1/import/teamcode 9m ingress
+          probe /api/v1/import/teamcode 2m server
+          probe /api/v1/tokens 20m ingress
+          probe /api/v1/tokens 9m server
+          exit $fail
       - name: Sample CPU and memory of every pod (kubectl top, every 5 s, in the background)
         run: |
           for _ in $(seq 1 36); do kubectl top pods -n "$NS" >/dev/null 2>&1 && break; sleep 5; done
