@@ -206,7 +206,11 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     const again = first.log?.steps[3];
     expect(again?.blocked, again?.reason).toBe(false);
     expect(originSha(sb, 'main')).toBe(shaA);
-    receipt = receiptIdIn(yes?.body) ?? receiptIdIn(again?.reason ?? '');
+    // The yes answers with the approval, without its receipt: the gate (GET /api/v1/gates/{id}) carries the receipt
+    // the server signs for the decision (EnsureGateReceiptUseCase; run 41489078824).
+    const view = await call(w.dev.browser.caller, 'GET', `/api/v1/gates/${encodeURIComponent(String(gate))}`);
+    expect(view.status, JSON.stringify(view.body)).toBe(200);
+    receipt = receiptIdIn(yes?.body) ?? receiptIdIn(view.body) ?? receiptIdIn(view.body['gate']) ?? receiptIdIn(again?.reason ?? '');
 
     // 5. E2E-YES-001: a new commit is a new request: the yes for shaA does not cover shaB.
     const shaB = commit(sb.work, 'b.txt', 'b\n', 'feat: b');

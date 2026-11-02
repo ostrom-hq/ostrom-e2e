@@ -113,6 +113,9 @@ describe('E2E-ATT: the attestation of a check run (decision 30/10 13:23, contrac
     expect(reported.status, JSON.stringify(reported.body)).toBe(201);
     const listed = itemsOf((await call(a.c, 'GET', `/api/v1/checks?sessionId=${encodeURIComponent(sessionId)}`)).body);
     expect(listed.map((c) => c['id'])).toContain(reported.body['id']);
+    // The workflow receipt is signed for an ended session only (409 « still open », run 41489078824).
+    const ended = await call(agent, 'POST', `/api/v1/sessions/${sessionId}/end`, { exitCode: 0 });
+    expect(ended.status, JSON.stringify(ended.body)).toBeLessThan(300);
     const receipt = await call(agent, 'POST', `/api/v1/sessions/${sessionId}/workflow-receipt`, { digest, agent: 'claude' });
     expect(receipt.status, JSON.stringify(receipt.body)).toBe(200);
     expect(receipt.body['verification']).toMatchObject({ ok: true });
@@ -129,6 +132,9 @@ describe('E2E-ATT: the attestation of a check run (decision 30/10 13:23, contrac
       expect([201, 400, 422], JSON.stringify(r.body)).toContain(r.status);
       if (r.status === 201) expect(r.body['attestation'] ?? 'workstation_declared').toBe('workstation_declared');
     }
+    // The workflow receipt is signed for an ended session only (409 « still open », run 41489078824).
+    const ended = await call(agent, 'POST', `/api/v1/sessions/${sessionId}/end`, { exitCode: 0 });
+    expect(ended.status, JSON.stringify(ended.body)).toBeLessThan(300);
     const receipt = await call(agent, 'POST', `/api/v1/sessions/${sessionId}/workflow-receipt`, { digest, agent: 'claude' });
     expect(receipt.status, JSON.stringify(receipt.body)).toBe(200);
     for (const node of checkNodes(receipt.body['receipt'])) expect(node['attestation']).not.toMatch(/^(ci|isolated_runner)$/);
