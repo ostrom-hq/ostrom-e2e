@@ -255,6 +255,24 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Statut : bloqué : ostrom-server + ostrom-web
 
 
+### E2E-CONN-016 — Une organisation ne prend ni l'installation ni le `state` d'une autre
+
+- Étapes :
+  1. Le propriétaire de B revient de GitHub avec l'`installation_id` de l'installation d'acme (42), autorisé comme `globex-admin`, qui n'atteint que 43.
+  2. Le `state` de A est rapporté dans la session de B.
+  3. B installe 43, A installe 42, puis A rejoue son `state`.
+  4. B lance l'installation avec `?org=` d'A.
+- Attendu :
+  - le callback renvoie toujours vers `/github` de la console, avec `?error=installation_not_yours`, puis `?error=forbidden` pour le `state` d'une autre session ;
+  - `?installed=1` pour B et pour A, et `?error=forbidden` quand A rejoue ;
+  - `?org=` d'une organisation qu'on n'administre pas reçoit 403 ;
+  - le serveur a lu `GET /user/installations`, et le jeton de l'utilisateur ne sert qu'à ça.
+- Surfaces : serveur, faux GitHub (port fixe `OSTROM_E2E_GITHUB_PORT`, App de test du banc)
+- Source : ostrom-server#44 (bloquant de la revue ; décision de l'orchestrateur du 30/10 à 12:55 : `?org`, `state` lié à la session, retour vers `/github`)
+- Fichier : `scenarios/github-install.e2e.ts` (E2E-GH-INSTALL-001)
+- Priorité : P1
+- Statut : codé
+
 ## CLAUDE : `ostrom claude` : lancement, hooks, budget du hook
 
 ### E2E-CLAUDE-001 — Lancement sous le paquet signé, rien d'écrit chez le dev
