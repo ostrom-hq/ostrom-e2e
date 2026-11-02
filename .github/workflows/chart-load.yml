@@ -85,10 +85,10 @@ jobs:
           printf 'subjectAltName=DNS:fakes.ostrom-fakes.svc,DNS:fakes.ostrom-fakes.svc.cluster.local\nextendedKeyUsage=serverAuth\n' > ext.cnf
           openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 1 -out tls.crt -extfile ext.cnf 2>/dev/null
           id=$(docker create ostrom-server:e2e)
-          docker cp "$id:/etc/ssl/certs/ca-certificates.crt" bundle.crt
+          # Copied out read-only, as in the image: the bench's bundle is a new file.
+          docker cp "$id:/etc/ssl/certs/ca-certificates.crt" system.crt
           docker rm "$id" >/dev/null
-          cat ca.crt >> bundle.crt
-          mkdir -p image && cp bundle.crt image/
+          mkdir -p image && cat system.crt ca.crt > image/bundle.crt
           printf 'FROM ostrom-server:e2e\nCOPY bundle.crt /etc/ssl/certs/ca-certificates.crt\n' > image/Dockerfile
           docker build -q -t ostrom-server:e2e-load image
       - name: Checkout ostrom-helm main
