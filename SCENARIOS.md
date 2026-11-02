@@ -3663,7 +3663,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), intégration GitHub
 - Source : JOURNAL 30/10 13:35 (décision 12:55 codée dans ostrom-server#44 : `FindOrgUseCase`, owner ou admin)
 - Priorité : P1
-- Statut : codé : `scenarios/github-org.e2e.ts`, allumé quand `install/start` est servie (ostrom-server#44) ; passé si le banc n'a pas d'App GitHub (503, ses réglages viennent avec e2e#23)
+- Statut : codé : `scenarios/github-org.e2e.ts`. #44 est sur main (44fc2fde), mais au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41467580197 le lancement répond 403 « This credential belongs to no organization », au propriétaire aussi : `actorOf` passe par `GateActorResolver`, et seul `NoGateActors` est lié sur main. Allumé par sonde dès ostrom-server#84 (`LaunchGateActors`, `POST /api/v1/launches`).
 
 ### E2E-GHORG-002 — Un membre, un étranger et un slug inconnu reçoivent le même 403 ; sans session, 401
 
@@ -3672,7 +3672,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), intégration GitHub, organisations
 - Source : JOURNAL 30/10 13:35 (« membre, étranger et slug inconnu reçoivent le même ») ; le cas étranger est aussi dans E2E-GH-INSTALL-001 d'e2e#23
 - Priorité : P1
-- Statut : codé : `scenarios/github-org.e2e.ts`, mêmes sondes que GHORG-001
+- Statut : codé : `scenarios/github-org.e2e.ts`. #44 est sur main (44fc2fde), mais au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41467580197 le lancement répond 403 « This credential belongs to no organization », au propriétaire aussi : `actorOf` passe par `GateActorResolver`, et seul `NoGateActors` est lié sur main. Allumé par sonde dès ostrom-server#84 (`LaunchGateActors`, `POST /api/v1/launches`).
 
 ### E2E-GHORG-003 — Un admin lance l'installation ; rétrogradé membre, il est refusé
 
@@ -3681,7 +3681,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), intégration GitHub, organisations
 - Source : JOURNAL 30/10 13:35 ; contrat `updateOrgMember`
 - Priorité : P1
-- Statut : codé : `scenarios/github-org.e2e.ts`, mêmes sondes que GHORG-001
+- Statut : codé : `scenarios/github-org.e2e.ts`. #44 est sur main (44fc2fde), mais au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41467580197 le lancement répond 403 « This credential belongs to no organization », au propriétaire aussi : `actorOf` passe par `GateActorResolver`, et seul `NoGateActors` est lié sur main. Allumé par sonde dès ostrom-server#84 (`LaunchGateActors`, `POST /api/v1/launches`).
 
 ## Récapitulatif
 

@@ -279,7 +279,7 @@ describe.skipIf(!EMAIL_SIGN_IN || !TOKENS || !ANSWER_SERVED)('E2E-AUTH: a token 
 // older than 5 minutes in the database (the only way to age it without waiting), as the clock would.
 // Markers: #43 serves the signed gate catalogue the hook reads, #64 the current org of a person (`/me/organizations`):
 // before #64, `POST /api/v1/workflows` answers 403 « belongs to no organization » to a person (run 41052130887).
-const STEP_UP_READY = EMAIL_SIGN_IN && TOKENS && ANSWER_SERVED && DATABASE_ADMIN_URL !== '' && (await served('POST', '/api/v1/workflows')) && (await served('POST', '/api/v1/gates')) && (await served('GET', '/api/v1/gates/catalog/signed')) && (await served('GET', '/api/v1/me/organizations'));
+const STEP_UP_READY = EMAIL_SIGN_IN && TOKENS && ANSWER_SERVED && DATABASE_ADMIN_URL !== '' && (await served('POST', '/api/v1/workflows')) && (await served('POST', '/api/v1/gates')) && (await served('GET', '/api/v1/gates/catalog/signed')) && (await served('GET', '/api/v1/me/organizations')) && (await served('POST', '/api/v1/launches'));
 
 /** Moves a person's browser sessions `minutes` into the past (their sign-in time, which the step-up reads). */
 function ageSessions(userId: string, minutes: number): void {
@@ -288,7 +288,7 @@ function ageSessions(userId: string, minutes: number): void {
   execFileSync('docker', ['run', '--rm', '--network', 'host', 'postgres:18', 'psql', DATABASE_ADMIN_URL, '-v', 'ON_ERROR_STOP=1', '-c', sql], { stdio: 'pipe', timeout: 60_000 });
 }
 
-describe.skipIf(!STEP_UP_READY)(`E2E-AUTH: step-up of a yes${STEP_UP_READY ? '' : ' (needs the workflows and signed gates of ostrom-server#43, the current org of #64, and the database URL)'}`, () => {
+describe.skipIf(!STEP_UP_READY)(`E2E-AUTH: step-up of a yes${STEP_UP_READY ? '' : ' (needs the workflows and signed gates of ostrom-server#43, the current org of #64, the actor resolver of #84, and the database URL)'}`, () => {
   it('E2E-AUTH-007 a browser session signed in more than 5 minutes ago cannot say yes (403 step_up_required); signed in again, it can', async () => {
     const requester = await signIn(email('stepup-dev'));
     const org = await orgOf(requester);
