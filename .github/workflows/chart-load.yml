@@ -2,7 +2,9 @@
 # chart in a kind cluster (built-in PostgreSQL, `ostrom-server migrate` init container, 2 server replicas, ingress-nginx,
 # namespace under the restricted Pod Security standard), loaded by QA's k6 scripts through the ingress. The job
 # summary gives p95/p99, error rate and requests/s per script, and the peak CPU and memory of every pod (what the
-# chart's `resources` are set from). Not on pull requests: the organisation runs a single `ci` job per PR.
+# chart's `resources` are set from). The server sends its metrics to an OpenTelemetry Collector and a Prometheus in the
+# cluster, where the queries of ostrom-infra's alerts and product dashboard are run (scripts/observability-check.ts).
+# By hand, `server_ref` builds another server. Not on pull requests: the organisation runs a single `ci` job per PR.
 name: Chart load
 on:
   push:
@@ -10,6 +12,15 @@ on:
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
+    inputs:
+      server_ref:
+        description: "ostrom-server branch, tag or commit to build (default: main)"
+        required: false
+        default: main
+      observability_required:
+        description: "Ids of scripts/observability-check.ts that must see data (comma-separated)"
+        required: false
+        default: ""
 # A load pass gates nothing: a newer run of the same ref replaces the one in progress (runners are scarce).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,11 +42,11 @@ jobs:
         with: { persist-credentials: false }
       # The server needs ostrom-core next to its checkout (ostrom.core.local): GitHub Packages of another repository
       # are not readable from here, like in ostrom-server's own CI (JOURNAL 05:50).
-      - name: Checkout ostrom-server main
+      - name: Checkout ostrom-server (main, or the dispatch's server_ref)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-server
-          ref: main
+          ref: ${{ inputs.server_ref || 'main' }}
           ssh-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           path: .ostrom/server
           persist-credentials: false
@@ -134,6 +145,11 @@ jobs:
       # Test values of the bench, never real ones. Sign-in mails go to a directory (as in ci.yml); billing stays off:
       # no route of the load pass needs it, and the chart's NetworkPolicy denies the server any private address, so an
       # in-cluster stripe-mock would not be reachable anyway. Test accounts are allowed for `seed-test-account`.
+      - name: Metrics path (OpenTelemetry Collector and Prometheus in namespace observe)
+        run: |
+          kubectl apply -f load/observability/kind.yaml
+          kubectl -n observe rollout status deployment/otel-collector --timeout=300s
+          kubectl -n observe rollout status deployment/prometheus --timeout=300s
       - name: helm install charts/ostrom (built-in PostgreSQL, migrate init container, 2 server replicas)
         run: |
           cat > "$RUNNER_TEMP/load-values.yaml" <<'EOF'
@@ -152,6 +168,10 @@ jobs:
             enabled: true
             persistence: { size: 1Gi }
           cloudSessions: { enabled: false }
+          observability:
+            otel:
+              enabled: true
+              endpoint: http://otel-collector.observe.svc.cluster.local:4318
           polis: { enabled: false }
           site: { enabled: false }
           # No console image is built by the bench: the API is reached on its own host only.
@@ -244,10 +264,23 @@ jobs:
         run: |
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js
+      # The server exports its metrics every minute: two exports after the last gate, then the queries of the alerts and
+      # of the product dashboard (ostrom-infra), against what the real server sent.
+      - name: Alert and dashboard queries against the server's metrics
+        if: always() && steps.server.outcome == 'success'
+        env:
+          OSTROM_OBS_REQUIRED: ${{ inputs.observability_required }}
+          OSTROM_PROMETHEUS_URL: http://127.0.0.1:19090
+        run: |
+          sleep 130
+          kubectl -n observe port-forward svc/prometheus 19090:9090 > "$RUNNER_TEMP/prometheus-forward.log" 2>&1 < /dev/null &
+          echo $! > "$RUNNER_TEMP/prometheus-forward.pid"
+          for _ in $(seq 1 30); do curl -fsS "$OSTROM_PROMETHEUS_URL/-/ready" >/dev/null 2>&1 && break; sleep 1; done
+          node scripts/observability-check.ts >> "$GITHUB_STEP_SUMMARY"
       - name: Stop the background sampler and port-forward
         if: always()
         run: |
-          for f in top port-forward; do [ -f "$RUNNER_TEMP/$f.pid" ] && kill "$(cat "$RUNNER_TEMP/$f.pid")" 2>/dev/null || true; done
+          for f in top port-forward prometheus-forward; do [ -f "$RUNNER_TEMP/$f.pid" ] && kill "$(cat "$RUNNER_TEMP/$f.pid")" 2>/dev/null || true; done
           mountpoint -q "$RUNNER_TEMP/ostrom-mail" && sudo umount "$RUNNER_TEMP/ostrom-mail" || true
           cp "$RUNNER_TEMP/top.txt" top-samples.txt 2>/dev/null || true
       - name: Summary (k6 per script, peak CPU and memory per pod, restarts)

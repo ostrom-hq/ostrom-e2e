@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: Apache-2.0
+# The metrics path of a deployment, in the chart load pass's kind cluster only: the server sends OTLP/HTTP to an
+# OpenTelemetry Collector, whose Prometheus exporter a Prometheus scrapes, so the queries of ostrom-infra's alerts and
+# dashboards run against what the real server emits (scripts/observability-check.ts). Images pinned by digest.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observe
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: otel-collector, namespace: observe }
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http: { endpoint: 0.0.0.0:4318 }
+    exporters:
+      # Resource attributes become `job` (service.namespace/service.name) and `instance`, as in Grafana Cloud.
+      prometheus: { endpoint: 0.0.0.0:8889 }
+      # Traces and logs are accepted (a refusal would count as dropped telemetry) and thrown away.
+      nop: {}
+    service:
+      pipelines:
+        metrics: { receivers: [otlp], exporters: [prometheus] }
+        traces: { receivers: [otlp], exporters: [nop] }
+        logs: { receivers: [otlp], exporters: [nop] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: otel-collector, namespace: observe }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: otel-collector } }
+  template:
+    metadata: { labels: { app: otel-collector } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: collector
+          # otel/opentelemetry-collector-contrib:0.164.0
+          image: otel/opentelemetry-collector-contrib@sha256:340c9ca6a36617084c6661bdc4f0fe92b7cda5a805d61673ec8db375fddc522b
+          args: ["--config=/etc/otel/config.yaml"]
+          ports: [{ containerPort: 4318 }, { containerPort: 8889 }]
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          volumeMounts: [{ name: config, mountPath: /etc/otel }]
+      volumes: [{ name: config, configMap: { name: otel-collector } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: otel-collector, namespace: observe }
+spec:
+  selector: { app: otel-collector }
+  ports:
+    - { name: otlp-http, port: 4318 }
+    - { name: prometheus, port: 8889 }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: prometheus, namespace: observe }
+data:
+  prometheus.yml: |
+    global: { scrape_interval: 5s, evaluation_interval: 5s }
+    scrape_configs:
+      # honor_labels keeps the exporter's `job` (ostrom/ostrom-server), the label every query filters on.
+      - job_name: otel-collector
+        honor_labels: true
+        static_configs: [{ targets: ["otel-collector.observe.svc.cluster.local:8889"] }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: prometheus, namespace: observe }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: prometheus } }
+  template:
+    metadata: { labels: { app: prometheus } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: prometheus
+          # prom/prometheus:v3.15.1
+          image: prom/prometheus@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+          args: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+          ports: [{ containerPort: 9090 }]
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus }
+            - { name: data, mountPath: /prometheus }
+      volumes:
+        - { name: config, configMap: { name: prometheus } }
+        - { name: data, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: prometheus, namespace: observe }
+spec:
+  selector: { app: prometheus }
+  ports: [{ name: http, port: 9090 }]
+---
+# The chart denies the server every private address; this policy, added in the release's namespace, opens the
+# collector's OTLP port only (NetworkPolicies add up).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: server-to-otel-collector, namespace: ostrom }
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/component: server }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: observe } }
+          podSelector: { matchLabels: { app: otel-collector } }
+      ports: [{ protocol: TCP, port: 4318 }]
