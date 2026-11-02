@@ -59,7 +59,7 @@ describe.skipIf(WHY !== '')(`E2E-GHORG: who starts the GitHub install of an orga
     expect(new URL(bySlug.location).searchParams.get('state')).not.toBe(new URL(byId.location).searchParams.get('state'));
   }, T);
 
-  it('E2E-GHORG-002 a member, a stranger and an unknown slug get the same 403; no session gets 401', async (ctx) => {
+  it('E2E-GHORG-002 a member gets 403; a stranger and an unknown slug get the same 404; no session gets 401', async (ctx) => {
     const owner = await signIn(email('gh-org-002'));
     const org = await orgOf(owner);
     if ((await start(owner.caller, org.id)).status === 503) ctx.skip();
@@ -74,12 +74,15 @@ describe.skipIf(WHY !== '')(`E2E-GHORG: who starts the GitHub install of an orga
     const asMember = await start(member.caller, org.id);
     const asStranger = await start(stranger.caller, org.id);
     const unknown = await start(stranger.caller, `no-such-org-${Date.now().toString(36)}`);
-    for (const r of [asMember, asStranger, unknown]) {
-      expect(r.status, JSON.stringify(r.body)).toBe(403);
+    // ostrom-server#143: an organization the caller is not in is not found (404), the same answer as an org that does
+    // not exist; a member without the role is refused (403).
+    expect(asMember.status, JSON.stringify(asMember.body)).toBe(403);
+    for (const r of [asStranger, unknown]) {
+      expect(r.status, JSON.stringify(r.body)).toBe(404);
       expect(r.location).toBe('');
     }
-    // Same answer for all three: nothing tells a member from a stranger, nor an existing org from none.
-    expect(refusal(asMember.body)).toEqual(refusal(asStranger.body));
+    expect(asMember.location).toBe('');
+    // Nothing tells an existing organization the stranger is not in from one that does not exist.
     expect(refusal(unknown.body)).toEqual(refusal(asStranger.body));
 
     const anonymous = await start({}, org.id);

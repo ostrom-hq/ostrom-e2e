@@ -25,7 +25,7 @@ import {
   realWorld,
   receiptIdIn,
 } from './lib.ts';
-import { call, email, signIn } from './org.ts';
+import { call, email, orgOf, signIn } from './org.ts';
 
 const reasonOf = async (probe: () => Promise<string>) => {
   try {
@@ -53,6 +53,9 @@ const mode = (path: string) => statSync(path).mode & 0o777;
 describe.skipIf(LOGIN_OFF !== '')(`jalon: real ostrom login${skipped(LOGIN_OFF)}`, () => {
   it('E2E-LOGIN-001 — device-flow login approved from the browser writes 0600 files, prints no secret, and the token speaks for the person', async () => {
     const m = await member(await signIn(email('dev-l')));
+    // A person in an organization, as after the onboarding: a person in none is « This credential belongs to no
+    // organization » for every org route (run 41519741958).
+    await orgOf(m.browser);
     const { run, userCode, answer: answered } = await deviceLogin(m.cli, m.browser);
 
     // The CLI showed a one-time code, the browser said yes to it, the CLI finished on its own.
@@ -94,20 +97,16 @@ describe.skipIf(LOGIN_OFF !== '')(`jalon: real ostrom login${skipped(LOGIN_OFF)}
       const inbox = await m.cli.ostrom(['inbox']);
       const said = inbox.stdout + inbox.stderr;
       expect(said).not.toMatch(SECRET);
-      if (inbox.code !== 0) {
-        expect(said, said).toMatch(/does not allow [a-z]+:[a-z*]+/);
-        expect(said).not.toMatch(/sign in|log ?in|unauthori[sz]ed|401/i);
-      }
+      // Since ostrom-server#122 the CLI token reads approvals (E2E-LOGIN-009): inbox answers.
+      expect(inbox.code, said).toBe(0);
+      expect(said).not.toMatch(/sign in|log ?in|unauthori[sz]ed|401/i);
     }
   }, 180_000);
 
-  // Known server gap, reported in the JOURNAL (02/11, → AUTH-REPRISE, GATES): the token of `ostrom login` holds
-  // CLI_SCOPES (profile:read, orgs:read, workflows:read, sessions:write), and `GET /api/v1/approvals` needs gates:read
-  // (`GateScopes.readingApprovals`), so `ostrom inbox` always ends in 77 after a login. `it.fails` keeps the bench
-  // green while the gap stands and turns red the day it is fixed: then drop `.fails`.
-  // Waits for ostrom-server#122 (gates:read, the CLI token reads approvals, gates and MCP servers).
-  it.fails('E2E-LOGIN-009 — after `ostrom login`, `ostrom inbox` lists the approvals waiting for the person', async () => {
+  // ostrom-server#122 (29a9ab54) gave the CLI token gates:read: `ostrom inbox` reads the person's approvals.
+  it('E2E-LOGIN-009 — after `ostrom login`, `ostrom inbox` lists the approvals waiting for the person', async () => {
     const m = await member(await signIn(email('dev-inbox')));
+    await orgOf(m.browser);
     const { run } = await deviceLogin(m.cli, m.browser);
     expect(run.code, run.stderr).toBe(0);
     const inbox = await m.cli.ostrom(['inbox']);
@@ -197,6 +196,10 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
       expect(theirs).toBeDefined();
       yes = await answer(w.rev.browser, theirs);
       expect(yes.status, JSON.stringify(yes.body)).toBe(200);
+      // ostrom-server#127: the answer carries the signed receipt, whose subject names shaA in clear.
+      const signed = yes.body['receipt'] as { signature?: unknown; subject?: { id?: unknown } } | undefined;
+      expect(typeof signed?.signature, JSON.stringify(yes.body)).toBe('string');
+      expect(signed?.subject?.id).toBe(shaA);
     } finally {
       writeFileSync(go, '');
     }
@@ -208,11 +211,7 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     const again = first.log?.steps[3];
     expect(again?.blocked, again?.reason).toBe(false);
     expect(originSha(sb, 'main')).toBe(shaA);
-    // The yes answers with the approval, without its receipt: the gate (GET /api/v1/gates/{id}) carries the receipt
-    // the server signs for the decision (EnsureGateReceiptUseCase; run 41489078824).
-    const view = await call(w.dev.browser.caller, 'GET', `/api/v1/gates/${encodeURIComponent(String(gate))}`);
-    expect(view.status, JSON.stringify(view.body)).toBe(200);
-    receipt = receiptIdIn(yes?.body) ?? receiptIdIn(view.body) ?? receiptIdIn(view.body['gate']) ?? receiptIdIn(again?.reason ?? '');
+    receipt = receiptIdIn(yes?.body);
 
     // 5. E2E-YES-001: a new commit is a new request: the yes for shaA does not cover shaB.
     const shaB = commit(sb.work, 'b.txt', 'b\n', 'feat: b');
@@ -223,14 +222,12 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     expect(shaB).not.toBe(shaA);
 
     // 6. The receipt of the yes is on the server, names the approver and the SHA it was given for.
-    expect(receipt, JSON.stringify(yes.body)).toBeDefined();
+    expect(receipt, JSON.stringify(yes?.body)).toBeDefined();
     const kept = await call(w.dev.browser.caller, 'GET', `/api/v1/receipts/${encodeURIComponent(String(receipt))}`);
     expect(kept.status, JSON.stringify(kept.body)).toBe(200);
     expect(JSON.stringify(kept.body)).toContain(w.rev.login);
-    // The receipt binds the SHA through its subject digest (what the approver was shown, ReceiptsGateSigner.kt), not
-    // in clear (run 41491873101): its subject is this gate, and the gate it signs names shaA.
-    expect((kept.body['subject'] as Record<string, unknown> | undefined)?.['id']).toBe(gate);
-    expect(JSON.stringify(view.body)).toContain(shaA);
+    // Its subject names the commit in clear (ostrom-server#127); the digest still binds what the approver was shown.
+    expect((kept.body['subject'] as Record<string, unknown> | undefined)?.['id']).toBe(shaA);
     receiptJson = JSON.stringify(kept.body);
   }, 300_000);
 

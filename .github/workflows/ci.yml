@@ -128,6 +128,8 @@ jobs:
             OSTROM_GITHUB_WEBHOOK_SECRET=whsec_github_e2e
             OSTROM_SHARING_CLAUDE_TOKEN_URL=http://127.0.0.1:4620/v1/oauth/token
             OSTROM_SHARING_CODEX_TOKEN_URL=http://127.0.0.1:4620/v1/oauth/token
+            OSTROM_GATEWAY_ANTHROPIC_URL=http://127.0.0.1:4620
+            OSTROM_GATEWAY_CODEX_URL=http://127.0.0.1:4620
           docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail
           required: "true"
       - name: Real ostrom CLI
@@ -148,7 +150,8 @@ jobs:
           # wait for a reconnection and to read the org's audit chain (TC-003/004).
           OSTROM_E2E_DATABASE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/ostrom
           OSTROM_E2E_GITHUB_PORT: "4700"
-          # E2E-TC-003/004: the fake TeamCode team and the fake provider token endpoint the server was pointed at.
+          # E2E-TC-003/004: the fake TeamCode team and the fake provider token endpoint the server was pointed at; E2E-SHARE-006:
+          # the same fake stands for the providers' APIs behind the gateway, so a call served by an account would show there.
           OSTROM_E2E_TEAMCODE_DB: mysql://teamcode_ro@127.0.0.1:3307/teamcode
           OSTROM_E2E_TEAMCODE_PASSWORD: teamcode-ro
           OSTROM_E2E_TEAMCODE_KEY_FILE: ${{ github.workspace }}/.ostrom/helm/compose/demo/teamcode/key.txt
