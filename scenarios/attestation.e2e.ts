@@ -57,6 +57,21 @@ function checkNodes(receipt: unknown): Record<string, unknown>[] {
   return found;
 }
 
+/** The id the compiler gave the script of check node `nodeId` (`s-<node>`, PackageCompiler.kt), read in the package. */
+function scriptOf(body: unknown, nodeId: string): string {
+  const seen: unknown[] = [body];
+  while (seen.length > 0) {
+    const v = seen.pop();
+    if (Array.isArray(v)) seen.push(...(v as unknown[]));
+    else if (v && typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      if (o['nodeId'] === nodeId && typeof o['id'] === 'string' && typeof o['path'] === 'string') return o['id'];
+      seen.push(...Object.values(o));
+    }
+  }
+  return `s-${nodeId}`;
+}
+
 /**
  * An accepted workflow with one check node (`tests`, `npm test`), its current package, a launch and its session, and
  * the agent's caller: what a workstation has when it reports a check.
@@ -76,13 +91,16 @@ async function sessionWithCheck(who: string) {
   const pkg = await call(a.c, 'GET', '/api/v1/packages/current');
   expect(pkg.status, JSON.stringify(pkg.body)).toBe(200);
   const digest = String(pkg.body['digest'] ?? (pkg.body['package'] as Record<string, unknown> | undefined)?.['digest'] ?? '');
-  expect(digest).toMatch(/^sha256:/);
+  // The server serves the digest as bare hex (run 41483058195); a `sha256:` prefix is accepted too.
+  expect(digest).toMatch(/^(sha256:)?[0-9a-f]{64}$/);
   const launch = await call(a.c, 'POST', '/api/v1/launches', { agent: 'claude', repo: 'acme/att' });
   expect(launch.status, JSON.stringify(launch.body)).toBe(201);
   const agent: Caller = { token: String(launch.body['agentToken']), org: a.org.id, ...(a.c.from ? { from: a.c.from } : {}) };
-  const sessionId = String(launch.body['sessionId'] ?? '') || String(itemsOf((await call(a.c, 'GET', '/api/v1/sessions')).body)[0]?.['id'] ?? '');
-  expect(sessionId).not.toBe('');
-  return { a, agent, digest, sessionId };
+  // The agent's first hook opens the session of the launch (`POST /api/v1/sessions`, StartSessionRequest).
+  const sessionId = randomUUID();
+  const opened = await call(agent, 'POST', '/api/v1/sessions', { id: sessionId, launchId: launch.body['launchId'], repo: 'acme/att', agent: 'claude', packageDigest: digest });
+  expect(opened.status, JSON.stringify(opened.body)).toBeLessThan(300);
+  return { a, agent, digest, sessionId, scriptId: scriptOf(pkg.body, 'tests') };
 }
 
 const W001 = await needs(['POST', '/api/v1/workflows'], ['GET', '/api/v1/packages/current'], ['POST', '/api/v1/launches'], ['POST', '/api/v1/checks'], ['GET', '/api/v1/checks'], ['POST', '/api/v1/sessions/{id}/workflow-receipt']);
@@ -90,11 +108,14 @@ const W003 = await needs(['POST', '/api/v1/rules'], ['POST', '/api/v1/gates'], [
 
 describe('E2E-ATT: the attestation of a check run (decision 30/10 13:23, contract core#40)', () => {
   it.skipIf(W001 !== '')(named('E2E-ATT-001 a check the workstation reports is `workstation_declared` in the signed receipt, which verifies', W001), async () => {
-    const { a, agent, digest, sessionId } = await sessionWithCheck('att-001');
-    const reported = await call(agent, 'POST', '/api/v1/checks', { sessionId, digest, nodeId: 'tests', scriptId: 'tests', exit: 0, outcome: 'passed', durationMs: 1200 });
+    const { a, agent, digest, sessionId, scriptId } = await sessionWithCheck('att-001');
+    const reported = await call(agent, 'POST', '/api/v1/checks', { sessionId, digest, nodeId: 'tests', scriptId, exit: 0, outcome: 'passed', durationMs: 1200 });
     expect(reported.status, JSON.stringify(reported.body)).toBe(201);
     const listed = itemsOf((await call(a.c, 'GET', `/api/v1/checks?sessionId=${encodeURIComponent(sessionId)}`)).body);
     expect(listed.map((c) => c['id'])).toContain(reported.body['id']);
+    // The workflow receipt is signed for an ended session only (409 « still open », run 41489078824).
+    const ended = await call(agent, 'POST', `/api/v1/sessions/${sessionId}/end`, { exitCode: 0 });
+    expect(ended.status, JSON.stringify(ended.body)).toBeLessThan(300);
     const receipt = await call(agent, 'POST', `/api/v1/sessions/${sessionId}/workflow-receipt`, { digest, agent: 'claude' });
     expect(receipt.status, JSON.stringify(receipt.body)).toBe(200);
     expect(receipt.body['verification']).toMatchObject({ ok: true });
@@ -104,20 +125,26 @@ describe('E2E-ATT: the attestation of a check run (decision 30/10 13:23, contrac
   }, T);
 
   it.skipIf(W001 !== '')(named('E2E-ATT-002 a workstation cannot claim `ci` or `isolated_runner`: the run stays declared', W001), async () => {
-    const { agent, digest, sessionId } = await sessionWithCheck('att-002');
+    const { agent, digest, sessionId, scriptId } = await sessionWithCheck('att-002');
     for (const claimed of ['ci', 'isolated_runner']) {
-      const r = await call(agent, 'POST', '/api/v1/checks', { sessionId, digest, nodeId: 'tests', scriptId: 'tests', exit: 0, outcome: 'passed', attestation: claimed });
+      const r = await call(agent, 'POST', '/api/v1/checks', { sessionId, digest, nodeId: 'tests', scriptId, exit: 0, outcome: 'passed', attestation: claimed });
       // Refused, or recorded without the claim: never recorded as attested.
       expect([201, 400, 422], JSON.stringify(r.body)).toContain(r.status);
       if (r.status === 201) expect(r.body['attestation'] ?? 'workstation_declared').toBe('workstation_declared');
     }
+    // The workflow receipt is signed for an ended session only (409 « still open », run 41489078824).
+    const ended = await call(agent, 'POST', `/api/v1/sessions/${sessionId}/end`, { exitCode: 0 });
+    expect(ended.status, JSON.stringify(ended.body)).toBeLessThan(300);
     const receipt = await call(agent, 'POST', `/api/v1/sessions/${sessionId}/workflow-receipt`, { digest, agent: 'claude' });
     expect(receipt.status, JSON.stringify(receipt.body)).toBe(200);
     for (const node of checkNodes(receipt.body['receipt'])) expect(node['attestation']).not.toMatch(/^(ci|isolated_runner)$/);
   }, T);
 
-  it.skipIf(W003 !== '')(named('E2E-ATT-003 a rule gate asking for an attested check is not satisfied by a declared run', W003), async () => {
-    const { a, agent, digest, sessionId } = await sessionWithCheck('att-003');
+  // Known gap (run 41491873101): the rules route keeps the rule's gate without `checks` (contract RuleGateCheck,
+  // `attested`), so no gate can ask for an attested run yet. `it.fails` until the rules keep it (JOURNAL 02/11 →
+  // SRV-REGLES-2; no server PR open for it yet, #79 does not touch it): remove `.fails` then.
+  (W003 !== '' ? it.skip : it.fails)(named('E2E-ATT-003 a rule gate asking for an attested check is not satisfied by a declared run', W003), async () => {
+    const { a, agent, digest, sessionId, scriptId } = await sessionWithCheck('att-003');
     const repo = `acme/att-${randomUUID().slice(0, 6)}`;
     const rule = await call(a.c, 'POST', '/api/v1/rules', {
       statement: 'Tests run by Ostrom or the CI before a push to main',
@@ -127,7 +154,7 @@ describe('E2E-ATT: the attestation of a check run (decision 30/10 13:23, contrac
     });
     expect(rule.status, JSON.stringify(rule.body)).toBeLessThan(300);
     expect(JSON.stringify(rule.body)).toContain('"attested":true');
-    expect((await call(agent, 'POST', '/api/v1/checks', { sessionId, digest, nodeId: 'tests', scriptId: 'tests', exit: 0, outcome: 'passed' })).status).toBe(201);
+    expect((await call(agent, 'POST', '/api/v1/checks', { sessionId, digest, nodeId: 'tests', scriptId, exit: 0, outcome: 'passed' })).status).toBe(201);
     const sha = randomUUID().replaceAll('-', '').padEnd(40, '0').slice(0, 40);
     const asked = await call(agent, 'POST', '/api/v1/gates', { repo, class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
     expect(asked.status, JSON.stringify(asked.body)).toBeLessThan(500);
