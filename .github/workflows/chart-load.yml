@@ -280,11 +280,13 @@ jobs:
               echo "| (no sample) | | | |"
             fi
             echo
-            echo "| pod | restarts | last termination |"
-            echo "|---|---|---|"
+            echo "| pod | restarts | terminated now | last termination |"
+            echo "|---|---|---|---|"
+            # A container killed seconds ago (OOMKilled during the race, run 41520333753) is still counted 0 restarts:
+            # its current termination shows it.
             kubectl -n "$NS" get pods --no-headers \
-              -o custom-columns='P:.metadata.name,R:.status.containerStatuses[*].restartCount,L:.status.containerStatuses[*].lastState.terminated.reason' \
-              2>/dev/null | awk '{ printf "| %s | %s | %s |\n", $1, $2, ($3 == "<none>" ? "" : $3) }' || true
+              -o custom-columns='P:.metadata.name,R:.status.containerStatuses[*].restartCount,T:.status.containerStatuses[*].state.terminated.reason,L:.status.containerStatuses[*].lastState.terminated.reason' \
+              2>/dev/null | awk '{ printf "| %s | %s | %s | %s |\n", $1, $2, ($3 == "<none>" ? "" : $3), ($4 == "<none>" ? "" : $4) }' || true
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Cluster state on failure
         if: failure()
