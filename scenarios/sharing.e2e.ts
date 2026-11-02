@@ -45,8 +45,13 @@ describe('E2E-SHARE: shared accounts and the provider', () => {
     // The provider says these tokens are someone else's.
     provider.accounts.set(refreshToken, 'acct-someone-else');
 
+    // The gateway takes an Ostrom token (`Authorization: Bearer`), not the browser's session (run 41524253992): a
+    // personal token with `inference:use`, as a member's agent would carry.
+    const pat = await call(owner.caller, 'POST', '/api/v1/tokens', { name: 'e2e share-006', scopes: ['inference:use'], expiresInDays: 1 });
+    expect(pat.status, JSON.stringify(pat.body)).toBe(201);
+    const member = { token: String(pat.body['secret']) };
     const ask = () =>
-      call(owner.caller, 'POST', '/api/v1/inference/v1/messages', { model: 'claude-sonnet-4-5', max_tokens: 16, messages: [{ role: 'user', content: 'hello' }] });
+      call(member, 'POST', '/api/v1/inference/v1/messages', { model: 'claude-sonnet-4-5', max_tokens: 16, messages: [{ role: 'user', content: 'hello' }] });
     const first = await ask();
     // The refresh happened once, with the declared account's refresh token...
     expect(provider.refreshes.map((r) => r.refreshToken), JSON.stringify(first.body)).toEqual([refreshToken]);
