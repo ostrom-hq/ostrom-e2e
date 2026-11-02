@@ -25,12 +25,19 @@ export class FakeTokens {
     return `http://127.0.0.1:${this.port}/v1/oauth/token`;
   }
 
-  /** Listens on [port] (0 for any free one). */
+  /** Listens on [port] (0 for any free one); once only, until it is stopped. */
   async start(port = 0): Promise<this> {
-    const server = createServer((req, res) => void this.answer(req, res));
+    if (this.server) throw new Error(`already listening on ${this.url}`);
+    const server = createServer((req, res) => {
+      // a request cut off mid-body (the server's container stopped) is answered by nobody, never an unhandled rejection
+      this.answer(req, res).catch(() => res.destroy());
+    });
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
-      server.listen(port, '127.0.0.1', resolve);
+      server.listen(port, '127.0.0.1', () => {
+        server.off('error', reject);
+        resolve();
+      });
     });
     this.server = server;
     this.port = (server.address() as AddressInfo).port;
@@ -44,8 +51,15 @@ export class FakeTokens {
   }
 
   private async answer(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    let raw = '';
-    for await (const chunk of req) raw += String(chunk);
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of req as AsyncIterable<Buffer>) {
+      size += chunk.length;
+      if (size > MAX_BODY) return send(res, 413, { error: 'invalid_request' });
+      chunks.push(chunk);
+    }
+    // decoded once whole: a character split across two chunks stays one
+    const raw = Buffer.concat(chunks).toString('utf8');
     if (req.method !== 'POST') return send(res, 405, { error: 'invalid_request' });
     let body: Record<string, unknown>;
     try {
@@ -63,6 +77,9 @@ export class FakeTokens {
     return send(res, 200, { access_token: `fake-access-${n}`, refresh_token: `fake-refresh-${n}`, expires_in: 28_800, token_type: 'Bearer' });
   }
 }
+
+/** A refresh request is a few hundred bytes: anything past 64 KiB is not one. */
+const MAX_BODY = 64 * 1024;
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));

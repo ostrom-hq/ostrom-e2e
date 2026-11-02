@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { request } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakeTokens } from '../src/fake-tokens.ts';
 
@@ -40,8 +41,36 @@ describe('FakeTokens', () => {
     expect(tokens.refreshes[1]).toEqual({ grantType: 'authorization_code', refreshToken: undefined, clientId: undefined });
   });
 
+  it('reads a body split anywhere, refuses one past 64 KiB, and survives a request cut off mid-body', async () => {
+    tokens = await new FakeTokens().start();
+    // é is two bytes: sent byte by byte, it is still é
+    const bytes = Buffer.from(JSON.stringify({ grant_type: 'refresh_token', refresh_token: 'rt-é' }), 'utf8');
+    const split = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const byte of bytes) controller.enqueue(Uint8Array.of(byte));
+        controller.close();
+      },
+    });
+    const r = await fetch(tokens.url, { method: 'POST', body: split, duplex: 'half' } as RequestInit);
+    expect(r.status).toBe(200);
+    expect(tokens.refreshes.at(-1)?.refreshToken).toBe('rt-é');
+    const big = await post(tokens.url, 'x'.repeat(64 * 1024 + 1));
+    expect(big.status).toBe(413);
+    // the client goes away after half the body it announced: nothing is recorded, and the endpoint still answers
+    const { port } = new URL(tokens.url);
+    await new Promise<void>((resolve) => {
+      const cut = request({ host: '127.0.0.1', port, path: '/v1/oauth/token', method: 'POST', headers: { 'content-length': '100' } });
+      cut.on('error', () => resolve());
+      cut.write('{"grant_type":');
+      setTimeout(() => cut.destroy(), 50);
+    });
+    expect(tokens.refreshes).toHaveLength(1);
+    expect((await post(tokens.url, JSON.stringify({ grant_type: 'refresh_token', refresh_token: 'rt-2' }))).status).toBe(200);
+  });
+
   it('listens on the port it is given, refuses one already taken, and stops once', async () => {
     tokens = await new FakeTokens().start();
+    await expect(tokens.start(), 'started twice').rejects.toThrow('already listening');
     const port = Number(new URL(tokens.url).port);
     await expect(new FakeTokens().start(port)).rejects.toThrow();
     await tokens.stop();

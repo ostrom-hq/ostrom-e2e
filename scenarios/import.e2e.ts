@@ -4,12 +4,11 @@
 // (src/fake-tokens.ts, the server's OSTROM_SHARING_CLAUDE_TOKEN_URL, ostrom-server#96). The plan, the import, the
 // accounts that wait while TeamCode runs, then the owner's cutover: accounts revived, one refused, exit codes, and the
 // audit event in the owner's name. Each part says why it is skipped until its pieces are there.
-import { execFileSync } from 'node:child_process';
 import { afterAll, describe, expect, it } from 'vitest';
 import { FakeTokens } from '../src/fake-tokens.ts';
 import { isServed } from '../src/probe.ts';
 import { CLI_BIN, DATABASE_ADMIN_URL, FAKE_TOKENS_PORT, SERVER_URL, TEAMCODE_DB, TEAMCODE_KEY_FILE, TEAMCODE_PASSWORD } from './env.ts';
-import { type Run, person } from './lib.ts';
+import { type Run, adminSql, person } from './lib.ts';
 import { type Person, call, email, orgOf, orgsUnavailable, profileOf, signIn } from './org.ts';
 
 async function unavailable(): Promise<string> {
@@ -37,7 +36,7 @@ const CLAUDE_CODE_CLIENT = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 
 type Account = { id: string; label: string; providerAccountId?: string; status: string };
 
-/** What the scenarios share: the owner, their org, their console token, the CLI as them. */
+/** One scenario's team: the owner, their org, their console token, the CLI as them. */
 interface Team {
   owner: Person;
   orgId: string;
@@ -45,22 +44,27 @@ interface Team {
   token: string;
   run(...args: string[]): Promise<Run>;
 }
-let team: Team | undefined;
-
-async function teamOf(): Promise<Team> {
-  if (team) return team;
-  const owner = await signIn(email('tc-owner'));
+/** A new owner [who] and their org: each scenario has its own, so that it runs alone too. */
+async function teamOf(who: string): Promise<Team> {
+  const owner = await signIn(email(who));
   const org = await orgOf(owner);
   const profile = await profileOf(owner.caller);
   // A console token, as an owner makes one on the console: the device token of `ostrom login` cannot import
   const pat = await call(owner.caller, 'POST', '/api/v1/tokens', { name: 'e2e TeamCode import', scopes: ['import:write', 'accounts:read', 'profile:read'], expiresInDays: 1 });
   expect(pat.status, JSON.stringify(pat.body)).toBe(201);
   const token = String(pat.body['secret']);
-  const cli = person('tc-owner');
+  const cli = person(who);
   const run = (...args: string[]) =>
     cli.ostrom(['import', 'teamcode', '--db', TEAMCODE_DB, '--key-file', TEAMCODE_KEY_FILE, ...args], { env: { OSTROM_TOKEN: token, MYSQL_PWD: TEAMCODE_PASSWORD } });
-  team = { owner, orgId: org.id, userId: profile.id, token, run };
-  return team;
+  return { owner, orgId: org.id, userId: profile.id, token, run };
+}
+
+/**
+ * Ostrom's copies of the shared accounts lose their tokens, as when a refresh is refused (AccountTokens.retire): they
+ * wait for a reconnection.
+ */
+function retire(t: Team): void {
+  admin(`UPDATE sharing_accounts SET status = 'RECONNECT_REQUIRED', version = version + 1 WHERE org_id = '${uuid(t.orgId)}'`);
 }
 
 async function accounts(t: Team): Promise<Account[]> {
@@ -70,10 +74,7 @@ async function accounts(t: Team): Promise<Account[]> {
 }
 
 /** Runs [sql] as the superuser of the bench's database; its rows, tab-separated. */
-function admin(sql: string): string[] {
-  const out = execFileSync('docker', ['run', '--rm', '--network', 'host', 'postgres:18', 'psql', DATABASE_ADMIN_URL, '-v', 'ON_ERROR_STOP=1', '-AtF', '\t', '-c', sql], { encoding: 'utf8', timeout: 60_000 });
-  return out.split('\n').filter((l) => l !== '');
-}
+const admin = (sql: string): string[] => adminSql(sql).split('\n').filter((l) => l !== '');
 
 const uuid = (v: string) => {
   if (!/^[0-9a-f-]{36}$/.test(v)) throw new Error(`not a uuid: ${v}`);
@@ -88,7 +89,7 @@ describe('E2E-TC: TeamCode into Ostrom, with the real ostrom import teamcode', (
   afterAll(() => tokens.stop());
 
   it.skipIf(WHY !== '')(named('E2E-TC-003 the plan writes nothing, the import shares the accounts, and an account to reconnect waits for the cutover while TeamCode runs', WHY), async () => {
-    const t = await teamOf();
+    const t = await teamOf('tc-import');
     const plan = await t.run();
     expect(plan.code, shown(plan)).toBe(0);
     expect(plan.stdout).toContain('Plan (nothing imported yet):');
@@ -103,9 +104,8 @@ describe('E2E-TC: TeamCode into Ostrom, with the real ostrom import teamcode', (
     const shared = await accounts(t);
     expect(shared.map((a) => [a.label, a.status])).toEqual([['Claude Max 1', 'ready'], ['Claude Max 2 (paused)', 'disabled']]);
 
-    // Ostrom's copies lose their tokens, as when a refresh is refused (AccountTokens.retire): they wait for a
-    // reconnection. While TeamCode runs, an import never tests TeamCode's tokens: testing rotates them.
-    admin(`UPDATE sharing_accounts SET status = 'RECONNECT_REQUIRED', version = version + 1 WHERE org_id = '${uuid(t.orgId)}'`);
+    // While TeamCode runs, an import never tests TeamCode's tokens: testing rotates them
+    retire(t);
     const again = await t.run('--yes');
     expect(again.code, shown(again)).toBe(0);
     expect(again.stdout).toMatch(/revive_at_cutover {2}account {2}claude\/Claude Max 1 \(/);
@@ -115,7 +115,11 @@ describe('E2E-TC: TeamCode into Ostrom, with the real ostrom import teamcode', (
   });
 
   it.skipIf(CUTOVER_WHY !== '')(named("E2E-TC-004 the owner's cutover revives the waiting accounts with TeamCode's tokens, leaves a refused one waiting (2), and is audited in the owner's name", CUTOVER_WHY), async () => {
-    const t = await teamOf();
+    // its own team, imported, its accounts waiting for the cutover (as E2E-TC-003 leaves them)
+    const t = await teamOf('tc-cutover');
+    const imported = await t.run('--yes');
+    expect(imported.code, shown(imported)).toBe(0);
+    retire(t);
     await tokens.start(FAKE_TOKENS_PORT);
     const before = admin(`SELECT count(*) FROM identity_audit_events WHERE org_id = '${uuid(t.orgId)}' AND action = 'import.teamcode.cutover'`);
 
@@ -153,7 +157,8 @@ describe('E2E-TC: TeamCode into Ostrom, with the real ostrom import teamcode', (
     expect(done.code, shown(done)).toBe(0);
     expect(done.stdout).toContain('No shared account waits for the cutover: nothing to do.');
 
-    // One audit event per cutover run, in the owner's name, before any write: the plans and the refusal record none
+    // One audit event per cutover run, in the owner's name, before any write: the plans and the refusal record none.
+    // `accounts` counts the accounts the CLI sent from TeamCode (two, each time), not those the run revived.
     const events = admin(`SELECT actor_id, details FROM identity_audit_events WHERE org_id = '${uuid(t.orgId)}' AND action = 'import.teamcode.cutover' ORDER BY sequence`);
     expect(events.length - Number(before[0])).toBe(2);
     for (const line of events) {
