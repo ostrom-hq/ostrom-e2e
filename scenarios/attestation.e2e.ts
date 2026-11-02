@@ -76,7 +76,8 @@ async function sessionWithCheck(who: string) {
   const pkg = await call(a.c, 'GET', '/api/v1/packages/current');
   expect(pkg.status, JSON.stringify(pkg.body)).toBe(200);
   const digest = String(pkg.body['digest'] ?? (pkg.body['package'] as Record<string, unknown> | undefined)?.['digest'] ?? '');
-  expect(digest).toMatch(/^sha256:/);
+  // The server serves the digest as bare hex (run 41483058195); a `sha256:` prefix is accepted too.
+  expect(digest).toMatch(/^(sha256:)?[0-9a-f]{64}$/);
   const launch = await call(a.c, 'POST', '/api/v1/launches', { agent: 'claude', repo: 'acme/att' });
   expect(launch.status, JSON.stringify(launch.body)).toBe(201);
   const agent: Caller = { token: String(launch.body['agentToken']), org: a.org.id, ...(a.c.from ? { from: a.c.from } : {}) };

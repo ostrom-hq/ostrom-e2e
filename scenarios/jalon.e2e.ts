@@ -148,13 +148,15 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
   it('E2E-GATE-001, E2E-YES-003, E2E-YESCLI-002, E2E-YES-001 — push blocked, the requester cannot say yes, a yes from a second account\'s browser lets exactly that SHA through', async () => {
     const sb = sandbox('api', w.repo);
     const shaA = commit(sb.work, 'a.txt', 'a\n', 'feat: a');
-    const push = bash('git push origin main');
+    // As Claude Code does, SessionStart first: it opens the session the gate asks in (without it the server answers
+    // « Session not found », run 41483058195). The push is step 1.
+    const push = { steps: [{ event: 'SessionStart', source: 'startup' }, ...bash('git push origin main').steps] };
 
     // 1. The push is refused before it runs; the refusal names the request to wait for.
     const first = await w.dev.cli.claude(sb.work, push, ['--repo', w.repo]);
-    const refused = first.log?.steps[0];
+    const refused = first.log?.steps[1];
     expect(refused?.blocked, first.run.stderr).toBe(true);
-    expect(refused?.reason).toMatch(/waiting for a yes/i);
+    expect(refused?.reason, refused?.reason).toMatch(/waiting for a yes/i);
     expect(originSha(sb, 'main')).not.toBe(shaA);
     gate = gateIdIn(refused?.reason ?? '');
     expect(gate).toBeDefined();
@@ -185,15 +187,15 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     const yes = await answer(w.rev.browser, theirs);
     expect(yes.status, JSON.stringify(yes.body)).toBe(200);
     const second = await w.dev.cli.claude(sb.work, push, ['--repo', w.repo]);
-    expect(second.log?.steps[0]?.blocked, second.log?.steps[0]?.reason).toBe(false);
+    expect(second.log?.steps[1]?.blocked, second.log?.steps[1]?.reason).toBe(false);
     expect(originSha(sb, 'main')).toBe(shaA);
-    receipt = receiptIdIn(yes.body) ?? receiptIdIn(second.log?.steps[0]?.reason ?? '');
+    receipt = receiptIdIn(yes.body) ?? receiptIdIn(second.log?.steps[1]?.reason ?? '');
 
     // 5. E2E-YES-001: a new commit is a new request: the yes for shaA does not cover shaB.
     const shaB = commit(sb.work, 'b.txt', 'b\n', 'feat: b');
     const third = await w.dev.cli.claude(sb.work, push, ['--repo', w.repo]);
-    expect(third.log?.steps[0]?.blocked).toBe(true);
-    expect(gateIdIn(third.log?.steps[0]?.reason ?? '')).not.toBe(gate);
+    expect(third.log?.steps[1]?.blocked).toBe(true);
+    expect(gateIdIn(third.log?.steps[1]?.reason ?? '')).not.toBe(gate);
     expect(originSha(sb, 'main')).toBe(shaA);
     expect(shaB).not.toBe(shaA);
 
