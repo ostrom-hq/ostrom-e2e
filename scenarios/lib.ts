@@ -235,6 +235,8 @@ export async function journeyUnavailable(): Promise<string> {
     // A person's current org (the only membership, or `Ostrom-Org`) on the current-org routes such as POST
     // /api/v1/workflows: before it, "This credential belongs to no organization" (run 41459755344).
     ['GET', '/api/v1/me/organizations', '#64'],
+    // A real GateActorResolver (`LaunchGateActors`) comes with the launches of #84; before, every caller is refused.
+    ['POST', '/api/v1/launches', '#84'],
   ];
   const missing: string[] = [];
   for (const [method, path, pr] of needed) if (!(await isServed(SERVER_URL, path, method))) missing.push(`${method} ${path.replace(sample, '{id}')} (${pr})`);
