@@ -3765,7 +3765,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), identité, organisations, chaque module
 - Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
 - Priorité : P1
-- Statut : codé : `scenarios/sweep.e2e.ts`, sauté sur le run 41541422573 (le login donne un `osc_`) : attend ostrom-server#137 (`ostrom login --admin`)
+- Statut : codé : `scenarios/sweep.e2e.ts`, réactivé depuis ostrom-server#137 (5949f7c1) : un login admin qui ne donne pas un `osg_` fait échouer le scénario (sauté sur le run 41541422573, avant #137)
 
 ### E2E-SWEEP-006 — Une clé de service de B n'obtient rien de A, sur chaque route servie
 

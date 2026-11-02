@@ -481,9 +481,11 @@ const INTRUDERS: Record<string, () => Promise<Intruder | string>> = {
   },
   'admin token (osg_)': async () => {
     const b = await sideB();
+    // `ostrom login --admin` since ostrom-server#137 (5949f7c1): the device login asks for the three governance scopes,
+    // B's owner approves it acting in B, and the token is an elevated `osg_` bound to B.
     const got = await deviceToken(b.caller, { clientName: 'sweep b admin', scopes: ['policy:write', 'harness:write', 'gates:policy'] });
-    if (!got.token) return `waits ostrom-server#137 (ostrom login --admin): ${got.why}`;
-    if (!got.token.startsWith('osg_')) return `waits ostrom-server#137 (ostrom login --admin): the device login gave a ${got.token.slice(0, 4)}… token, not osg_`;
+    if (!got.token) throw new Error(`ostrom login --admin: ${got.why}`);
+    if (!got.token.startsWith('osg_')) throw new Error(`ostrom login --admin gave a ${got.token.slice(0, 4)}… token, not osg_ (a server before ostrom-server#137?)`);
     return { name: 'admin token (osg_)', caller: { token: got.token, from: address() }, org: b.org };
   },
   'service key': async () => {
