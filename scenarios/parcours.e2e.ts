@@ -375,8 +375,10 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     const a = await owner('parc-015');
     const before = await call(a.c, 'GET', '/api/v1/gates/policy');
     expect(before.status).toBe(200);
-    expect(typeof before.body?.['selfApproval']).toBe('string');
-    const other = before.body['selfApproval'] === 'never' ? 'allowed' : 'never';
+    // Since ostrom-server#159 (contract core#66) the policy is `sole-approver` or `never`, and an organization that never
+    // chose is `never`: its own actions are never approved by their author.
+    expect(before.body).toEqual({ selfApproval: 'never' });
+    const other = 'sole-approver';
     const set = await call(a.c, 'PUT', '/api/v1/gates/policy', { selfApproval: other });
     expect(set.body).toEqual({ selfApproval: other });
     expect((await call(a.c, 'GET', '/api/v1/gates/policy')).body).toEqual({ selfApproval: other });
@@ -385,7 +387,8 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     const { person } = await join(m);
     const refused = await call({ ...person.caller, org: a.org.id }, 'PUT', '/api/v1/gates/policy', { selfApproval: before.body['selfApproval'] });
     expect(refused.status).toBe(403);
-    expect((await call(a.c, 'PUT', '/api/v1/gates/policy', { selfApproval: 'whenever' })).status).toBe(400);
+    // An unknown value, and `allowed`, the value before #159, are refused.
+    for (const value of ['whenever', 'allowed']) expect((await call(a.c, 'PUT', '/api/v1/gates/policy', { selfApproval: value })).status, value).toBe(400);
   }, T);
 
   it.skipIf(W016 !== '')(named('E2E-PARC-016 — 3.4 the model policy and the inference settings are set and read back', W016), async () => {
