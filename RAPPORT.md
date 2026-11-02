@@ -27,7 +27,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 |---|---|---|---|---|---|---|
 | LOGIN | 9 | 1 | 0 | 1 | 0 | 8 |
 | CONN | 16 | 0 | 0 | 1 | 0 | 15 |
-| CLAUDE | 20 | 4 | 0 | 2 | 0 | 18 |
+| CLAUDE | 20 | 4 | 1 | 2 | 0 | 17 |
 | CODEX | 9 | 0 | 0 | 0 | 0 | 9 |
 | GATE | 15 | 5 | 0 | 1 | 0 | 14 |
 | BYPASS | 33 | 12 | 0 | 3 | 0 | 30 |
@@ -69,7 +69,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | PARC | 37 | 15 | 6 | 31 | 0 | 0 |
 | ATT | 3 | 3 | 2 | 0 | 0 | 1 |
 | GHORG | 3 | 0 | 3 | 0 | 0 | 0 |
-| **Total** | 386 | 69 | 31 | 47 | 0 | 308 |
+| **Total** | 386 | 69 | 32 | 47 | 0 | 307 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un

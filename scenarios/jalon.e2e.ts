@@ -105,6 +105,7 @@ describe.skipIf(LOGIN_OFF !== '')(`jalon: real ostrom login${skipped(LOGIN_OFF)}
   // CLI_SCOPES (profile:read, orgs:read, workflows:read, sessions:write), and `GET /api/v1/approvals` needs gates:read
   // (`GateScopes.readingApprovals`), so `ostrom inbox` always ends in 77 after a login. `it.fails` keeps the bench
   // green while the gap stands and turns red the day it is fixed: then drop `.fails`.
+  // Waits for ostrom-server#122 (gates:read, the CLI token reads approvals, gates and MCP servers).
   it.fails('E2E-LOGIN-009 — after `ostrom login`, `ostrom inbox` lists the approvals waiting for the person', async () => {
     const m = await member(await signIn(email('dev-inbox')));
     const { run } = await deviceLogin(m.cli, m.browser);
@@ -255,10 +256,9 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     expect(ms[10]).toBeLessThan(50);
   }, 120_000);
 
-  // Known gap (run 41480063393): `--repo` says « Repository (else read from origin) », but AgentLaunchUseCase takes the
-  // folder's name (`folderName(top)`), so a gate set on `acme/api` never reaches a session in a clone named `api`. The
-  // journey above passes `--repo`; this one stays `it.fails` until the CLI reads origin: remove `.fails` then.
-  it.fails('E2E-CLAUDE-020 — without --repo, ostrom claude names the repository from origin (owner/name), not from the folder', async () => {
+  // Run 41480063393 found the repository named after the folder; ostrom-cli#65 (b82f327) names it owner/name from
+  // origin, as `--repo`'s help says.
+  it('E2E-CLAUDE-020 — without --repo, ostrom claude names the repository from origin (owner/name), not from the folder', async () => {
     const slug = `acme/from-origin-${Date.now().toString(36)}`;
     const sb = sandbox('api', slug);
     const { run } = await w.dev.cli.claude(sb.work, { steps: [{ event: 'SessionStart', source: 'startup' }, { event: 'SessionEnd' }] });

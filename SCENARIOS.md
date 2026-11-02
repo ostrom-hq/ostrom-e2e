@@ -462,7 +462,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI réelle, serveur (image), faux agent
 - Source : run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393 (session enregistrée pour `api`, paquet à 0 workflow) ; `AgentLaunchUseCase.kt` prend `folderName(top)` ; JOURNAL 02/11 → CLI-AGENTS
 - Priorité : P1
-- Statut : rouge connu : `scenarios/jalon.e2e.ts` en `it.fails` (retirer `.fails` quand la CLI lit `origin`)
+- Statut : vert : `scenarios/jalon.e2e.ts`, depuis ostrom-cli#65 (b82f327), run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41494850752
 
 
 ## CODEX : `ostrom codex` et les autres agents
