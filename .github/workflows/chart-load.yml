@@ -213,6 +213,9 @@ jobs:
       # node's /var volume, is bind-mounted on the runner. Checked by one sign-in mail; else the setup says why it skips.
       - name: Gate load setup (requester token, approver session)
         id: loadsetup
+        env:
+          # The only origin a browser session may write from: the chart's console URL (global.urls.app, S2-08).
+          OSTROM_E2E_CONSOLE_ORIGIN: http://app.ostrom.test
         run: |
           pod=$(kubectl -n "$NS" get pod -l app.kubernetes.io/component=server -o jsonpath='{.items[0].metadata.name}')
           kubectl -n "$NS" port-forward "pod/$pod" 18080:8080 > "$RUNNER_TEMP/port-forward.log" 2>&1 < /dev/null &
@@ -237,6 +240,7 @@ jobs:
         env:
           OSTROM_URL: ${{ env.API_URL }}
           OSTROM_LOAD_SCENARIOS: gates
+          OSTROM_LOAD_APPROVER_ORIGIN: http://app.ostrom.test
         run: |
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js
@@ -257,26 +261,8 @@ jobs:
             echo
             echo "ostrom-server@${SERVER_SHA:-?} · gates and race: ${GATES:-not run}"
             echo
-            # shellcheck disable=SC2016 # JavaScript template literals, not shell expansions
-            node -e '
-              const fs = require("fs");
-              const files = [["smoke (health, instance)", "smoke-summary.json"], ["chart journeys", "journeys-summary.json"],
-                ["gates", "gates-summary.json"], ["race", "race-summary.json"]];
-              const ms = (v) => (v === undefined ? "" : v.toFixed(1));
-              const pct = (v) => (v === undefined ? "" : `${(v * 100).toFixed(2)} %`);
-              let out = "| script | metric | p95 (ms) | p99 (ms) | errors | req/s |\n|---|---|---|---|---|---|\n";
-              for (const [label, file] of files) {
-                if (!fs.existsSync(file)) { out += `| ${label} | not run | | | | |\n`; continue; }
-                const m = JSON.parse(fs.readFileSync(file, "utf8")).metrics;
-                for (const [k, v] of Object.entries(m).filter(([k]) => k.startsWith("http_req_duration"))) {
-                  const sel = k.slice("http_req_duration".length);
-                  const failed = m[`http_req_failed${sel}`] ?? (sel === "" ? m.http_req_failed : undefined);
-                  const reqs = m[`http_reqs${sel}`] ?? (sel === "" ? m.http_reqs : undefined);
-                  out += `| ${label} | ${sel || "all"} | ${ms(v["p(95)"])} | ${ms(v["p(99)"])} | ${pct(failed?.value)} | ${reqs?.rate === undefined ? "" : reqs.rate.toFixed(1)} |\n`;
-                }
-              }
-              process.stdout.write(out);
-            ' || echo "(no k6 summary)"
+            node scripts/k6-summary.ts "smoke (health, instance)=smoke-summary.json" "chart journeys=journeys-summary.json" \
+              "gates=gates-summary.json" "race=race-summary.json" || echo "(no k6 summary)"
             echo
             echo "| pod | peak CPU | peak memory | samples |"
             echo "|---|---|---|---|"

@@ -118,6 +118,7 @@ jobs:
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
           OSTROM_LOAD_SCENARIOS: health,instance
+          K6_SUMMARY_TREND_STATS: "avg,min,med,max,p(90),p(95),p(99)"
         run: k6 run --summary-export smoke-summary.json load/smoke.js
       # Gate load tests (LOAD-002 gates, LOAD-006 race): they run as soon as the server serves gates, people,
       # organizations and workflows; until then scripts/load-setup.ts says what is missing and they are skipped.
@@ -133,6 +134,9 @@ jobs:
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
           OSTROM_LOAD_SCENARIOS: gates
+          # The session's writes need the console's origin (S2-08): the bench's console URL.
+          OSTROM_LOAD_APPROVER_ORIGIN: http://127.0.0.1:4600
+          K6_SUMMARY_TREND_STATS: "avg,min,med,max,p(90),p(95),p(99)"
         run: |
           k6 run --summary-export gates-summary.json load/smoke.js
           k6 run --summary-export race-summary.json load/race.js
@@ -149,6 +153,8 @@ jobs:
             const line = `### Bench e2e\n\nserver: ${process.env.S || "absent"} (${process.env.M}) · cli: ${process.env.C || "absent"} · gate load: ${process.env.G || "not run"}\n\n| passed | failed | todo | skipped |\n|---|---|---|---|\n| ${n("passed")} | ${n("failed")} | ${n("todo")} | ${n("pending") + n("skipped")} |\n`;
             require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, line);
           ' || true
+          # p95/p99, errors and requests/s of the load tests (scripts/k6-summary.ts).
+          node scripts/k6-summary.ts "smoke=smoke-summary.json" "gates=gates-summary.json" "race=race-summary.json" >> "$GITHUB_STEP_SUMMARY" || true
         env:
           S: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.sha || '' }}
           M: ${{ steps.server.outputs.mode }}

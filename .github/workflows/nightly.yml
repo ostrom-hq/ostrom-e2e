@@ -70,13 +70,20 @@ jobs:
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
           OSTROM_LOAD_SCENARIOS: ${{ steps.loadsetup.outputs.ready == 'true' && 'health,asks,gates' || 'health' }}
+          OSTROM_LOAD_APPROVER_ORIGIN: http://127.0.0.1:4600
+          K6_SUMMARY_TREND_STATS: "avg,min,med,max,p(90),p(95),p(99)"
         run: k6 run --summary-export soak-summary.json load/soak.js
       - name: k6 race (100 simultaneous yes)
         # Runs as soon as scripts/load-setup.ts could make the requester token and the approver session.
         if: steps.loadsetup.outputs.ready == 'true'
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
+          OSTROM_LOAD_APPROVER_ORIGIN: http://127.0.0.1:4600
+          K6_SUMMARY_TREND_STATS: "avg,min,med,max,p(90),p(95),p(99)"
         run: k6 run --summary-export race-summary.json load/race.js
+      - name: k6 summary (p95, p99, errors, requests/s)
+        if: always() && steps.server.outputs.available == 'true'
+        run: node scripts/k6-summary.ts "soak=soak-summary.json" "race=race-summary.json" >> "$GITHUB_STEP_SUMMARY"
       - name: No server yet
         if: steps.server.outputs.available != 'true'
         run: echo "ostrom-server does not meet the bench contract yet; load tests are blocked (RAPPORT.md)." >> "$GITHUB_STEP_SUMMARY"
