@@ -31,6 +31,9 @@ const named = (title: string, why: string) => (why === '' ? title : `${title} (s
 /** TeamCode's refresh tokens of the fake team's two Claude accounts (compose/demo/teamcode/seed.mjs, fake). */
 const MAX_1 = 'sk-ant-ort-demo-1';
 const MAX_2 = 'sk-ant-ort-demo-2';
+/** Their provider account ids, which a refresh must name for a revival (ostrom-server#117). */
+const ACCOUNT_1 = 'acct-a-max-1';
+const ACCOUNT_2 = 'acct-a-max-2';
 /** The public client id of Claude Code, sent with every refresh (HttpOAuthRefresher). */
 const CLAUDE_CODE_CLIENT = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 
@@ -135,6 +138,14 @@ describe('E2E-TC: TeamCode into Ostrom, with the real ostrom import teamcode', (
     expect(declined.stdout).toContain('The cutover writes 2 shared accounts');
     expect(tokens.refreshes, 'a plan tests no token').toEqual([]);
 
+    // A provider that does not say whose tokens they are revives nothing (ostrom-server#117): both keep waiting
+    const unnamed = await t.run('--cutover', '--confirm', 'cutover');
+    expect(unnamed.code, shown(unnamed)).toBe(2);
+    expect(unnamed.stdout).toMatch(/skipped {2}account {2}claude\/Claude Max 1 \(The provider does not confirm/);
+    expect((await accounts(t)).map((a) => a.status)).toEqual(['reconnect_required', 'reconnect_required']);
+    tokens.refreshes.length = 0;
+    tokens.accounts.set(MAX_1, ACCOUNT_1).set(MAX_2, ACCOUNT_2);
+
     // The provider forgot one of TeamCode's refresh tokens: that account keeps waiting, the cutover ends with 2
     tokens.refused.add(MAX_2);
     const partial = await t.run('--cutover', '--confirm', 'cutover');
@@ -157,10 +168,11 @@ describe('E2E-TC: TeamCode into Ostrom, with the real ostrom import teamcode', (
     expect(done.code, shown(done)).toBe(0);
     expect(done.stdout).toContain('No shared account waits for the cutover: nothing to do.');
 
-    // One audit event per cutover run, in the owner's name, before any write: the plans and the refusal record none.
-    // `accounts` counts the accounts the CLI sent from TeamCode (two, each time), not those the run revived.
+    // One audit event per cutover run that sends accounts (three), in the owner's name, before any write: the plans,
+    // the refusal and the run with nothing left record none. `accounts` counts the accounts the CLI sent from TeamCode
+    // (two, each time), not those the run revived.
     const events = admin(`SELECT actor_id, details FROM identity_audit_events WHERE org_id = '${uuid(t.orgId)}' AND action = 'import.teamcode.cutover' ORDER BY sequence`);
-    expect(events.length - Number(before[0])).toBe(2);
+    expect(events.length - Number(before[0])).toBe(3);
     for (const line of events) {
       const [actor, details] = line.split('\t');
       expect(actor).toBe(t.userId);

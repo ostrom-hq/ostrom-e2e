@@ -22,6 +22,15 @@ describe('FakeTokens', () => {
     expect(tokens.refreshes).toEqual([{ grantType: 'refresh_token', refreshToken: 'rt-1', clientId: 'cid' }]);
   });
 
+  it("names the account a refresh token is of, as Claude's account.uuid, once it is told which", async () => {
+    tokens = await new FakeTokens().start();
+    tokens.accounts.set('rt-1', 'acct-1');
+    const r = await post(tokens.url, JSON.stringify({ grant_type: 'refresh_token', refresh_token: 'rt-1' }));
+    expect(await r.json()).toMatchObject({ access_token: 'fake-access-1', account: { uuid: 'acct-1' } });
+    const other = await post(tokens.url, JSON.stringify({ grant_type: 'refresh_token', refresh_token: 'rt-2' }));
+    expect(await other.json()).not.toHaveProperty('account');
+  });
+
   it('refuses a forgotten refresh token with invalid_grant, and a malformed request with invalid_request', async () => {
     tokens = await new FakeTokens().start();
     tokens.refused.add('rt-dead');
