@@ -2,8 +2,11 @@
 // A fake OAuth token endpoint of a provider (Claude, Codex), for the shared accounts' refresh: the server's
 // OSTROM_SHARING_CLAUDE_TOKEN_URL and OSTROM_SHARING_CODEX_TOKEN_URL point here (ostrom-server#96). It answers a
 // refresh the way the providers do (RFC 6749 § 5.1 and § 5.2): 200 with a new pair, or 400 `invalid_grant` for a
-// refresh token it was told to refuse. Like Claude's, a 200 names the account the tokens are of (`account.uuid`) when it
-// was told which: the server keeps a revived account's tokens only when they are that account's (ostrom-server#117). Every refresh token it is sent is recorded, never a token of a real provider.
+// refresh token it was told to refuse. A 200 names the account the tokens are of when it was told which, as both
+// providers do: Claude's `account.uuid`, and Codex's `chatgpt_account_id` in the claims of an `id_token`; told nothing, it
+// names no account. The server keeps a revived account's tokens only when they are that account's (ostrom-server#117),
+// and takes out of service an account whose refresh names another one (`wrong_account`, ostrom-server#134). Every
+// request it is sent is recorded, never a token of a real provider.
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -17,7 +20,7 @@ export interface Refresh {
 export class FakeTokens {
   /** The refresh tokens answered with 400 `invalid_grant` (the provider forgot them). */
   readonly refused = new Set<string>();
-  /** The provider account each refresh token is of, named in the answer as Claude does (`account.uuid`). */
+  /** The provider account each refresh token is of, named in the answer as Claude and Codex do. */
   readonly accounts = new Map<string, string>();
   readonly refreshes: Refresh[] = [];
   private server: Server | undefined;
@@ -79,8 +82,17 @@ export class FakeTokens {
     const n = this.refreshes.length;
     const uuid = this.accounts.get(refresh.refreshToken);
     const pair = { access_token: `fake-access-${n}`, refresh_token: `fake-refresh-${n}`, expires_in: 28_800, token_type: 'Bearer' };
-    return send(res, 200, uuid === undefined ? pair : { ...pair, account: { uuid } });
+    return send(res, 200, uuid === undefined ? pair : { ...pair, account: { uuid }, id_token: idToken(uuid) });
   }
+}
+
+/** The claim of an OpenAI id_token that holds the ChatGPT account (the server's OPENAI_AUTH_CLAIM). */
+export const OPENAI_AUTH_CLAIM = 'https://api.openai.com/auth';
+
+/** An unsigned JWT naming [account] as Codex's id_token does (`chatgpt_account_id`); the server reads it, never checks it. */
+export function idToken(account: string): string {
+  const part = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  return `${part({ alg: 'none', typ: 'JWT' })}.${part({ [OPENAI_AUTH_CLAIM]: { chatgpt_account_id: account } })}.`;
 }
 
 /** A refresh request is a few hundred bytes: anything past 64 KiB is not one. */
