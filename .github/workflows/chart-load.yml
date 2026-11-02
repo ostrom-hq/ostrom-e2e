@@ -74,6 +74,7 @@ jobs:
           database-url: postgresql://127.0.0.1:1/none
           required: "false"
       - name: The image is built
+        id: image
         env:
           SHA: ${{ steps.server.outputs.sha }}
         run: |
@@ -267,7 +268,7 @@ jobs:
       # The server exports its metrics every minute: two exports after the last gate, then the queries of the alerts and
       # of the product dashboard (ostrom-infra), against what the real server sent.
       - name: Alert and dashboard queries against the server's metrics
-        if: always() && steps.server.outcome == 'success'
+        if: always() && steps.image.outcome == 'success'
         env:
           OSTROM_OBS_REQUIRED: ${{ inputs.observability_required }}
           OSTROM_PROMETHEUS_URL: http://127.0.0.1:19090
