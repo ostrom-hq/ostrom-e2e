@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: Apache-2.0
+// The MCP relay under load, with upstreams that answer at once, late, never, or not at all, all at the same time:
+// - fast: `echo` on a server that answers at once, 1.5 calls/s (under the relay's 120 calls per member, server and
+//   minute). Its p95 is the relay's own cost; it must hold while the other servers are slow or down.
+// - slow: `echo` on a server that answers every message 1 s late (2 at a time): the call succeeds, late.
+// - hang: `echo` on a server that never answers: the relay gives up at its deadline (OSTROM_MCP_CALL_TIMEOUT_MS of
+//   the load pass) with a tool error, never a hung request.
+// - down: `echo` on a server nothing listens on: a tool error at once.
+// Usage: k6 run load/mcp.js  (OSTROM_URL, OSTROM_LOAD_RELAY_TOKEN; OSTROM_LOAD_MCP_DEADLINE_MS, the relay's deadline)
+import { check } from 'k6';
+import { Counter } from 'k6/metrics';
+import { callTool, requireRelayToken, rpcResult } from './relay-lib.js';
+
+const DURATION = __ENV.OSTROM_LOAD_MCP_DURATION || '60s';
+const DEADLINE_MS = Number(__ENV.OSTROM_LOAD_MCP_DEADLINE_MS || 5000);
+const unexpected = new Counter('mcp_unexpected');
+
+export const options = {
+  scenarios: {
+    fast: { executor: 'constant-arrival-rate', rate: 3, timeUnit: '2s', duration: DURATION, preAllocatedVUs: 4, maxVUs: 4, exec: 'fast' },
+    slow: { executor: 'constant-vus', vus: 2, duration: DURATION, exec: 'slow' },
+    hang: { executor: 'constant-vus', vus: 1, duration: DURATION, exec: 'hang' },
+    down: { executor: 'constant-arrival-rate', rate: 1, timeUnit: '2s', duration: DURATION, preAllocatedVUs: 2, maxVUs: 2, exec: 'down' },
+  },
+  thresholds: {
+    mcp_unexpected: ['count==0'],
+    'http_req_duration{name:mcp-fast}': ['p(95)<250'],
+    'http_req_duration{name:mcp-slow}': ['p(95)<10000'],
+    // The deadline, plus what the relay needs to answer.
+    'http_req_duration{name:mcp-hang}': [`max<${DEADLINE_MS + 2000}`],
+    'http_req_duration{name:mcp-down}': ['p(95)<1000'],
+  },
+};
+
+export function setup() {
+  requireRelayToken('the MCP relay');
+}
+
+/** Calls `echo` on `server` and checks the answer is a success (`ok`) or a tool error (not ok), never anything else. */
+function echo(server, ok) {
+  const r = callTool(server, 'echo', { text: 'k6' }, `mcp-${server}`, { timeout: `${Math.ceil(DEADLINE_MS / 1000) + 30}s` });
+  const result = rpcResult(r);
+  const good = result !== null && (ok ? result.isError !== true && JSON.stringify(result.content).includes('k6') : result.isError === true);
+  if (!check(r, { [`mcp ${server} ${ok ? 'answers' : 'fails as a tool error'}`]: () => good })) {
+    unexpected.add(1, { server });
+    console.warn(`mcp ${server}: ${r.status} ${String(r.body).slice(0, 300)}`);
+  }
+}
+
+export function fast() {
+  echo('fast', true);
+}
+
+export function slow() {
+  echo('slow', true);
+}
+
+export function hang() {
+  echo('hang', false);
+}
+
+export function down() {
+  echo('down', false);
+}
