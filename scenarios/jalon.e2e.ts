@@ -25,7 +25,7 @@ import {
   realWorld,
   receiptIdIn,
 } from './lib.ts';
-import { call, email, signIn } from './org.ts';
+import { call, email, orgOf, signIn } from './org.ts';
 
 const reasonOf = async (probe: () => Promise<string>) => {
   try {
@@ -53,6 +53,9 @@ const mode = (path: string) => statSync(path).mode & 0o777;
 describe.skipIf(LOGIN_OFF !== '')(`jalon: real ostrom login${skipped(LOGIN_OFF)}`, () => {
   it('E2E-LOGIN-001 — device-flow login approved from the browser writes 0600 files, prints no secret, and the token speaks for the person', async () => {
     const m = await member(await signIn(email('dev-l')));
+    // A person in an organization, as after the onboarding: a person in none is « This credential belongs to no
+    // organization » for every org route (run 41519741958).
+    await orgOf(m.browser);
     const { run, userCode, answer: answered } = await deviceLogin(m.cli, m.browser);
 
     // The CLI showed a one-time code, the browser said yes to it, the CLI finished on its own.
@@ -94,16 +97,16 @@ describe.skipIf(LOGIN_OFF !== '')(`jalon: real ostrom login${skipped(LOGIN_OFF)}
       const inbox = await m.cli.ostrom(['inbox']);
       const said = inbox.stdout + inbox.stderr;
       expect(said).not.toMatch(SECRET);
-      if (inbox.code !== 0) {
-        expect(said, said).toMatch(/does not allow [a-z]+:[a-z*]+/);
-        expect(said).not.toMatch(/sign in|log ?in|unauthori[sz]ed|401/i);
-      }
+      // Since ostrom-server#122 the CLI token reads approvals (E2E-LOGIN-009): inbox answers.
+      expect(inbox.code, said).toBe(0);
+      expect(said).not.toMatch(/sign in|log ?in|unauthori[sz]ed|401/i);
     }
   }, 180_000);
 
   // ostrom-server#122 (29a9ab54) gave the CLI token gates:read: `ostrom inbox` reads the person's approvals.
   it('E2E-LOGIN-009 — after `ostrom login`, `ostrom inbox` lists the approvals waiting for the person', async () => {
     const m = await member(await signIn(email('dev-inbox')));
+    await orgOf(m.browser);
     const { run } = await deviceLogin(m.cli, m.browser);
     expect(run.code, run.stderr).toBe(0);
     const inbox = await m.cli.ostrom(['inbox']);
