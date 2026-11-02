@@ -313,7 +313,9 @@ describe('E2E-PARC: 2. organization setup', () => {
 // --------------------------------------------------------------------------------------------------------- 3. Rules
 
 const W012 = await needs(['GET', '/api/v1/rules'], ['PATCH', '/api/v1/rules/{id}'], ['POST', '/api/v1/rules/bulk'], ['GET', '/api/v1/analysis/state'], ['POST', '/api/v1/analysis/start']);
-const W013 = (await needs(['GET', '/api/v1/gates/catalog'], ['GET', '/api/v1/gates/catalog/signed'])) || ACTORS;
+// 3.2 end to end: a rule's gate (ostrom-server#79) is in the catalogue the hook reads and asks a yes for the push it
+// names; the yes needs a fresh sign-in (step-up) and the token of `gates:ask` (tokens and scopes of #88).
+const W013 = (await needs(['GET', '/api/v1/gates/catalog'], ['GET', '/api/v1/gates/catalog/signed'], ['POST', '/api/v1/rules'], ['PATCH', '/api/v1/rules/{id}'], ['POST', '/api/v1/gates'], ['GET', '/api/v1/approvals'], ['POST', '/api/v1/tokens'])) || ACTORS;
 const W014 = (await needs(['GET', '/api/v1/gates/approvers'])) || ACTORS;
 const W015 = await needs(['GET', '/api/v1/gates/policy'], ['PUT', '/api/v1/gates/policy']);
 const W016 = (await needs(['GET', '/api/v1/policy/models'], ['PUT', '/api/v1/policy/models'], ['GET', '/api/v1/inference/settings'], ['PUT', '/api/v1/inference/settings'])) || ORG64;
@@ -351,16 +353,72 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     await needsCredential('GET', '/api/v1/rules');
   }, T);
 
-  it.skipIf(W013 !== '')(named('E2E-PARC-013 — 3.2 the gate catalogue of the org, and its signed form the hook reads', W013), async () => {
+  it.skipIf(W013 !== '')(named('E2E-PARC-013 — 3.2 a rule poses a gate: in the signed catalogue, a push to main waits for a yes', W013), async () => {
     const a = await owner('parc-013');
+    const reviewerEmail = email('parc-013-rev');
+    expect((await invite(a.person, a.org.id, [reviewerEmail], 'admin')).status).toBe(200);
+    const { person: reviewer, accepted } = await join(reviewerEmail);
+    expect(accepted.status).toBe(200);
+    const login = (await profileOf(reviewer.caller)).login;
+    const repo = `acme/parc-${randomUUID().slice(0, 8)}`;
+    const q = `?repo=${encodeURIComponent(repo)}`;
     // The catalogue is a repository's (`GateCatalogApi(repo)`): without `?repo=` the server answers 400.
-    const catalog = await call(a.c, 'GET', '/api/v1/gates/catalog?repo=acme%2Fparc');
+    const before = await call(a.c, 'GET', `/api/v1/gates/catalog${q}`);
+    expect(before.status, JSON.stringify(before.body)).toBe(200);
+    expect(typeof before.body).toBe('object');
+    expect(JSON.stringify(before.body)).not.toContain('rule:');
+
+    // The owner writes the rule and its gate in /rules: accepted at once, its gate goes to the catalogue.
+    const made = await call(a.c, 'POST', '/api/v1/rules', {
+      statement: 'A push to main waits for a review', group: 'git', scope: [repo],
+      gate: { actions: [{ class: 'push-main', label: 'Push to main', patterns: [], repos: [repo] }], approvers: [login] },
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body).toMatchObject({ status: 'accepted', output: 'gate' });
+    const workflowId = `rule:${String(made.body['id'])}`;
+    const catalog = await call(a.c, 'GET', `/api/v1/gates/catalog${q}`);
     expect(catalog.status, JSON.stringify(catalog.body)).toBe(200);
-    expect(typeof catalog.body).toBe('object');
-    const signed = await call(a.c, 'GET', '/api/v1/gates/catalog/signed?repo=acme%2Fparc');
+    expect(JSON.stringify(catalog.body)).toContain(workflowId);
+    const signed = await call(a.c, 'GET', `/api/v1/gates/catalog/signed${q}`);
     expect(signed.status, JSON.stringify(signed.body)).toBe(200);
     expect(JSON.stringify(signed.body)).toMatch(/sig|signature|kid/i);
-    await needsCredential('GET', '/api/v1/gates/catalog?repo=acme%2Fparc');
+    expect(JSON.stringify(signed.body), 'the hook reads the rule\'s gate').toContain(workflowId);
+
+    // A push to main of that repository is held by the rule's gate until the reviewer says yes.
+    const token = await call(a.c, 'POST', '/api/v1/tokens', { name: 'parc-013 asker', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
+    expect(token.status, JSON.stringify(token.body)).toBeLessThan(300);
+    const asker: Caller = { token: String(token.body['secret']), org: a.org.id };
+    const push = (sha: string) =>
+      call(asker, 'POST', '/api/v1/gates', { repo, class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
+    const sha = randomUUID().replaceAll('-', '').padEnd(40, '0').slice(0, 40);
+    const asked = await push(sha);
+    expect(asked.status, JSON.stringify(asked.body)).toBeLessThan(300);
+    const gate = asked.body['gate'] as Record<string, unknown>;
+    expect(gate['status'], JSON.stringify(asked.body)).toBe('pending');
+    expect(gate['gate'], JSON.stringify(asked.body)).toMatchObject({ workflowId, enforce: true });
+    expect((gate['gate'] as Record<string, unknown>)['approvers']).toContain(login);
+    const pending = await call(reviewer.caller, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
+    const mine = itemsOf(pending.body).find((x) => x['group'] === gate['id']);
+    expect(mine, JSON.stringify({ gate: asked.body, pending: pending.body })).toBeDefined();
+    // The reviewer has just signed in: the yes passes the step-up and answers with the signed receipt of the commit.
+    const yes = await call(reviewer.caller, 'POST', `/api/v1/approvals/${String(mine?.['id'])}/answer`, { answer: 'approve', shownDigest: mine?.['shownDigest'] });
+    expect(yes.status, JSON.stringify(yes.body)).toBe(200);
+    const receipt = yes.body['receipt'] as { signature?: unknown; subject?: { id?: unknown } } | undefined;
+    expect(typeof receipt?.signature, JSON.stringify(yes.body)).toBe('string');
+    expect(receipt?.subject?.id).toBe(sha);
+
+    // Rejected, the rule no longer gates: the next push of the repository asks nobody.
+    const rejected = await call(a.c, 'PATCH', `/api/v1/rules/${String(made.body['id'])}`, { status: 'rejected' });
+    expect(rejected.status, JSON.stringify(rejected.body)).toBe(200);
+    expect(JSON.stringify((await call(a.c, 'GET', `/api/v1/gates/catalog${q}`)).body)).not.toContain(workflowId);
+    const after = await push(randomUUID().replaceAll('-', '').padEnd(40, '1').slice(0, 40));
+    expect(after.status, JSON.stringify(after.body)).toBeLessThan(300);
+    expect((after.body['gate'] as Record<string, unknown>)['status'], JSON.stringify(after.body)).not.toBe('pending');
+
+    // Another organization never sees the rule's gate, even on the same repository name.
+    const b = await owner('parc-013-b');
+    await hidden(b.c, `/api/v1/gates/catalog${q}`, workflowId);
+    await needsCredential('GET', `/api/v1/gates/catalog${q}`);
   }, T);
 
   it.skipIf(W014 !== '')(named('E2E-PARC-014 — 3.3 the approvers graph: approvers, unanswered gates, ungated repositories', W014), async () => {
