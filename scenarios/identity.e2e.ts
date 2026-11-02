@@ -323,5 +323,9 @@ describe.skipIf(!STEP_UP_READY)(`E2E-AUTH: step-up of a yes${STEP_UP_READY ? '' 
     const fresh = await signIn(approverEmail);
     const yes = await answer(fresh);
     expect(yes.status, JSON.stringify(yes.body)).toBe(200);
+    // ostrom-server#127: the answer carries the signed receipt, whose subject names the pushed commit in clear.
+    const signed = yes.body['receipt'] as { signature?: unknown; subject?: { id?: unknown } } | undefined;
+    expect(typeof signed?.signature, JSON.stringify(yes.body)).toBe('string');
+    expect(signed?.subject?.id).toBe(sha);
   });
 });
