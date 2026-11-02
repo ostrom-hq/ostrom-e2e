@@ -2907,6 +2907,24 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P2
 - Statut : bloqué : ostrom-server + ostrom-cli
 
+### E2E-TC-003 — Import d'une équipe TeamCode : plan, import, comptes en attente de la bascule
+
+- Étapes : La vraie CLI lit l'équipe TeamCode factice d'ostrom-helm (`compose/demo/teamcode`, helm#25) dans MySQL, avec un jeton de console de l'owner : `ostrom import teamcode` (le plan), puis `--yes`. Les copies Ostrom des comptes partagés perdent leurs jetons (comme un rafraîchissement refusé), puis `--yes` encore.
+- Attendu : Le plan n'écrit rien (aucun compte partagé) et dit le compte jamais terminé laissé de côté. L'import partage les deux comptes Claude, le compte désactivé dans TeamCode reste éteint. Tant que TeamCode tourne, un import ne teste aucun jeton : les comptes à reconnecter sont `revive_at_cutover`, et la CLI dit combien attendent le passage final. Code 0 à chaque étape.
+- Surfaces : CLI, serveur
+- Source : ostrom-server#28, #80 et #86 (RELAY) ; ostrom-cli#24, #55, #62 et #63 ; JOURNAL 30/10 15:10 RELAY
+- Priorité : P1
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41484214036 (image ostrom-server@d084bb2c, ostrom-cli@479e5c1, ostrom-helm@4f03cd37), `scenarios/import.e2e.ts`
+
+### E2E-TC-004 — Bascule (cutover) de l'owner : comptes ranimés, refus, audit à son nom
+
+- Étapes : Le faux point de jetons du fournisseur (`src/fake-tokens.ts`, `OSTROM_SHARING_CLAUDE_TOKEN_URL` du serveur, ostrom-server#96) refuse un des deux jetons de rafraîchissement de TeamCode. `ostrom import teamcode --cutover` sans terminal, `--cutover --yes`, `--cutover --confirm yes`, puis `--cutover --confirm cutover` ; le fournisseur reprend le jeton refusé, et la même commande encore, deux fois.
+- Attendu : Sans terminal ni `--confirm`, et avec `--yes`, 64 avant tout appel. Un autre mot : le plan s'affiche, rien n'est testé ni écrit, code 2. La bascule ranime le compte accepté avec les jetons de TeamCode renouvelés (client de Claude Code), laisse l'autre en attente avec sa raison, code 2. La même commande ranime le second, éteint comme dans TeamCode, code 0 ; ensuite « rien à faire », code 0. Un événement d'audit `import.teamcode.cutover` par bascule lancée, au nom de l'owner, aucun pour les plans ni le refus.
+- Surfaces : CLI, serveur
+- Source : ostrom-server#86 et #96 (RELAY) ; ostrom-cli#55, #62 et #63 ; JOURNAL 30/10 13:24 orchestrateur, 02/11 15:20 RELAY
+- Priorité : P1
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41484214036 (image ostrom-server@d084bb2c, ostrom-cli@479e5c1, ostrom-helm@4f03cd37), `scenarios/import.e2e.ts`
+
 
 ## AUTH : Identité côté serveur (lien e-mail, GitHub, appareil, jetons, déconnexion)
 

@@ -3,7 +3,7 @@
 // binary, the fake agent in place of Claude Code / Codex. Two worlds: the prototype's (`world()`, logged in through the
 // fake GitHub, OSTROM_E2E_JALON=1) kept for bypass.e2e.ts, and the real one (`realWorld()`): people signed in by their
 // e-mailed link in the browser, the real `ostrom login` approved from that browser, the gate made by a workflow.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +11,7 @@ import type { AgentLog, Script } from '../src/fake-agent.ts';
 import { FakeGitHub } from '../src/fake-github.ts';
 import { GIT_ENV } from '../src/git.ts';
 import { isServed } from '../src/probe.ts';
-import { CLI_BIN, FAKE_CLAUDE, FAKE_CODEX, SERVER_URL } from './env.ts';
+import { CLI_BIN, DATABASE_ADMIN_URL, FAKE_CLAUDE, FAKE_CODEX, SERVER_URL } from './env.ts';
 import { type Person as Browser, address, call, email, invite, join as joinOrg, orgOf, orgsUnavailable, profileOf, signIn, url } from './org.ts';
 
 export interface Run {
@@ -355,4 +355,13 @@ export function receiptIdIn(body: unknown): string | undefined {
     return undefined;
   }
   return typeof body === 'string' ? /receipt ([A-Za-z0-9_-]{6,})/.exec(body)?.[1] : undefined;
+}
+
+/**
+ * Runs [sql] as the superuser of the bench's database (`OSTROM_E2E_DATABASE_ADMIN_URL`), through `psql` of the
+ * PostgreSQL image on the host network; what it prints, unaligned, tab-separated and without headers.
+ */
+export function adminSql(sql: string): string {
+  const args = ['run', '--rm', '--network', 'host', 'postgres:18', 'psql', DATABASE_ADMIN_URL, '-v', 'ON_ERROR_STOP=1', '-AtF', '\t', '-c', sql];
+  return execFileSync('docker', args, { encoding: 'utf8', timeout: 60_000 });
 }

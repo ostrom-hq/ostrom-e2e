@@ -3,12 +3,12 @@
 // by GitHub (the bench plays GitHub, src/fake-github.ts), the CLI's device login, personal tokens, sign-out and their
 // revocation, refusals without a credential, and the step-up of a yes. Each part switches itself on when its routes
 // are served (src/probe.ts); routes and bodies are those of ostrom-server main (IdentityApi.kt, contract 0.1.140).
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeGitHub } from '../src/fake-github.ts';
 import { isServed } from '../src/probe.ts';
 import { DATABASE_ADMIN_URL, FAKE_GITHUB_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
+import { adminSql } from './lib.ts';
 import { address, call, cookiesOf, email, invite, join, mailedToken, orgOf, profileOf, signIn, url } from './org.ts';
 
 const served = async (method: string, path: string) => SERVER_URL !== '' && (await isServed(SERVER_URL, path, method));
@@ -285,7 +285,7 @@ const STEP_UP_READY = EMAIL_SIGN_IN && TOKENS && ANSWER_SERVED && DATABASE_ADMIN
 function ageSessions(userId: string, minutes: number): void {
   if (!/^[0-9a-f-]{36}$/.test(userId)) throw new Error(`not a user id: ${userId}`);
   const sql = `UPDATE identity_web_sessions SET created_at = created_at - interval '${minutes} minutes' WHERE user_id = '${userId}'`;
-  execFileSync('docker', ['run', '--rm', '--network', 'host', 'postgres:18', 'psql', DATABASE_ADMIN_URL, '-v', 'ON_ERROR_STOP=1', '-c', sql], { stdio: 'pipe', timeout: 60_000 });
+  adminSql(sql);
 }
 
 describe.skipIf(!STEP_UP_READY)(`E2E-AUTH: step-up of a yes${STEP_UP_READY ? '' : ' (needs the workflows and signed gates of ostrom-server#43, the current org of #64, the actor resolver of #84, and the database URL)'}`, () => {

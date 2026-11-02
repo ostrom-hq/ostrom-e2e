@@ -15,5 +15,14 @@ export const FAKE_GITHUB_PORT = Number(process.env['OSTROM_E2E_FAKE_GITHUB_PORT'
 // The console's origin, the only one a browser session may write from (OSTROM_CONSOLE_URL of the bench's server, audit
 // S2-08, ostrom-server#58). The bench is plain HTTP, so the session cookie has no `__Host-` prefix (HTTPS only).
 export const CONSOLE_ORIGIN = process.env['OSTROM_E2E_CONSOLE_ORIGIN'] ?? 'http://127.0.0.1:4600';
-// The superuser URL of the bench's `ostrom` database: only to age a session (AUTH-007), never to make data.
+// The superuser URL of the bench's `ostrom` database: only to age a session (AUTH-007), to make an imported account
+// wait for a reconnection as a refused refresh does (TC-003), and to read the org's audit chain (no route serves it).
 export const DATABASE_ADMIN_URL = process.env['OSTROM_E2E_DATABASE_ADMIN_URL'] ?? '';
+// The fake TeamCode team of ostrom-helm (compose/demo/teamcode, helm#25) in the bench's MySQL: the URL `ostrom import
+// teamcode --db` takes, the read-only user's password (MYSQL_PWD) and the file holding the team's key (fake, public).
+export const TEAMCODE_DB = process.env['OSTROM_E2E_TEAMCODE_DB'] ?? '';
+export const TEAMCODE_PASSWORD = process.env['OSTROM_E2E_TEAMCODE_PASSWORD'] ?? '';
+export const TEAMCODE_KEY_FILE = process.env['OSTROM_E2E_TEAMCODE_KEY_FILE'] ?? '';
+// The port of the fake provider token endpoint (src/fake-tokens.ts): the server was started with
+// OSTROM_SHARING_CLAUDE_TOKEN_URL = http://127.0.0.1:<port>/v1/oauth/token (ostrom-server#96).
+export const FAKE_TOKENS_PORT = Number(process.env['OSTROM_E2E_FAKE_TOKENS_PORT'] ?? '0');
