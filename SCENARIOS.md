@@ -3417,14 +3417,29 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`/rules`, `/rules/{id}`, `/rules/bulk`, `/analysis/*` planned) ; forme du contrat `openapi.yaml`)
 
-### E2E-PARC-013 — 3.2 Catalogue des portes de l'org et sa forme signée
+### E2E-PARC-013 — 3.2 Une règle pose une porte : catalogue signé, un push sur main attend un oui
 
-- Étapes : Le propriétaire lit `GET /api/v1/gates/catalog` puis `GET /api/v1/gates/catalog/signed`.
-- Attendu : 200 avec un objet ; la forme signée porte sa signature (`sig`, `signature` ou `kid`) ; 401 sans identifiant. Création d'un harnais (`ostrom harness add`, en attente) : famille HARNESS.
-- Surfaces : serveur (le hook lit le catalogue signé)
+- Étapes :
+  1. Le propriétaire invite un relecteur admin.
+  2. Il lit le catalogue de `acme/parc-…`, sans porte de règle.
+  3. Il écrit dans `/rules` une règle avec porte : `push-main` sur ce dépôt, relecteur en approbateur.
+  4. Il relit `GET /api/v1/gates/catalog` et sa forme signée.
+  5. Un jeton `gates:ask` demande la porte d'un push sur main.
+  6. Le relecteur, qui vient de se connecter, trouve la demande dans `GET /approvals?mine=true` et dit oui.
+  7. La règle est refusée, puis un second push est demandé.
+  8. Une autre org lit le catalogue du même dépôt.
+- Attendu :
+  - La règle est rendue `accepted`, `output: gate`.
+  - Le catalogue et sa forme signée (`sig`, `signature` ou `kid`) contiennent `rule:<id>`.
+  - Le push rend `status: pending`, sa porte est `rule:<id>` (`enforce: true`), avec le relecteur dans ses approbateurs.
+  - Le oui rend 200 et le reçu signé du commit.
+  - Une fois la règle refusée, sa porte quitte le catalogue et le push suivant n'attend plus.
+  - L'autre org ne voit pas la porte.
+  - 401 sans identifiant.
+- Surfaces : serveur (le hook lit le catalogue signé, la console écrit la règle dans `/rules`)
 - Source : `demo/PARCOURS.md` 3.2
 - Priorité : jalon
-- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#43)
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : catalogue, règles, portes, approbations, jetons ; porte d'une règle : ostrom-server#79)
 
 ### E2E-PARC-014 — 3.3 Qui approuve quoi : le graphe des approbateurs
 
