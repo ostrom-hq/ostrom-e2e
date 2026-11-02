@@ -242,8 +242,12 @@ jobs:
           OSTROM_LOAD_SCENARIOS: gates
           OSTROM_LOAD_APPROVER_ORIGIN: http://app.ostrom.test
         run: |
-          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js
-          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js
+          # The race runs even when a check of the gates fails: its own thresholds (1 × 200, 99 × 409) are
+          # another question, and its numbers would be lost. The step fails if either run fails.
+          rc=0
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js || rc=$?
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js || rc=$?
+          exit "$rc"
       - name: Stop the background sampler and port-forward
         if: always()
         run: |
