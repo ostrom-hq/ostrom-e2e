@@ -3666,11 +3666,11 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 ### E2E-ATT-003 — Une porte qui exige un check attesté n'est pas satisfaite par une déclaration
 
 - Étapes : une règle `git` avec une porte push-main sur un dépôt marqué, `checks: [{check: tests, attested: true}]` (`POST /api/v1/rules`) ; l'agent rapporte `tests` passé depuis le poste ; il demande la porte d'un push sur main (`POST /api/v1/gates`).
-- Attendu : la règle garde `attested: true` ; la porte ne laisse pas passer le push sur une déclaration (ni `allow` ni `approved`), et la réponse dit que le check n'est que déclaré. Par défaut (sans `attested`), la déclaration est acceptée et affichée comme telle.
+- Attendu : la règle garde `attested: true` ; la porte refuse le push sur une déclaration avant toute demande de oui : 409 `check_not_attested`, message « tests was only declared by the workstation (workstation_declared) » (la porte est demandée par la session qui a rapporté le check, classe `push-main`). Par défaut (sans `attested`), la déclaration est acceptée et affichée comme telle.
 - Surfaces : serveur (image), règles, portes
 - Source : JOURNAL 30/10 13:23 (l'ajout : une règle ou une porte peut exiger `attestation != workstation_declared`) ; contrat core#40 (`RuleGateCheck.attested`) ; SRV-REGLES-2
 - Priorité : jalon
-- Statut : scindé (JOURNAL 02/11 22:27). **ATT-003a**, l'aller-retour de la règle avec `gate.checks` : codé, à vert depuis ostrom-server#145 (b462063). **ATT-003b**, la porte qui refuse un check seulement déclaré : rouge connu, `it.fails` jusqu'à la PR de SRV-REGLES-2 qui fait respecter l'attestation (après server#81, pas encore ouverte)
+- Statut : scindé (JOURNAL 02/11 22:27). **ATT-003a**, l'aller-retour de la règle avec `gate.checks` : codé, à vert depuis ostrom-server#145 (b462063). **ATT-003b**, la porte qui refuse un check seulement déclaré : codé, `it.fails` retiré depuis ostrom-server#162 (20d74fd), qui le fait respecter
 
 ## GHORG : Installation GitHub d'une organisation, `?org` (décision du 30/10 12:55)
 

@@ -162,20 +162,25 @@ describe('E2E-ATT: the attestation of a check run (decision 30/10 13:23, contrac
     expect((kept?.['gate'] as Record<string, unknown> | undefined)?.['checks'], JSON.stringify(kept)).toEqual([{ check: 'tests', attested: true }]);
   }, T);
 
-  // b: the gate refuses a check the workstation only declared. Known gap: the gate does not enforce the attestation yet;
-  // it waits for the SRV-REGLES-2 PR that makes it (JOURNAL 02/11 22:27, after server#81; no PR open yet). `it.fails`
-  // until then: remove `.fails` when it merges.
-  (W003 !== '' ? it.skip : it.fails)(named('E2E-ATT-003b a rule gate asking for an attested check is not satisfied by a declared run', W003), async () => {
+  // b: the gate refuses a check the workstation only declared: 409 `check_not_attested`, before any yes is asked, since
+  // ostrom-server#162 (20d74fd; JOURNAL 02/11 22:27 for the split).
+  it.skipIf(W003 !== '')(named('E2E-ATT-003b a rule gate asking for an attested check is not satisfied by a declared run', W003), async () => {
     const { a, agent, digest, sessionId, scriptId } = await sessionWithCheck('att-003b');
     const repo = `acme/att-${randomUUID().slice(0, 6)}`;
     const rule = await call(a.c, 'POST', '/api/v1/rules', ruleAskingAttested(repo));
     expect(rule.status, JSON.stringify(rule.body)).toBeLessThan(300);
     expect((await call(agent, 'POST', '/api/v1/checks', { sessionId, digest, nodeId: 'tests', scriptId, exit: 0, outcome: 'passed' })).status).toBe(201);
     const sha = randomUUID().replaceAll('-', '').padEnd(40, '0').slice(0, 40);
-    const asked = await call(agent, 'POST', '/api/v1/gates', { repo, class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
-    expect(asked.status, JSON.stringify(asked.body)).toBeLessThan(500);
-    // The push does not pass on a declaration: refused or waiting, and the answer says the check is only declared.
-    expect(JSON.stringify(asked.body)).not.toMatch(/"(decision|status)":"(allow|allowed|approved)"/);
-    expect(JSON.stringify(asked.body)).toMatch(/attest|declared/i);
+    // The gate is asked by the session that ran the check (without `sessionId`, 403 « not asked by your session »), for
+    // the rule's action class.
+    const asked = await call(agent, 'POST', '/api/v1/gates', {
+      sessionId, repo, class: 'push-main', tool: 'Bash', command: 'git push origin main', diff: '+ok',
+      push: { remote: `git@github.com:${repo}.git`, refs: [{ ref: 'refs/heads/main', sha }] },
+    });
+    // The push does not pass on a declaration: refused before any yes, naming the check only declared.
+    expect(asked.status, JSON.stringify(asked.body)).toBe(409);
+    const error = (asked.body['error'] ?? {}) as { type?: string; message?: string };
+    expect(error.type, JSON.stringify(asked.body)).toBe('check_not_attested');
+    expect(error.message ?? '').toContain('tests was only declared by the workstation (workstation_declared)');
   }, T);
 });
