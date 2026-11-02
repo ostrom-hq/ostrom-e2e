@@ -138,8 +138,12 @@ jobs:
           OSTROM_LOAD_APPROVER_ORIGIN: http://127.0.0.1:4600
           K6_SUMMARY_TREND_STATS: "avg,min,med,max,p(90),p(95),p(99)"
         run: |
-          k6 run --summary-export gates-summary.json load/smoke.js
-          k6 run --summary-export race-summary.json load/race.js
+          # The race runs even when a check of the gates fails: its own thresholds (1 × 200, 99 × 409) are
+          # another question, and its numbers would be lost. The step fails if either run fails.
+          rc=0
+          k6 run --summary-export gates-summary.json load/smoke.js || rc=$?
+          k6 run --summary-export race-summary.json load/race.js || rc=$?
+          exit "$rc"
       - name: Server logs
         if: always() && steps.server.outputs.available == 'true'
         run: docker logs ostrom-e2e-server 2>&1 | tail -n 200
