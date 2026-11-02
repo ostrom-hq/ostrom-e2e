@@ -5,7 +5,7 @@
 // No switch to set: each describe probes the server and switches itself on the day its pieces are on main
 // (login: ostrom-server#62 on top of ostrom-cli#40; journey: ostrom-server#43 and #26). Until then it is skipped, and
 // the reason is in its title.
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { commit, git, originSha, sandbox } from '../src/git.ts';
@@ -148,52 +148,69 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
   it('E2E-GATE-001, E2E-YES-003, E2E-YESCLI-002, E2E-YES-001 — push blocked, the requester cannot say yes, a yes from a second account\'s browser lets exactly that SHA through', async () => {
     const sb = sandbox('api', w.repo);
     const shaA = commit(sb.work, 'a.txt', 'a\n', 'feat: a');
-    // As Claude Code does, SessionStart first: it opens the session the gate asks in (without it the server answers
-    // « Session not found », run 41483058195). The push is step 1.
-    const push = { steps: [{ event: 'SessionStart', source: 'startup' }, ...bash('git push origin main').steps] };
+    // One agent session, as Claude Code lives it: SessionStart opens the session the gate asks in (without it the
+    // server answers « Session not found », run 41483058195); the push is refused and waits for a yes; the agent then
+    // waits, as `ostrom wait` would, and runs the exact same push again. A yes holds for its session only
+    // (AskGateUseCase `scope = session:<id>`, run 41485630703): a new `ostrom claude` would ask again.
+    const go = join(sb.root, 'go');
+    const push = bash('git push origin main').steps;
+    const script = { steps: [{ event: 'SessionStart', source: 'startup' }, ...push, ...bash(`while [ ! -f '${go}' ]; do sleep 1; done`).steps, ...push] };
+    const running = w.dev.cli.claude(sb.work, script, ['--repo', w.repo]);
+    let yes: Awaited<ReturnType<typeof answer>> | undefined;
+    try {
+      // 1. The push is refused before it runs: the request waits in the requester's queue.
+      let mine: Approval | undefined;
+      for (let i = 0; i < 60 && mine === undefined; i++) {
+        const r = await call(w.dev.browser.caller, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
+        mine = ((r.body['items'] as Approval[] | undefined) ?? [])[0];
+        if (mine === undefined) await new Promise((done) => setTimeout(done, 1000));
+      }
+      expect(mine, 'the refused push opened a request').toBeDefined();
+      const g = String(mine?.group ?? mine?.gate ?? mine?.id);
+      gate = g;
+      expect(originSha(sb, 'main')).not.toBe(shaA);
 
-    // 1. The push is refused before it runs; the refusal names the request to wait for.
-    const first = await w.dev.cli.claude(sb.work, push, ['--repo', w.repo]);
+      // 2. E2E-YES-003: the requester, approver too, says yes from a fresh browser session: 403, naming the other
+      // approver who must say yes (SelfApprovalRefusedException, ostrom-server#41), and the request stays pending.
+      const own = (await approvalFor(await w.dev.fresh(), g)) as Approval;
+      expect(own, 'the requester is an approver of the gate: it has its own request').toBeDefined();
+      const self = await answer(w.dev.browser, own);
+      expect(self.status, JSON.stringify(self.body)).toBe(403);
+      expect(JSON.stringify(self.body)).toMatch(/must say yes|cannot approve/i);
+      expect(JSON.stringify(self.body)).toContain(w.rev.login);
+      expect((await approvalFor(w.dev.browser, g))?.id).toBe(own.id);
+
+      // 3. E2E-YESCLI-002, as the real CLI serves it: `ostrom approve` never answers (it opens the console page, where
+      // a browser says yes, ostrom-cli ApprovalCommands.kt), and a token can never say yes (ostrom-server#41). The
+      // requester's own token answering its request is refused, and nothing moves.
+      const pat = await call(w.dev.browser.caller, 'POST', '/api/v1/tokens', { name: 'e2e requester', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
+      expect(pat.status, JSON.stringify(pat.body)).toBe(201);
+      const byToken = await call({ token: String(pat.body['secret']) }, 'POST', `/api/v1/approvals/${encodeURIComponent(own.id)}/answer`, { answer: 'approve', shownDigest: own.shownDigest });
+      expect(byToken.status, JSON.stringify(byToken.body)).toBe(403);
+      expect(originSha(sb, 'main')).not.toBe(shaA);
+
+      // 4. rev-b says yes from its browser, signed in less than 5 minutes ago (step-up, ostrom-server#41), with the
+      // digest it was shown; the same push, in the same session, now goes through and lands exactly shaA.
+      const theirs = (await approvalFor(await w.rev.fresh(), g)) as Approval;
+      expect(theirs).toBeDefined();
+      yes = await answer(w.rev.browser, theirs);
+      expect(yes.status, JSON.stringify(yes.body)).toBe(200);
+    } finally {
+      writeFileSync(go, '');
+    }
+    const first = await running;
     const refused = first.log?.steps[1];
     expect(refused?.blocked, first.run.stderr).toBe(true);
     expect(refused?.reason, refused?.reason).toMatch(/waiting for a yes/i);
-    expect(originSha(sb, 'main')).not.toBe(shaA);
-    gate = gateIdIn(refused?.reason ?? '');
-    expect(gate).toBeDefined();
-
-    // 2. E2E-YES-003: the requester, approver too, says yes from a fresh browser session: 403, naming the other
-    // approver who must say yes (SelfApprovalRefusedException, ostrom-server#41), and the request stays pending.
-    const own = (await approvalFor(await w.dev.fresh(), String(gate))) as Approval;
-    expect(own, 'the requester is an approver of the gate: it has its own request').toBeDefined();
-    const self = await answer(w.dev.browser, own);
-    expect(self.status, JSON.stringify(self.body)).toBe(403);
-    expect(JSON.stringify(self.body)).toMatch(/must say yes|cannot approve/i);
-    expect(JSON.stringify(self.body)).toContain(w.rev.login);
-    expect((await approvalFor(w.dev.browser, String(gate)))?.id).toBe(own.id);
-
-    // 3. E2E-YESCLI-002, as the real CLI serves it: `ostrom approve` never answers (it opens the console page, where a
-    // browser says yes, ostrom-cli ApprovalCommands.kt), and a token can never say yes (ostrom-server#41). The
-    // requester's own token answering its request is refused, and nothing moves.
-    const pat = await call(w.dev.browser.caller, 'POST', '/api/v1/tokens', { name: 'e2e requester', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
-    expect(pat.status, JSON.stringify(pat.body)).toBe(201);
-    const byToken = await call({ token: String(pat.body['secret']) }, 'POST', `/api/v1/approvals/${encodeURIComponent(own.id)}/answer`, { answer: 'approve', shownDigest: own.shownDigest });
-    expect(byToken.status, JSON.stringify(byToken.body)).toBe(403);
-    expect(originSha(sb, 'main')).not.toBe(shaA);
-
-    // 4. rev-b says yes from its browser, signed in less than 5 minutes ago (step-up, ostrom-server#41), with the
-    // digest it was shown; the same push now goes through and lands exactly shaA.
-    const theirs = (await approvalFor(await w.rev.fresh(), String(gate))) as Approval;
-    expect(theirs).toBeDefined();
-    const yes = await answer(w.rev.browser, theirs);
-    expect(yes.status, JSON.stringify(yes.body)).toBe(200);
-    const second = await w.dev.cli.claude(sb.work, push, ['--repo', w.repo]);
-    expect(second.log?.steps[1]?.blocked, second.log?.steps[1]?.reason).toBe(false);
+    expect(gateIdIn(refused?.reason ?? '')).toBeDefined();
+    const again = first.log?.steps[3];
+    expect(again?.blocked, again?.reason).toBe(false);
     expect(originSha(sb, 'main')).toBe(shaA);
-    receipt = receiptIdIn(yes.body) ?? receiptIdIn(second.log?.steps[1]?.reason ?? '');
+    receipt = receiptIdIn(yes?.body) ?? receiptIdIn(again?.reason ?? '');
 
     // 5. E2E-YES-001: a new commit is a new request: the yes for shaA does not cover shaB.
     const shaB = commit(sb.work, 'b.txt', 'b\n', 'feat: b');
-    const third = await w.dev.cli.claude(sb.work, push, ['--repo', w.repo]);
+    const third = await w.dev.cli.claude(sb.work, { steps: [{ event: 'SessionStart', source: 'startup' }, ...push] }, ['--repo', w.repo]);
     expect(third.log?.steps[1]?.blocked).toBe(true);
     expect(gateIdIn(third.log?.steps[1]?.reason ?? '')).not.toBe(gate);
     expect(originSha(sb, 'main')).toBe(shaA);
