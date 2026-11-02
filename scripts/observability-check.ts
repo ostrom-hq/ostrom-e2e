@@ -75,6 +75,8 @@ for (const [id, where, expr] of QUERIES) {
 const names = await query(`count by (__name__) ({${SERVER}, __name__=~"ostrom_.*"})`);
 out += `\nostrom_* series sent by the server: ${names.map((s) => s.metric['__name__']).sort().join(', ') || 'none'}\n`;
 process.stdout.write(out);
+// Also in the log: a job summary is not readable through the API.
+process.stderr.write(out);
 if (missing.length) {
   process.stderr.write(`::error title=observability::no data for ${missing.join(', ')}\n`);
   process.exitCode = 1;
