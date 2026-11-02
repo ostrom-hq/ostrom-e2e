@@ -47,7 +47,7 @@ jobs:
           ./actionlint -color .github/workflows/*.yml templates/*/ci.yml
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
       - name: k6 scripts parse (k6 inspect)
-        run: for f in load/smoke.js load/race.js load/soak.js; do k6 inspect "$f" > /dev/null; done
+        run: for f in load/smoke.js load/race.js load/soak.js load/chart-journeys.js; do k6 inspect "$f" > /dev/null; done
       - name: Unit tests of the bench, 100 % thresholds
         run: pnpm test:coverage
       # Full stack: the real server and the real `ostrom` built from the main branches of ostrom-server and ostrom-cli.
@@ -56,6 +56,10 @@ jobs:
       # scenarios silently skipped (run 41028221230 was green with neither, ostrom-core unreadable).
       - name: Sign-in mail directory (written by the server's non-root user, read by the scenarios)
         run: mkdir -p "$RUNNER_TEMP/ostrom-mail" && chmod 0777 "$RUNNER_TEMP/ostrom-mail"
+      # The GitHub App of the bench: a key made for this run only, and the fake GitHub of scenarios/github-install
+      # on a fixed port, so that the server started before the scenarios already points at it.
+      - name: Test key of the bench's GitHub App
+        run: echo "E2E_GITHUB_APP_PEM=$(openssl genrsa -traditional 2048 2>/dev/null | awk '{printf "%s\\n", $0}')" >> "$GITHUB_ENV"
       - name: Real Ostrom server (image of ostrom-server main)
         id: server
         uses: ./.github/actions/server
@@ -79,6 +83,15 @@ jobs:
             OSTROM_GITHUB_API_URL=http://127.0.0.1:4610
             OSTROM_GITHUB_CLIENT_ID=Iv1.e2ebench
             OSTROM_GITHUB_CLIENT_SECRET=e2e-bench-fake-github
+            OSTROM_WEB_ORIGIN=http://127.0.0.1:4600
+            OSTROM_GITHUB_API=http://127.0.0.1:4700
+            OSTROM_GITHUB_WEB=http://127.0.0.1:4700
+            OSTROM_GITHUB_APP_ID=1
+            OSTROM_GITHUB_APP_SLUG=ostrom-e2e
+            OSTROM_GITHUB_APP_PEM=${{ env.E2E_GITHUB_APP_PEM }}
+            OSTROM_GITHUB_APP_CLIENT_ID=Iv1.fake
+            OSTROM_GITHUB_APP_CLIENT_SECRET=fake-client-secret
+            OSTROM_GITHUB_WEBHOOK_SECRET=whsec_github_e2e
           docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail
           required: "true"
       - name: Real ostrom CLI
@@ -97,6 +110,7 @@ jobs:
           OSTROM_E2E_FAKE_GITHUB_PORT: "4610"
           # Only to age a session in AUTH-007 (the step-up), as the superuser of the bench's throwaway database.
           OSTROM_E2E_DATABASE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/ostrom
+          OSTROM_E2E_GITHUB_PORT: "4700"
         run: pnpm e2e --reporter=default --reporter=json --outputFile=e2e-results.json
       # Short load test on the served public routes; the thresholds of load/smoke.js fail the job.
       - name: k6 smoke against the server image (health, instance)

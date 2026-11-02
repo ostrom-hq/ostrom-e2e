@@ -87,6 +87,11 @@ CI (`.github/workflows/ci.yml`) is one job, `ci`, on every pull request and on `
 exactly one must win (`load/race.js`), against the server built from `ostrom-server` main; it skips them, with a note in
 the job summary, while that server does not meet the bench contract. The short k6 run on server pull requests is a
 template (`templates/server/ci-extra.yml`) not installed in `ostrom-server` yet.
+`chart-load.yml` (main, every night, by hand; never on pull requests) installs the server image of `ostrom-server` main
+with the `ostrom-helm` chart in kind (built-in PostgreSQL, migrate init container, 2 replicas, ingress-nginx) and runs
+`load/smoke.js`, `load/chart-journeys.js` and, once `scripts/load-setup.ts` reports ready, the gates and the race
+through the ingress; its job summary gives p95/p99, errors and requests/s per script, and the peak CPU and memory of
+every pod.
 
 ## Documentation
 
