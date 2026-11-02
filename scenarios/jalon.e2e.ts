@@ -197,6 +197,10 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
       expect(theirs).toBeDefined();
       yes = await answer(w.rev.browser, theirs);
       expect(yes.status, JSON.stringify(yes.body)).toBe(200);
+      // ostrom-server#127: the answer carries the signed receipt, whose subject names shaA in clear.
+      const signed = yes.body['receipt'] as { signature?: unknown; subject?: { id?: unknown } } | undefined;
+      expect(typeof signed?.signature, JSON.stringify(yes.body)).toBe('string');
+      expect(signed?.subject?.id).toBe(shaA);
     } finally {
       writeFileSync(go, '');
     }
@@ -208,11 +212,7 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     const again = first.log?.steps[3];
     expect(again?.blocked, again?.reason).toBe(false);
     expect(originSha(sb, 'main')).toBe(shaA);
-    // The yes answers with the approval, without its receipt: the gate (GET /api/v1/gates/{id}) carries the receipt
-    // the server signs for the decision (EnsureGateReceiptUseCase; run 41489078824).
-    const view = await call(w.dev.browser.caller, 'GET', `/api/v1/gates/${encodeURIComponent(String(gate))}`);
-    expect(view.status, JSON.stringify(view.body)).toBe(200);
-    receipt = receiptIdIn(yes?.body) ?? receiptIdIn(view.body) ?? receiptIdIn(view.body['gate']) ?? receiptIdIn(again?.reason ?? '');
+    receipt = receiptIdIn(yes?.body);
 
     // 5. E2E-YES-001: a new commit is a new request: the yes for shaA does not cover shaB.
     const shaB = commit(sb.work, 'b.txt', 'b\n', 'feat: b');
@@ -223,14 +223,12 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     expect(shaB).not.toBe(shaA);
 
     // 6. The receipt of the yes is on the server, names the approver and the SHA it was given for.
-    expect(receipt, JSON.stringify(yes.body)).toBeDefined();
+    expect(receipt, JSON.stringify(yes?.body)).toBeDefined();
     const kept = await call(w.dev.browser.caller, 'GET', `/api/v1/receipts/${encodeURIComponent(String(receipt))}`);
     expect(kept.status, JSON.stringify(kept.body)).toBe(200);
     expect(JSON.stringify(kept.body)).toContain(w.rev.login);
-    // The receipt binds the SHA through its subject digest (what the approver was shown, ReceiptsGateSigner.kt), not
-    // in clear (run 41491873101): its subject is this gate, and the gate it signs names shaA.
-    expect((kept.body['subject'] as Record<string, unknown> | undefined)?.['id']).toBe(gate);
-    expect(JSON.stringify(view.body)).toContain(shaA);
+    // Its subject names the commit in clear (ostrom-server#127); the digest still binds what the approver was shown.
+    expect((kept.body['subject'] as Record<string, unknown> | undefined)?.['id']).toBe(shaA);
     receiptJson = JSON.stringify(kept.body);
   }, 300_000);
 
