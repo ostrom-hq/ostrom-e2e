@@ -5,10 +5,26 @@
 // refresh token it was told to refuse. A 200 names the account the tokens are of when it was told which, as both
 // providers do: Claude's `account.uuid`, and Codex's `chatgpt_account_id` in the claims of an `id_token`; told nothing, it
 // names no account. The server keeps a revived account's tokens only when they are that account's (ostrom-server#117),
-// and takes out of service an account whose refresh names another one (`wrong_account`, ostrom-server#134). Every
-// request it is sent is recorded, never a token of a real provider.
+// and takes out of service an account whose refresh names another one (`wrong_account`, ostrom-server#134). It also
+// stands for Anthropic's Messages API behind the gateway (OSTROM_GATEWAY_ANTHROPIC_URL): `POST /v1/messages` answers a
+// message that bills the tokens of `usage`, so a call served by a shared account costs what the bench chooses (the
+// budgets, ostrom-server#133). Every request it is sent is recorded, never a token of a real provider.
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+
+/** A model call the fake Messages API was sent. */
+export interface ModelCall {
+  readonly model: string | undefined;
+  readonly maxTokens: number | undefined;
+  /** The `Authorization` the gateway sent: the shared account's access token. */
+  readonly authorization: string | undefined;
+}
+
+/** The tokens a model call bills (Anthropic's `usage`). */
+export interface Usage {
+  readonly input_tokens: number;
+  readonly output_tokens: number;
+}
 
 /** What the endpoint was sent: one entry per request, in order. */
 export interface Refresh {
@@ -23,6 +39,10 @@ export class FakeTokens {
   /** The provider account each refresh token is of, named in the answer as Claude and Codex do. */
   readonly accounts = new Map<string, string>();
   readonly refreshes: Refresh[] = [];
+  /** The model calls of `POST /v1/messages`, in order; never counted as refreshes. */
+  readonly calls: ModelCall[] = [];
+  /** What each model call bills. */
+  usage: Usage = { input_tokens: 10, output_tokens: 1 };
   private server: Server | undefined;
   private port = 0;
 
@@ -75,6 +95,13 @@ export class FakeTokens {
       body = Object.fromEntries(new URLSearchParams(raw));
     }
     const text = (key: string) => (typeof body[key] === 'string' ? (body[key] as string) : undefined);
+    if (req.url === '/v1/messages') {
+      const model = text('model');
+      const max = body['max_tokens'];
+      this.calls.push({ model, maxTokens: typeof max === 'number' ? max : undefined, authorization: req.headers.authorization });
+      const message = { id: `msg_fake_${this.calls.length}`, type: 'message', role: 'assistant', model, content: [{ type: 'text', text: 'ok' }] };
+      return send(res, 200, { ...message, stop_reason: 'end_turn', stop_sequence: null, usage: this.usage });
+    }
     const refresh: Refresh = { grantType: text('grant_type'), refreshToken: text('refresh_token'), clientId: text('client_id') };
     this.refreshes.push(refresh);
     if (refresh.grantType !== 'refresh_token' || refresh.refreshToken === undefined) return send(res, 400, { error: 'invalid_request' });

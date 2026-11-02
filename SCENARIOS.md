@@ -3701,6 +3701,26 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
 
+## BUDGET : Budgets appliqués par le gateway
+
+### E2E-BUDGET-001 — Un appel qui peut coûter plus que le reste du budget est refusé, un plus petit ne l'est pas
+
+- Étapes : le propriétaire met un budget d'organisation de 1 $ par mois, arrêt dur (`PUT /api/v1/budgets {scope: org, usdPerMonth: 1, hardStop: true}`), lance un agent (`POST /api/v1/launches`) ; avec le jeton d'agent en `x-api-key`, `POST /api/v1/inference/v1/messages` sur `claude-opus-5` avec `max_tokens` 100 000, puis le même avec `max_tokens` 1.
+- Attendu : 429, `error.type` `rate_limit_error`, message qui commence par « Budget left too low for this call: », sans `Retry-After` ; le second appel n'est plus un 429 (le gateway vérifie le budget avant de chercher un compte ou une clé).
+- Surfaces : serveur (image), gateway, budgets
+- Source : `demo/PARCOURS.md` 3.5 ; JOURNAL 02/11 23:43 (SPEND-GUARD, recette du parcours réel) ; ostrom-server#133 (96ae0554) ; contrat core#55 (`InferenceRefused`)
+- Priorité : P1
+- Statut : codé : `scenarios/budget.e2e.ts`
+
+### E2E-BUDGET-002 — Une dépense facturée qui atteint le budget refuse l'appel suivant, avec `Retry-After`
+
+- Étapes : même organisation à 1 $ ; un compte Claude partagé ; le faux fournisseur (`src/fake-tokens.ts`, `OSTROM_GATEWAY_ANTHROPIC_URL`) facture 300 000 jetons d'entrée (1,50 $) ; un appel `max_tokens` 1, la dépense du mois (`GET /api/v1/spending?period=month`), puis un second appel.
+- Attendu : le premier appel est servi (200, un appel au fournisseur) ; la dépense du mois atteint au moins 1 $ ; le second est refusé en 429, `rate_limit_error`, « Monthly budget reached: », `Retry-After` > 0, sans atteindre le fournisseur.
+- Surfaces : serveur (image), gateway, budgets, partage
+- Source : `demo/PARCOURS.md` 3.5 ; JOURNAL 02/11 23:43 (SPEND-GUARD, recette du parcours réel) ; ostrom-server#133 (96ae0554) ; contrat core#55 (`InferenceRefused`)
+- Priorité : P1
+- Statut : codé : `scenarios/budget.e2e.ts`
+
 ## Récapitulatif
 
 | Famille | Intitulé | Scénarios | dont jalon | P1 | P2 |
@@ -3747,6 +3767,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | ISO | Isolation entre organisations | 1 | 1 | 0 | 0 |
 | ATT | Attestation des checks d'un reçu | 3 | 3 | 0 | 0 |
 | GHORG | Installation GitHub d'une organisation, `?org` | 3 | 0 | 3 | 0 |
-| **Total** | | **341** | **46** | **175** | **120** |
+| BUDGET | Budgets appliqués par le gateway | 2 | 0 | 2 | 0 |
+| **Total** | | **343** | **46** | **177** | **120** |
 
 Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-BYPASS-020, E2E-BYPASS-021, E2E-BYPASS-023, E2E-BYPASS-024, E2E-BYPASS-026, E2E-BYPASS-028, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.

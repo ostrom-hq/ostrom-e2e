@@ -67,5 +67,6 @@ describe('E2E-SHARE: shared accounts and the provider', () => {
     expect(second.status, JSON.stringify(second.body)).not.toBe(200);
     expect(provider.refreshes, 'only the one refresh, never a model call').toHaveLength(1);
     expect(provider.refreshes.every((r) => r.grantType === 'refresh_token')).toBe(true);
+    expect(provider.calls, 'no model call reached the provider').toEqual([]);
   });
 });
