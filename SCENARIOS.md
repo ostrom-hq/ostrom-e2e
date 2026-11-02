@@ -124,7 +124,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI réelle, serveur (image), identité, portes
 - Source : run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41456816659 (`ostrom inbox` → 77, « This credential does not allow gates:answer ») ; `CLI_SCOPES` (`Policies.kt`) n'a pas `gates:read`, que demande `GateScopes.readingApprovals` ; JOURNAL 02/11 → AUTH-REPRISE, GATES
 - Priorité : P1
-- Statut : rouge connu : `scenarios/jalon.e2e.ts` en `it.fails` (le banc reste vert tant que le trou existe, et passe au rouge le jour où il est corrigé : retirer alors `.fails`)
+- Statut : codé : `scenarios/jalon.e2e.ts`, `.fails` retiré après ostrom-server#122 (29a9ab54, `gates:read` dans `CLI_SCOPES`)
 
 ## CONN : Connexion GitHub et Slack (onboarding)
 

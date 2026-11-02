@@ -101,12 +101,8 @@ describe.skipIf(LOGIN_OFF !== '')(`jalon: real ostrom login${skipped(LOGIN_OFF)}
     }
   }, 180_000);
 
-  // Known server gap, reported in the JOURNAL (02/11, → AUTH-REPRISE, GATES): the token of `ostrom login` holds
-  // CLI_SCOPES (profile:read, orgs:read, workflows:read, sessions:write), and `GET /api/v1/approvals` needs gates:read
-  // (`GateScopes.readingApprovals`), so `ostrom inbox` always ends in 77 after a login. `it.fails` keeps the bench
-  // green while the gap stands and turns red the day it is fixed: then drop `.fails`.
-  // Waits for ostrom-server#122 (gates:read, the CLI token reads approvals, gates and MCP servers).
-  it.fails('E2E-LOGIN-009 — after `ostrom login`, `ostrom inbox` lists the approvals waiting for the person', async () => {
+  // ostrom-server#122 (29a9ab54) gave the CLI token gates:read: `ostrom inbox` reads the person's approvals.
+  it('E2E-LOGIN-009 — after `ostrom login`, `ostrom inbox` lists the approvals waiting for the person', async () => {
     const m = await member(await signIn(email('dev-inbox')));
     const { run } = await deviceLogin(m.cli, m.browser);
     expect(run.code, run.stderr).toBe(0);
