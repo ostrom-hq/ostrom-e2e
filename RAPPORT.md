@@ -47,7 +47,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | MCP | 6 | 0 | 0 | 0 | 0 | 6 |
 | SECRETS | 8 | 0 | 0 | 0 | 0 | 8 |
 | GW | 9 | 0 | 0 | 0 | 0 | 9 |
-| SHARE | 5 | 0 | 0 | 0 | 0 | 5 |
+| SHARE | 6 | 0 | 0 | 1 | 0 | 5 |
 | CLOUD | 8 | 0 | 0 | 0 | 0 | 8 |
 | WF | 14 | 0 | 0 | 0 | 0 | 14 |
 | WFRUN | 8 | 0 | 0 | 0 | 0 | 8 |
@@ -58,7 +58,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | ANA | 5 | 0 | 0 | 0 | 0 | 5 |
 | HARNESS | 8 | 0 | 0 | 0 | 0 | 8 |
 | DIST | 4 | 0 | 0 | 0 | 0 | 4 |
-| TC | 2 | 0 | 0 | 0 | 0 | 2 |
+| TC | 4 | 0 | 2 | 0 | 0 | 2 |
 | AUTH | 7 | 7 | 6 | 1 | 0 | 0 |
 | LOAD | 11 | 0 | 1 | 3 | 0 | 7 |
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
@@ -69,7 +69,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | PARC | 37 | 15 | 6 | 31 | 0 | 0 |
 | ATT | 3 | 3 | 2 | 0 | 0 | 1 |
 | GHORG | 3 | 0 | 3 | 0 | 0 | 0 |
-| **Total** | 386 | 69 | 32 | 47 | 0 | 307 |
+| **Total** | 389 | 69 | 34 | 48 | 0 | 307 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un

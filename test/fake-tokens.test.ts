@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { request } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { FakeTokens } from '../src/fake-tokens.ts';
+import { FakeTokens, OPENAI_AUTH_CLAIM, idToken } from '../src/fake-tokens.ts';
 
 let tokens: FakeTokens | undefined;
 afterEach(async () => {
@@ -22,13 +22,21 @@ describe('FakeTokens', () => {
     expect(tokens.refreshes).toEqual([{ grantType: 'refresh_token', refreshToken: 'rt-1', clientId: 'cid' }]);
   });
 
-  it("names the account a refresh token is of, as Claude's account.uuid, once it is told which", async () => {
+  it("names the account a refresh token is of, as Claude's account.uuid and Codex's id_token, once it is told which", async () => {
     tokens = await new FakeTokens().start();
     tokens.accounts.set('rt-1', 'acct-1');
     const r = await post(tokens.url, JSON.stringify({ grant_type: 'refresh_token', refresh_token: 'rt-1' }));
-    expect(await r.json()).toMatchObject({ access_token: 'fake-access-1', account: { uuid: 'acct-1' } });
+    const named = (await r.json()) as { account: unknown; id_token: string };
+    expect(named).toMatchObject({ access_token: 'fake-access-1', account: { uuid: 'acct-1' }, id_token: idToken('acct-1') });
+    // the id_token is a JWT whose claims name the ChatGPT account, as the server reads it
+    const parts = named.id_token.split('.');
+    expect(parts).toHaveLength(3);
+    expect(JSON.parse(Buffer.from(String(parts[1]), 'base64url').toString('utf8'))).toEqual({ [OPENAI_AUTH_CLAIM]: { chatgpt_account_id: 'acct-1' } });
+    // told nothing, it names no account at all
     const other = await post(tokens.url, JSON.stringify({ grant_type: 'refresh_token', refresh_token: 'rt-2' }));
-    expect(await other.json()).not.toHaveProperty('account');
+    const unnamed = await other.json();
+    expect(unnamed).not.toHaveProperty('account');
+    expect(unnamed).not.toHaveProperty('id_token');
   });
 
   it('refuses a forgotten refresh token with invalid_grant, and a malformed request with invalid_request', async () => {

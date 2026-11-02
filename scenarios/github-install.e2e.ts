@@ -73,8 +73,8 @@ describe.skipIf(WHY !== '')(`E2E-GH-INSTALL: an organization installs only its o
     expect(await back(a.caller, 42, 'acme-admin', stateA)).toBe('?installed=1');
     expect((await call(a.caller, 'GET', '/api/v1/github/app')).body).toMatchObject({ installed: true });
     expect(await back(a.caller, 42, 'acme-admin', stateA)).toBe('?error=forbidden');
-    // B names A's organization: 403, like the Ostrom-Org header.
-    expect((await visit(b.caller, `${START}?org=${(await orgOf(a)).id}`)).status).toBe(403);
+    // B names A's organization: 404, an organization B is not in is not found (ostrom-server#143).
+    expect((await visit(b.caller, `${START}?org=${(await orgOf(a)).id}`)).status).toBe(404);
     // The person's token is used to list their installations, never sent anywhere else.
     expect(github.requests.filter((r) => r.authorization.includes('ghu_')).every((r) => r.path === '/user/installations')).toBe(true);
   });

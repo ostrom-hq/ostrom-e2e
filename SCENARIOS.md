@@ -124,7 +124,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI réelle, serveur (image), identité, portes
 - Source : run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41456816659 (`ostrom inbox` → 77, « This credential does not allow gates:answer ») ; `CLI_SCOPES` (`Policies.kt`) n'a pas `gates:read`, que demande `GateScopes.readingApprovals` ; JOURNAL 02/11 → AUTH-REPRISE, GATES
 - Priorité : P1
-- Statut : rouge connu : `scenarios/jalon.e2e.ts` en `it.fails` (le banc reste vert tant que le trou existe, et passe au rouge le jour où il est corrigé : retirer alors `.fails`)
+- Statut : codé : `scenarios/jalon.e2e.ts`, `.fails` retiré après ostrom-server#122 (29a9ab54, `gates:read` dans `CLI_SCOPES`)
 
 ## CONN : Connexion GitHub et Slack (onboarding)
 
@@ -2190,6 +2190,15 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P2
 - Statut : bloqué : ostrom-server
 
+### E2E-SHARE-006 — Le fournisseur nomme un autre compte : `wrong_account`, le compte ne sert plus
+
+- Étapes : le propriétaire partage un compte Claude sous l'id `acct-declared-006`, jeton d'accès sur le point d'expirer ; le faux fournisseur (`src/fake-tokens.ts`, point de jetons et API derrière la passerelle) répond au rafraîchissement en nommant un autre compte ; deux appels `POST /api/v1/inference/v1/messages`.
+- Attendu : un seul rafraîchissement, avec le jeton du compte ; le compte passe `wrong_account` ; aucun appel n'est servi par lui (rien n'arrive à l'API du fournisseur, pas de second rafraîchissement). Le faux fournisseur nomme le compte comme les deux fournisseurs (`account.uuid` de Claude, `chatgpt_account_id` dans l'`id_token` de Codex), ou rien.
+- Surfaces : serveur (image), partage, passerelle
+- Source : JOURNAL 02/11 20:48 (ostrom-server#134, `AccountTokens`)
+- Priorité : P1
+- Statut : codé : `scenarios/sharing.e2e.ts`
+
 
 ## CLOUD : Agents cloud et attentes (waits)
 
@@ -3674,12 +3683,12 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
 
-### E2E-GHORG-002 — Un membre, un étranger et un slug inconnu reçoivent le même 403 ; sans session, 401
+### E2E-GHORG-002 — Un membre reçoit 403 ; un étranger et un slug inconnu reçoivent le même 404 ; sans session, 401
 
 - Étapes : le propriétaire invite un membre (rôle `member`) qui accepte ; un étranger se connecte ; chacun lance `install/start?org=<id>`, l'étranger aussi avec un slug qui n'existe pas ; un appel sans session.
-- Attendu : 403 sans redirection pour les trois, avec le même `error.type` et le même message (rien ne distingue un membre d'un étranger, ni une organisation existante d'une absente) ; 401 sans session.
+- Attendu : sans redirection, 403 pour le membre (pas propriétaire ni admin) ; 404 pour l'étranger et pour le slug inconnu, avec le même `error.type` et le même message (rien ne distingue une organisation où l'on n'est pas d'une organisation absente) ; 401 sans session.
 - Surfaces : serveur (image), intégration GitHub, organisations
-- Source : JOURNAL 30/10 13:35 (« membre, étranger et slug inconnu reçoivent le même ») ; le cas étranger est aussi dans E2E-GH-INSTALL-001 d'e2e#23
+- Source : JOURNAL 30/10 13:35 ; JOURNAL 02/11 20:48 (ostrom-server#143 : une org dont on n'est pas membre répond 404) ; le cas étranger est aussi dans E2E-GH-INSTALL-001 d'e2e#23
 - Priorité : P1
 - Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
 
@@ -3718,7 +3727,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | MCP | Relais MCP et MCP du harnais | 6 | 0 | 4 | 2 |
 | SECRETS | Secrets | 8 | 0 | 4 | 4 |
 | GW | Passerelle d'inférence, politique et budgets | 9 | 0 | 7 | 2 |
-| SHARE | Partage d'abonnement (comptes mis en commun) | 5 | 0 | 2 | 3 |
+| SHARE | Partage d'abonnement (comptes mis en commun) | 6 | 0 | 3 | 3 |
 | CLOUD | Agents cloud et attentes (waits) | 8 | 0 | 4 | 4 |
 | WF | Compilation des workflows en harnais (nœuds) | 14 | 0 | 8 | 6 |
 | WFRUN | Exécution de workflows : nœuds étape, check, porte, notification, agent, attente | 8 | 0 | 3 | 5 |
@@ -3738,6 +3747,6 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | ISO | Isolation entre organisations | 1 | 1 | 0 | 0 |
 | ATT | Attestation des checks d'un reçu | 3 | 3 | 0 | 0 |
 | GHORG | Installation GitHub d'une organisation, `?org` | 3 | 0 | 3 | 0 |
-| **Total** | | **340** | **46** | **174** | **120** |
+| **Total** | | **341** | **46** | **175** | **120** |
 
 Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-BYPASS-020, E2E-BYPASS-021, E2E-BYPASS-023, E2E-BYPASS-024, E2E-BYPASS-026, E2E-BYPASS-028, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.
