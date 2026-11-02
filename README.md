@@ -68,6 +68,7 @@ the bench contract.
 | `scenarios/` | the runnable scenarios (Vitest); a scenario not written yet shows as `todo` in the CI report |
 | `bin/fake-claude`, `bin/fake-codex`, `src/fake-agent.ts` | the fake agent |
 | `src/fake-github.ts`, `src/git.ts` | a fake GitHub and throwaway git repositories for the scenarios |
+| `src/fake-tokens.ts` | a fake provider token endpoint, for the shared accounts the import revives |
 | `load/` | k6 scripts: smoke, soak and ramp, and the race of 100 simultaneous yes |
 | `templates/` | the test CI templates of the other repositories and the contract of the test bench |
 | `.github/actions/` | composite actions that build and start the real server and the real CLI |
