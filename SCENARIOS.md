@@ -3437,8 +3437,8 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-PARC-015 — 3.3 Politique d'auto-approbation : lue et réglée par un admin, refusée à un membre
 
-- Étapes : Le propriétaire lit `GET /api/v1/gates/policy`, met l'autre valeur (`PUT`), relit ; un membre invité tente le `PUT` ; une valeur inconnue.
-- Attendu : `{selfApproval}` rendu puis relu à l'identique ; 403 pour le membre ; 400 pour la valeur inconnue. Hypothèse : les valeurs `never` et `allowed` (le contrat ne donne pas d'énumération).
+- Étapes : Le propriétaire lit `GET /api/v1/gates/policy`, met `sole-approver` (`PUT`), relit ; un membre invité tente le `PUT` ; une valeur inconnue, et `allowed`.
+- Attendu : `never` pour une organisation qui n'a jamais choisi ; `{selfApproval: 'sole-approver'}` rendu puis relu à l'identique ; 403 pour le membre ; 400 pour la valeur inconnue et pour `allowed`. Les valeurs sont `sole-approver` et `never` depuis ostrom-server#159 (contrat core#66).
 - Surfaces : serveur
 - Source : `demo/PARCOURS.md` 3.3
 - Priorité : jalon
