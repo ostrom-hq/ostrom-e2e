@@ -5,6 +5,22 @@ export interface Caller {
   readonly token?: string;
   readonly cookie?: string;
   readonly csrf?: string;
+  /**
+   * The client address the caller claims through `X-Forwarded-For`. The bench's server trusts 127.0.0.1 as its proxy
+   * (`OSTROM_TRUSTED_PROXIES`), so each person signs in from an address of its own and the per-address sign-in limits
+   * count people, not the whole bench.
+   */
+  readonly from?: string;
+  /**
+   * The `Origin` a browser sends with the session cookie. Since ostrom-server#58 (audit S2-08), a session write needs it
+   * to be an allowed origin (the console's), besides its CSRF token.
+   */
+  readonly origin?: string;
+  /**
+   * The organization a request acts in, sent as `Ostrom-Org` (id or slug, ostrom-server#64): the "current org" routes
+   * without `{org}` in their path (rules, sessions, workflows, spending, activity, gates…) resolve it from this header.
+   */
+  readonly org?: string;
 }
 
 export interface RouteCase {
@@ -24,13 +40,19 @@ export interface Violation {
   readonly reason: string;
 }
 
-/** The headers a caller sends: bearer token, or session cookie plus its CSRF token on a state-changing request. */
+/**
+ * The headers a caller sends: bearer token, or session cookie plus its CSRF token on a state-changing request, and the
+ * caller's address and `Origin` when it has them.
+ */
 export function headersOf(caller: Caller, method: string, json: boolean): Record<string, string> {
   const h: Record<string, string> = {};
   if (json) h['content-type'] = 'application/json';
   if (caller.token) h['authorization'] = `Bearer ${caller.token}`;
   if (caller.cookie) h['cookie'] = caller.cookie;
   if (caller.csrf && method !== 'GET' && method !== 'HEAD') h['x-csrf-token'] = caller.csrf;
+  if (caller.from) h['x-forwarded-for'] = caller.from;
+  if (caller.origin) h['origin'] = caller.origin;
+  if (caller.org) h['ostrom-org'] = caller.org;
   return h;
 }
 

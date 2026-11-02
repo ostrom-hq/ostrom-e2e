@@ -12,6 +12,7 @@ import type { AddressInfo } from 'node:net';
 export interface FakeUser {
   readonly login: string;
   readonly id: number;
+  readonly email?: string;
 }
 
 export interface FakePull {
@@ -64,6 +65,7 @@ export class FakeGitHub {
   private readonly pulls = new Map<string, FakePull>();
   private readonly compares = new Map<string, readonly string[]>();
   private readonly devices = new Map<string, DeviceCode>();
+  private readonly codes = new Map<string, string>();
   private readonly installations = new Map<number, FakeInstallation>();
   private readonly webCodes = new Map<string, string>();
   private server: Server | undefined;
@@ -84,6 +86,19 @@ export class FakeGitHub {
     this.ids.set(login, id);
     this.tokens.set(token, { login, id });
     return token;
+  }
+
+  /**
+   * The web OAuth flow (`/login/oauth/authorize` → callback): returns the one-time `code` GitHub would hand back to
+   * the redirect URI for `login`, whose verified primary address is `email`.
+   */
+  oauthCode(login: string, email: string): string {
+    const code = `code_${this.nextId++}`;
+    this.codes.set(code, login);
+    const id = this.ids.get(login) ?? 1000 + this.ids.size;
+    this.ids.set(login, id);
+    this.tokens.set(`gho_${login}`, { login, id, email });
+    return code;
   }
 
   /** The next device flow will be approved by this login; a prepared flow nobody started is dropped. */
@@ -176,7 +191,14 @@ export class FakeGitHub {
       if (!code || !d) return [404, { message: 'no device login prepared (FakeGitHub.deviceLogin)' }];
       return [200, { device_code: code, user_code: 'ABCD-1234', verification_uri: `${this.url}/login/device`, expires_in: 900, interval: 0 }];
     }
-    if (method === 'POST' && path === '/login/oauth/access_token' && fields['code'] !== undefined) return this.exchange(fields);
+    if (method === 'POST' && path === '/login/oauth/access_token' && fields['code'] !== undefined) {
+      // A code of the install's return (`webCode`) goes to the App's client; a sign-in code (`oauthCode`) is good once,
+      // like GitHub's; anything else, or a code already used, is `bad_verification_code`.
+      if (this.webCodes.has(String(fields['code']))) return this.exchange(fields);
+      const login = this.codes.get(String(fields['code']));
+      this.codes.delete(String(fields['code']));
+      return login ? [200, { access_token: `gho_${login}`, token_type: 'bearer', scope: 'read:user,user:email' }] : [200, { error: 'bad_verification_code' }];
+    }
     if (method === 'POST' && path === '/login/oauth/access_token') {
       const d = this.devices.get(String(fields['device_code']));
       if (!d) return [200, { error: 'expired_token' }];
@@ -189,6 +211,7 @@ export class FakeGitHub {
     const user = this.who(req);
     if (!user) return [401, { message: 'Bad credentials' }];
     if (method === 'GET' && path === '/user') return [200, { login: user.login, id: user.id, type: 'User' }];
+    if (method === 'GET' && path === '/user/emails') return [200, user.email ? [{ email: user.email, primary: true, verified: true }] : []];
     if (method === 'GET' && path === '/user/installations') return this.reachable(user, query);
     const repoPath = /^\/repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path);
     if (!repoPath) return [404, { message: 'Not Found' }];
@@ -226,8 +249,7 @@ export class FakeGitHub {
       return [200, { error: 'incorrect_client_credentials' }];
     }
     const code = String(fields['code']);
-    const login = this.webCodes.get(code);
-    if (login === undefined) return [200, { error: 'bad_verification_code' }];
+    const login = this.webCodes.get(code) as string; // `handle` only sends a known code here
     this.webCodes.delete(code);
     return [200, { access_token: this.user(login, `ghu_${login}_${this.nextId++}`), token_type: 'bearer', scope: '' }];
   }

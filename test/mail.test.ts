@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { signInToken } from '../src/mail.ts';
+import { invitationToken, signInToken } from '../src/mail.ts';
 
 const mail = (to: string, link: string) => `To: ${to}\nSubject: Sign in to Ostrom\n\nSign in to Ostrom as ${to} with this link:\n\n${link}\n`;
 
@@ -30,5 +30,17 @@ describe('signInToken', () => {
     utimesSync(join(dir, '1.eml'), 5000, 5000);
     utimesSync(join(dir, '2.eml'), 5000, 5000);
     expect(signInToken(dir, 'x@example.test')).toBe('second');
+  });
+
+  it('tells a sign-in link from an invitation link', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ostrom-mail-'));
+    writeFileSync(join(dir, '1.eml'), mail('y@example.test', 'http://c/auth/email#token=signin'));
+    writeFileSync(join(dir, '2.eml'), mail('y@example.test', 'http://c/invite#token=invite'));
+    utimesSync(join(dir, '1.eml'), 5000, 5000);
+    utimesSync(join(dir, '2.eml'), 6000, 6000);
+    expect(signInToken(dir, 'y@example.test')).toBe('invite');
+    expect(signInToken(dir, 'y@example.test', '/auth/email')).toBe('signin');
+    expect(invitationToken(dir, 'y@example.test')).toBe('invite');
+    expect(signInToken(dir, 'y@example.test', '/a.b')).toBeUndefined();
   });
 });

@@ -27,10 +27,10 @@ jobs:
     services:
       postgres:
         image: postgres:18
-        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+        env: { POSTGRES_PASSWORD: postgres }
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
       stripe-mock:
         image: stripe/stripe-mock@sha256:aeb96b83e87a893d2ac005e363ac01ffa6e59a5ad85b49c155dfc9129de02e78 # latest, 2026-10-01 (as ostrom-server)
         ports: ["12111:12111"]
@@ -52,7 +52,8 @@ jobs:
         run: pnpm test:coverage
       # Full stack: the real server and the real `ostrom` built from the main branches of ostrom-server and ostrom-cli.
       # The server runs as its own distroless image (its Dockerfile on main), the artefact that ships.
-      # A repository that does not meet the contract yet leaves its scenarios as todos (« bloqué »), it does not fail.
+      # Both now meet the contract on main: a server or CLI that does not build fails the job, it never leaves the
+      # scenarios silently skipped (run 41028221230 was green with neither, ostrom-core unreadable).
       - name: Sign-in mail directory (written by the server's non-root user, read by the scenarios)
         run: mkdir -p "$RUNNER_TEMP/ostrom-mail" && chmod 0777 "$RUNNER_TEMP/ostrom-mail"
       # The GitHub App of the bench: a key made for this run only, and the fake GitHub of scenarios/github-install
@@ -64,7 +65,10 @@ jobs:
         uses: ./.github/actions/server
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
+          core-key: ${{ secrets.DEPLOY_KEY_CORE }}
           database-url: postgresql://localhost:5432/ostrom
+          # The superuser of the service only creates the roles; the server migrates as ostrom_owner, serves as ostrom_app.
+          database-admin-url: postgresql://postgres:postgres@localhost:5432/postgres
           image: "true"
           # Test values of the bench, never real ones: stripe-mock behind billing, sign-in mails written to a directory.
           extra-env: |
@@ -74,6 +78,11 @@ jobs:
             OSTROM_MAIL_DIR=/var/lib/ostrom/mail
             OSTROM_PUBLIC_URL=http://127.0.0.1:4600
             OSTROM_CONSOLE_URL=http://127.0.0.1:4600
+            OSTROM_TRUSTED_PROXIES=127.0.0.1/32
+            OSTROM_GITHUB_WEB_URL=http://127.0.0.1:4610
+            OSTROM_GITHUB_API_URL=http://127.0.0.1:4610
+            OSTROM_GITHUB_CLIENT_ID=Iv1.e2ebench
+            OSTROM_GITHUB_CLIENT_SECRET=e2e-bench-fake-github
             OSTROM_WEB_ORIGIN=http://127.0.0.1:4600
             OSTROM_GITHUB_API=http://127.0.0.1:4700
             OSTROM_GITHUB_WEB=http://127.0.0.1:4700
@@ -84,19 +93,23 @@ jobs:
             OSTROM_GITHUB_APP_CLIENT_SECRET=fake-client-secret
             OSTROM_GITHUB_WEBHOOK_SECRET=whsec_github_e2e
           docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail
-          required: "false"
+          required: "true"
       - name: Real ostrom CLI
         id: cli
         uses: ./.github/actions/cli
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_CLI }}
-          required: "false"
+          core-key: ${{ secrets.DEPLOY_KEY_CORE }}
+          required: "true"
       - name: Scenarios
         env:
           OSTROM_E2E_SERVER_URL: ${{ steps.server.outputs.available == 'true' && steps.server.outputs.url || '' }}
           OSTROM_E2E_CLI_BIN: ${{ steps.cli.outputs.available == 'true' && steps.cli.outputs.bin || '' }}
           OSTROM_E2E_MAIL_DIR: ${{ runner.temp }}/ostrom-mail
           OSTROM_E2E_STRIPE_WEBHOOK_SECRET: whsec_e2e_bench
+          OSTROM_E2E_FAKE_GITHUB_PORT: "4610"
+          # Only to age a session in AUTH-007 (the step-up), as the superuser of the bench's throwaway database.
+          OSTROM_E2E_DATABASE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/ostrom
           OSTROM_E2E_GITHUB_PORT: "4700"
         run: pnpm e2e --reporter=default --reporter=json --outputFile=e2e-results.json
       # Short load test on the served public routes; the thresholds of load/smoke.js fail the job.

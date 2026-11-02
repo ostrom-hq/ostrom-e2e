@@ -24,10 +24,10 @@ jobs:
     services:
       postgres:
         image: postgres:18
-        env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+        env: { POSTGRES_PASSWORD: postgres }
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -43,6 +43,7 @@ jobs:
         with:
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           database-url: postgresql://localhost:5432/ostrom
+          database-admin-url: postgresql://postgres:postgres@localhost:5432/postgres
           required: "false" # QA flips it to "true" once ostrom-server meets the bench contract
       - run: pnpm exec playwright install --with-deps chromium
       - name: Playwright

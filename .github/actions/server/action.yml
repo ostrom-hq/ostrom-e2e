@@ -17,6 +17,13 @@ inputs:
     description: Ref of ostrom-server to build (ignored when `path` is given).
     required: false
     default: main
+  core-key:
+    description: >
+      Read-only deploy key of ostrom-core (org secret DEPLOY_KEY_CORE). When the sources pin ostrom-core in
+      `gradle/ostrom-core.ref`, core is checked out at that commit and built with them (`ostrom.core.local`): a
+      GITHUB_TOKEN never reads another repository's Maven packages (JOURNAL 05:50).
+    required: false
+    default: ""
   path:
     description: Path of an ostrom-server checkout already on the runner (ostrom-server's own CI).
     required: false
@@ -24,6 +31,14 @@ inputs:
   database-url:
     description: PostgreSQL URL for the server (postgresql://host:port/db).
     required: true
+  database-admin-url:
+    description: >
+      A superuser URL of the same PostgreSQL (postgresql://user:password@host:port/postgres). When the sources have
+      `ci/database-roles.sql`, the roles are created as deployed (docs/tenancy.md): `ostrom_owner` migrates the
+      database (`ostrom-server migrate`) and the server serves as `ostrom_app`, which owns nothing and cannot bypass
+      row-level security (the server refuses a role that can, S2-01). The database of `database-url` must not exist.
+    required: false
+    default: ""
   database-user:
     description: PostgreSQL user.
     required: false
@@ -105,6 +120,35 @@ runs:
       with:
         path: ${{ runner.temp }}/ostrom-bin/ostrom-server
         key: ostrom-server-linuxX64-${{ steps.src.outputs.sha }}
+    - name: ostrom-core version (gradle/ostrom-core.ref)
+      id: core
+      if: inputs.core-key != '' && steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        DIR: ${{ steps.src.outputs.dir }}
+      run: |
+        if [ -f "$DIR/gradle/ostrom-core.ref" ]; then echo "ref=$(tr -d '[:space:]' < "$DIR/gradle/ostrom-core.ref")" >> "$GITHUB_OUTPUT"; fi
+    - name: Checkout ostrom-core at that commit
+      if: steps.core.outputs.ref != ''
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: ostrom-hq/ostrom-core
+        ref: ${{ steps.core.outputs.ref }}
+        ssh-key: ${{ inputs.core-key }}
+        path: .ostrom/core-server
+        persist-credentials: false
+    - name: Build ostrom-core with the sources (ostrom.core.local)
+      if: steps.core.outputs.ref != ''
+      shell: bash
+      env:
+        DIR: ${{ steps.src.outputs.dir }}
+      run: |
+        # settings.gradle.kts includes ../ostrom-core next to the sources; the server and the CLI may pin different
+        # commits, so each build puts its own there.
+        rm -rf "$DIR/../ostrom-core"
+        mv .ostrom/core-server "$DIR/../ostrom-core"
+        mkdir -p ~/.gradle
+        grep -qx 'ostrom.core.local=true' ~/.gradle/gradle.properties 2>/dev/null || echo "ostrom.core.local=true" >> ~/.gradle/gradle.properties
     - name: Set up Java (build only)
       if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
       uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -136,8 +180,17 @@ runs:
         else
           out=app/build/bin/linuxX64/releaseExecutable/ostrom-server.kexe; ./gradlew --no-daemon :app:linkReleaseExecutableLinuxX64 && ok=1 || ok=0
         fi
+        # Free the runner's memory for what comes next (the other native build, the server, the scenarios): the
+        # Gradle and Kotlin daemons of this build stay up otherwise, and two native links at once exhaust the runner
+        # (runs 41031154110 #1 and #2 cancelled during the CLI's link). Only this job's own daemons run here.
+        stop_daemons() { ./gradlew --stop >/dev/null 2>&1 || true; pkill -f 'KotlinCompileDaemon' || true; }
+        stop_daemons
         if [ "$ok" = 1 ] && [ -f "$out" ]; then
-          cp "$out" "$RUNNER_TEMP/ostrom-bin/ostrom-server"; echo "built=true" >> "$GITHUB_OUTPUT"; exit 0
+          cp "$out" "$RUNNER_TEMP/ostrom-bin/ostrom-server"; echo "built=true" >> "$GITHUB_OUTPUT"
+          # The binary is copied: the build outputs of the server and of ostrom-core only take disk from the CLI's build.
+          find . ../ostrom-core -name build -type d -prune -exec rm -rf {} + 2>/dev/null || true
+          df -h / | tail -1; free -m | sed -n 2p
+          exit 0
         fi
         echo "::$LEVEL title=ostrom-server contract::the build failed or did not produce $out (contract in ostrom-e2e/templates/README.md)"
         echo "built=false" >> "$GITHUB_OUTPUT"
@@ -159,14 +212,36 @@ runs:
         echo "::$LEVEL title=ostrom-server image::no Dockerfile, or docker build failed"
         echo "built=false" >> "$GITHUB_OUTPUT"
         [ "$REQUIRED" = "true" ] && exit 1 || exit 0
+    - name: Database roles and migrations, as deployed (ci/database-roles.sql)
+      id: db
+      if: inputs.database-admin-url != '' && steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false' && steps.image.outputs.built != 'false'
+      shell: bash
+      env:
+        DIR: ${{ steps.src.outputs.dir }}
+        ADMIN_URL: ${{ inputs.database-admin-url }}
+        DATABASE_URL: ${{ inputs.database-url }}
+        IMAGE: ${{ inputs.image }}
+        BIN: ${{ steps.src.outputs.bin }}
+      run: |
+        if [ ! -f "$DIR/ci/database-roles.sql" ]; then echo "no ci/database-roles.sql: the server serves as the given user"; exit 0; fi
+        # psql of the same PostgreSQL image as the service, on the host network: nothing installed on the runner.
+        docker run --rm -i --network host postgres:18 psql "$ADMIN_URL" -v ON_ERROR_STOP=1 < "$DIR/ci/database-roles.sql"
+        # postgresql://host:port/db → the owner's URL for `migrate`.
+        owner="postgresql://ostrom_owner:ostrom_owner@${DATABASE_URL#postgresql://}"
+        if [ "$IMAGE" = "true" ]; then
+          docker run --rm --network host -e OSTROM_DATABASE_MIGRATION_URL="$owner" ostrom-server:e2e migrate
+        else
+          chmod +x "$BIN"; OSTROM_DATABASE_MIGRATION_URL="$owner" "$BIN" migrate
+        fi
+        echo "roles=true" >> "$GITHUB_OUTPUT"
     - name: Start the server and wait for /health
       id: start
       if: steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false' && steps.image.outputs.built != 'false'
       shell: bash
       env:
         OSTROM_DATABASE_URL: ${{ inputs.database-url }}
-        OSTROM_DATABASE_USER: ${{ inputs.database-user }}
-        OSTROM_DATABASE_PASSWORD: ${{ inputs.database-password }}
+        OSTROM_DATABASE_USER: ${{ steps.db.outputs.roles == 'true' && 'ostrom_app' || inputs.database-user }}
+        OSTROM_DATABASE_PASSWORD: ${{ steps.db.outputs.roles == 'true' && 'ostrom_app' || inputs.database-password }}
         OSTROM_PORT: ${{ inputs.port }}
         KEY_FILE: ${{ runner.temp }}/ostrom-instance-key-${{ inputs.port }}.pem
         EXTRA_ENV: ${{ inputs.extra-env }}

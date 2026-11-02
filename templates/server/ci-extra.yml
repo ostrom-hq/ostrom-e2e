@@ -4,10 +4,10 @@
 services:
   postgres:
     image: postgres:18
-    env: { POSTGRES_USER: ostrom, POSTGRES_PASSWORD: ostrom, POSTGRES_DB: ostrom }
+    env: { POSTGRES_PASSWORD: postgres }
     ports: ["5432:5432"]
     options: >-
-      --health-cmd "pg_isready -U ostrom -d ostrom" --health-interval 5s --health-timeout 5s --health-retries 20
+      --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
 # 2. Append these steps after the tests (the job has already checked out this repository):
 steps:
   # The full-stack bench (ostrom-e2e) against THIS commit of the server, with the `ostrom` CLI from main.
@@ -17,6 +17,7 @@ steps:
     with:
       path: .
       database-url: postgresql://localhost:5432/ostrom
+      database-admin-url: postgresql://postgres:postgres@localhost:5432/postgres
   - name: ostrom CLI from main
     id: cli
     uses: ostrom-hq/ostrom-e2e/.github/actions/cli@main

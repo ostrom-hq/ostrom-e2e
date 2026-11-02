@@ -8,7 +8,7 @@
 import { appendFileSync } from 'node:fs';
 import { isServed } from '../src/probe.ts';
 import { SERVER_URL } from '../scenarios/env.ts';
-import { call, email, orgOf, orgsUnavailable, signIn } from '../scenarios/org.ts';
+import { call, email, invite, join, orgOf, orgsUnavailable, profileOf, signIn } from '../scenarios/org.ts';
 
 const REPO = process.env['OSTROM_LOAD_REPO'] ?? 'acme/api';
 const out = (file: string | undefined, line: string) => (file ? appendFileSync(file, `${line}\n`) : console.log(line));
@@ -23,19 +23,26 @@ async function setup(): Promise<string> {
   const devA = await signIn(email('dev-a'));
   const org = await orgOf(devA);
   const revBEmail = email('rev-b');
-  const invited = await call(devA.caller, 'POST', '/api/v1/members/invites', { invites: [{ email: revBEmail, role: 'admin' }] });
+  const invited = await invite(devA, org.id, [revBEmail], 'admin');
   if (invited.status !== 200) return `invite → ${invited.status} ${JSON.stringify(invited.body)}`;
-  const revB = await signIn(revBEmail);
-  if ((await orgOf(revB)).id !== org.id) return 'rev-b did not join the organization of dev-a';
+  const { person: revB, accepted } = await join(revBEmail);
+  if (accepted.status !== 200 || accepted.body['id'] !== org.id) return `rev-b join → ${accepted.status} ${JSON.stringify(accepted.body)}`;
   const token = await call(devA.caller, 'POST', '/api/v1/tokens', { name: 'k6 requester', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
   const secret = token.body['secret'];
-  if (token.status !== 200 || typeof secret !== 'string') return `token → ${token.status} ${JSON.stringify(token.body)}`;
-  // The approver of pushes to main of REPO comes from a compiled workflow (contract `POST /api/v1/workflows`). Its
-  // body is written here once the compiler is on main; until then the gate is not configured and the tests wait.
+  if (token.status !== 201 || typeof secret !== 'string') return `token → ${token.status} ${JSON.stringify(token.body)}`;
+  // The approver of pushes to main of REPO comes from an accepted workflow whose gate node names rev-b's login
+  // (contract `Workflow`/`WorkflowNode`/`GateAction`, action class `push-main` of the compiler, ostrom-server#43).
+  const reviewer = await profileOf(revB.caller);
+  const login = reviewer.login;
+  if (login === '') return `rev-b profile → ${reviewer.status} ${JSON.stringify(reviewer.body)}`;
   const workflow = await call(devA.caller, 'POST', '/api/v1/workflows', {
+    id: `k6-push-main-${Date.now().toString(36)}`,
     name: 'k6 push to main',
-    scope: `repo:${REPO}`,
-    nodes: [{ id: 'push-main', type: 'gate', on: { class: 'git.push', ref: 'refs/heads/main' }, approvers: [revBEmail], enforce: true }],
+    domain: 'delivery',
+    status: 'accepted',
+    foundAt: new Date().toISOString(),
+    nodes: [{ id: 'push-main', kind: 'gate', label: 'Push to main', approvers: [login], actions: [{ class: 'push-main', label: 'Push to the main branch', patterns: [], repos: [REPO] }] }],
+    edges: [],
   });
   if (workflow.status >= 300) return `workflow → ${workflow.status} ${JSON.stringify(workflow.body)}`;
   const { cookie = '', csrf = '' } = revB.caller;
