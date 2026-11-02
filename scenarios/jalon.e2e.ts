@@ -118,6 +118,7 @@ describe.skipIf(LOGIN_OFF !== '')(`jalon: real ostrom login${skipped(LOGIN_OFF)}
 describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes from the browser bound to the SHA, receipt${skipped(JOURNEY_OFF)}`, () => {
   let w: RealWorld;
   let receipt: string | undefined;
+  let receiptJson: string | undefined;
   let gate: string | undefined;
 
   beforeAll(async () => {
@@ -225,12 +226,20 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     const kept = await call(w.dev.browser.caller, 'GET', `/api/v1/receipts/${encodeURIComponent(String(receipt))}`);
     expect(kept.status, JSON.stringify(kept.body)).toBe(200);
     expect(JSON.stringify(kept.body)).toContain(w.rev.login);
-    expect(JSON.stringify(kept.body)).toContain(shaA);
+    // The receipt binds the SHA through its subject digest (what the approver was shown, ReceiptsGateSigner.kt), not
+    // in clear (run 41491873101): its subject is this gate, and the gate it signs names shaA.
+    expect((kept.body['subject'] as Record<string, unknown> | undefined)?.['id']).toBe(gate);
+    expect(JSON.stringify(view.body)).toContain(shaA);
+    receiptJson = JSON.stringify(kept.body);
   }, 300_000);
 
   it.skipIf(!HAS_VERIFY)(`E2E-RECEIPT-001 — the gate receipt verifies offline (no server reachable)${HAS_VERIFY ? '' : ' [skipped: no `ostrom verify` in the CLI yet]'}`, async () => {
-    expect(receipt, 'E2E-GATE-001 gave a receipt').toBeDefined();
-    const offline = await w.dev.cli.ostrom(['verify', String(receipt)], { env: { OSTROM_URL: 'http://127.0.0.1:9' } });
+    expect(receiptJson, 'E2E-GATE-001 gave a receipt').toBeDefined();
+    // `ostrom verify` takes a receipt file, or a receipt kept in ~/.ostrom/receipts (run 41491873101): the receipt as
+    // the server gave it is saved to a file, then checked with no server reachable, on the key pinned at first use.
+    const file = join(w.dev.cli.home, 'gate-receipt.json');
+    writeFileSync(file, String(receiptJson));
+    const offline = await w.dev.cli.ostrom(['verify', file], { env: { OSTROM_URL: 'http://127.0.0.1:9' } });
     expect(offline.code, offline.stderr).toBe(0);
     expect(offline.stdout).toMatch(/VERIFIED/);
     expect(offline.stdout).toContain(w.rev.login);

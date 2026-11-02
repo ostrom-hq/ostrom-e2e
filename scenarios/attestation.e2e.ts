@@ -140,7 +140,10 @@ describe('E2E-ATT: the attestation of a check run (decision 30/10 13:23, contrac
     for (const node of checkNodes(receipt.body['receipt'])) expect(node['attestation']).not.toMatch(/^(ci|isolated_runner)$/);
   }, T);
 
-  it.skipIf(W003 !== '')(named('E2E-ATT-003 a rule gate asking for an attested check is not satisfied by a declared run', W003), async () => {
+  // Known gap (run 41491873101): the rules route keeps the rule's gate without `checks` (contract RuleGateCheck,
+  // `attested`), so no gate can ask for an attested run yet. `it.fails` until the rules keep it (JOURNAL 02/11 →
+  // SRV-REGLES-2): remove `.fails` then.
+  (W003 !== '' ? it.skip : it.fails)(named('E2E-ATT-003 a rule gate asking for an attested check is not satisfied by a declared run', W003), async () => {
     const { a, agent, digest, sessionId, scriptId } = await sessionWithCheck('att-003');
     const repo = `acme/att-${randomUUID().slice(0, 6)}`;
     const rule = await call(a.c, 'POST', '/api/v1/rules', {

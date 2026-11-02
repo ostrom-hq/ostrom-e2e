@@ -3625,7 +3625,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), lanceur, reçus
 - Source : JOURNAL 30/10 13:23 (décision sur QUESTIONS « 13:35 CLI-AGENTS ») ; contrat core#40 (`CheckAttestation`, `ReceiptNode.attestation`) ; ostrom-server#78 (checks, reçu de workflow)
 - Priorité : jalon
-- Statut : codé : `scenarios/attestation.e2e.ts`, allumé par les sondes quand `/api/v1/launches`, `/api/v1/checks` et `/api/v1/sessions/{id}/workflow-receipt` sont servies (SRV-LANCEUR, ostrom-server#78)
+- Statut : vert : `scenarios/attestation.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41491873101 (avec ostrom-server#78 8f3d1986)
 
 ### E2E-ATT-002 — Le poste ne peut pas se déclarer `ci` ni `isolated_runner`
 
@@ -3634,7 +3634,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), lanceur, reçus
 - Source : JOURNAL 30/10 13:23 ; contrat core#40 (`CheckAttestation`)
 - Priorité : jalon
-- Statut : codé : `scenarios/attestation.e2e.ts`, mêmes sondes qu'ATT-001
+- Statut : vert : `scenarios/attestation.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41491873101
 
 ### E2E-ATT-003 — Une porte qui exige un check attesté n'est pas satisfaite par une déclaration
 
@@ -3643,7 +3643,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), règles, portes
 - Source : JOURNAL 30/10 13:23 (l'ajout : une règle ou une porte peut exiger `attestation != workstation_declared`) ; contrat core#40 (`RuleGateCheck.attested`) ; SRV-REGLES-2
 - Priorité : jalon
-- Statut : codé : `scenarios/attestation.e2e.ts`, allumé quand `/api/v1/rules`, `/api/v1/gates`, `/api/v1/launches` et `/api/v1/checks` sont servies
+- Statut : rouge connu : `scenarios/attestation.e2e.ts` en `it.fails`. Au run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41491873101, `POST /api/v1/rules` rend la règle sans `gate.checks` (contrat `RuleGateCheck`, `attested`) : aucune porte ne peut encore exiger un run attesté. JOURNAL 02/11 → SRV-REGLES-2 ; retirer `.fails` quand les règles le gardent
 
 ## GHORG : Installation GitHub d'une organisation, `?org` (décision du 30/10 12:55)
 
