@@ -43,17 +43,24 @@ describe.skipIf(OFF !== '')(title, () => {
     git(spaced, 'remote', 'set-url', 'origin', `https://github.com/${w.repo}.git`);
     git(spaced, 'config', `url.${sb.origin}.pushInsteadOf`, `https://github.com/${w.repo}.git`);
     commit(spaced, 'b.txt', 'b\n', 'feat: b');
-    const results = await attempts(sb.work, [
-      `git -C ${sb.work} push origin main`,
-      `git -C "${spaced}" push origin HEAD:main`,
-      'git -c core.sshCommand=ssh push origin main',
-      'git --no-pager push origin main',
-      `git --git-dir ${sb.work}/.git push origin main`,
-    ]);
+    const results = [
+      ...(await attempts(sb.work, [
+        `git -C ${sb.work} push origin main`,
+        'git -c core.sshCommand=ssh push origin main',
+        'git --no-pager push origin main',
+        `git --git-dir ${sb.work}/.git push origin main`,
+      ])),
+      // A quoted path with a space, from a session opened in that checkout: the gate of main.
+      ...(await attempts(spaced, [`git -C "${spaced}" push origin HEAD:main`])),
+    ];
     for (const r of results) {
       expect(r.blocked, r.why).toBe(true);
       expect(r.gate, r.why).toBeDefined();
     }
+    // From a session opened in another checkout, the same push is denied outright: the session's gates do not cover it.
+    const [elsewhere] = await attempts(sb.work, [`git -C "${spaced}" push origin HEAD:main`]);
+    expect(elsewhere?.blocked, elsewhere?.why).toBe(true);
+    expect(elsewhere?.why).toMatch(/do not cover/);
     expect(originSha(sb, 'main')).toBe(before);
   }, 180_000);
 
