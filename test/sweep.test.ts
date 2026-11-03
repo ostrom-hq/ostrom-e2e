@@ -173,6 +173,7 @@ describe('judge', () => {
   it('makes bodies comparable', () => {
     expect(normalize(JSON.stringify({ error: { message: 'Rule rule-A not found', requestId: 'x', traceId: 'y' } }), ['rule-A', 'ab'])).toBe('{"error":{"message":"Rule <sent> not found"}}');
     expect(normalize('plain rule-A', ['rule-A', 'plain'])).toBe('<sent> <sent>');
+    expect(normalize(JSON.stringify({ confirmationId: 'gcf_1', confirmUrl: 'http://x/confirm/gcf_1', expiresAt: '2026-11-03T11:23:15Z' }), [])).toBe('{}');
   });
 
   it('accepts the answer of a missing resource, and nothing of A', () => {

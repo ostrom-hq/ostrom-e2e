@@ -39,8 +39,10 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/auth/{provider}': 'provider',
   '/api/v1/automations/{id}': 'automation',
   '/api/v1/cloud/sessions/{id}': 'cloudSession',
+  '/api/v1/confirmations/{id}': 'confirmation',
   '/api/v1/devices/{id}': 'device',
   '/api/v1/gates/{id}': 'gate',
+  '/api/v1/launches/{launchId}': 'launch',
   '/api/v1/mcp/servers/{name}': 'mcpServer',
   '/api/v1/mcp/servers/{}/assignments/{member}': 'member',
   '/api/v1/mcp/servers/{}/policies/{policyId}': 'mcpPolicy',
@@ -273,11 +275,14 @@ async function makeWorld(): Promise<World> {
     const launch = await call(c, 'POST', '/api/v1/launches', { agent: 'claude', repo: 'acme/sweep' });
     if (launch.status >= 300) throw new Error(`launch → ${text(launch)}`);
     agent = { token: String(launch.body['agentToken']), org: org.id, from: address() };
+    values['launch'] = String(launch.body['launchId']);
     const id = randomUUID();
     const opened = await call(agent, 'POST', '/api/v1/sessions', { id, launchId: launch.body['launchId'], repo: 'acme/sweep', agent: 'claude', ...(values['package'] ? { packageDigest: values['package'] } : {}) });
     if (opened.status >= 300) throw new Error(`session → ${text(opened)}`);
     return field(opened.body, 'id') ?? id;
   });
+  // A governance write waits for a confirmation in the console (ostrom-server#146): A's pending one, by its id.
+  await make('confirmation', () => post('/api/v1/rules/bulk', {}, 'bulkUpdateRules', ['confirmationId']));
   const sha = 'a'.repeat(8) + tag.replace(/[^0-9a-f]/g, '0').padEnd(32, '0');
   await make('gate', async () => {
     if (!agent) throw new Error('no session');
