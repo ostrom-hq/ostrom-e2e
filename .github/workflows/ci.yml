@@ -108,7 +108,7 @@ jobs:
         uses: ./.github/actions/server
         with:
           # perf/race-memory-probe only: the server branch under measurement.
-          ref: fix/gateway-open-calls-cap
+          ref: perf/race-memory-dispatch
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           core-key: ${{ secrets.DEPLOY_KEY_CORE }}
           database-url: postgresql://localhost:5432/ostrom
@@ -148,8 +148,7 @@ jobs:
             OSTROM_GATEWAY_ANTHROPIC_URL=http://127.0.0.1:4620
             OSTROM_GATEWAY_CODEX_URL=http://127.0.0.1:4620
             OSTROM_ARTIFACTS_CONTENT_ORIGIN=http://localhost:4601
-          # perf/race-memory-probe only: the chart's limit decided at 13:0x (512Mi).
-          docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail --memory 512m --memory-swap 512m
+          docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail
           required: "true"
       - name: Real ostrom CLI
         id: cli
