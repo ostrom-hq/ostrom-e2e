@@ -104,7 +104,8 @@ The workflow runs in two legs, each on its own runner and kind cluster: `gates` 
 and the race) and `relay` (the smoke, the journeys, then the gateway and the relay). Both build the server image and
 open the port-forward and the mail directory of the sign-in; only `gates` runs `scripts/load-setup.ts`, only `relay` the
 CA and the fakes. A crash in one never decides the other's numbers. Their artifacts are `chart-load-k6` and
-`chart-load-k6-relay`; a dispatch may run one leg only (`pass`).
+`chart-load-k6-relay`; a dispatch may run one leg only (`pass`). The relay leg also keeps each server container's log,
+followed across restarts, and its open descriptors every second (`scripts/server-watch.sh`, in `server-watch/`).
 
 ## Documentation
 
