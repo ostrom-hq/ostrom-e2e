@@ -3488,8 +3488,8 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-PARC-018 — 3.5 Budget de l'org : réglé, listé avec sa période, lu comme budget du membre
 
-- Étapes : Le propriétaire règle `PUT /api/v1/budgets` `{scope: org, usdPerMonth: 42, hardStop: true}`, lit `GET /budgets` et `GET /budgets/me` ; une autre org lit ses budgets ; trois formes refusées.
-- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; budget par jour, budget sans arrêt et portée inconnue : 400.
+- Étapes : Le propriétaire règle `PUT /api/v1/budgets` `{scope: org, usdPerMonth: 42, hardStop: true}`, lit `GET /budgets` et `GET /budgets/me` ; une autre org lit ses budgets ; il règle le budget d'une personne, la sienne, nommée par l'`id` de `GET /orgs/{org}/members`, par jour et qui prévient seulement (`{scope: member, subject: <id>, usdPerDay: 20, hardStop: false}`) ; deux formes refusées.
+- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; le budget de la personne : 200, listé sous son id avec `usdPerDay: 20`, `hardStop: false` et sans `usdPerMonth`, invisible de l'autre org (un serveur sans ostrom-server#230 le refuse en 400, et refuse alors aussi le budget par jour et le budget sans arrêt de l'org) ; budget de workflow et portée inconnue : 400.
 - Surfaces : serveur (l'écran `/spend` lit ces routes)
 - Source : `demo/PARCOURS.md` 3.5
 - Priorité : P1
