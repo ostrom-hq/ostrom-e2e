@@ -6,6 +6,10 @@
 #                                 second restart), and samples each server process's open descriptors every second
 #                                 into <dir>/fds.txt: `<epoch s> <pid> <open descriptors> <highest descriptor>`.
 #                                 Ktor's native CIO server refuses a socket numbered FD_SETSIZE (1024) or above.
+#                                 Every two seconds it also splits each server process's resident memory (KiB, from
+#                                 /proc/<pid>/smaps) into <dir>/mem.txt: `<epoch s> <pid> <threads> <rss> <[heap]> <anon>
+#                                 <files> <stacks> <anon 60-66 MiB: rss count> <anon over 66 MiB: rss count>`. [heap] is
+#                                 malloc's main arena, ~64 MiB mappings its thread arenas, the larger ones the Kotlin heap.
 #   server-watch.sh stop <dir>    stops both.
 # NS is the release's namespace, CLUSTER the kind cluster (its node container is `$CLUSTER-control-plane`).
 set -euo pipefail
@@ -47,6 +51,25 @@ case "${1:-}" in
         sleep 1
       done
     ) >> "$dir/fds.txt" < /dev/null 2>/dev/null &
+    echo $! >> "$dir/watch.pids"
+    # The split of /proc/<pid>/smaps, handed to the node's shell as its first argument.
+    split='/^[0-9a-f]+-[0-9a-f]+ /{path=$6; next}
+      /^Size:/{size=$2}
+      /^Rss:/{r=$2; rss+=r
+        if (path=="[heap]") h+=r; else if (path ~ /^\[stack/) st+=r; else if (path=="") an+=r; else f+=r
+        if (path=="" && size>=60000 && size<=66000) {ar+=r; na++}
+        if (path=="" && size>66000) {big+=r; nb++}}
+      END{print rss+0, h+0, an+0, f+0, st+0, ar+0, na+0, big+0, nb+0}'
+    (
+      while :; do
+        ts=$(date +%s)
+        docker exec "$CLUSTER-control-plane" sh -c '
+          for p in $(grep -lx ostrom-server /proc/[0-9]*/comm 2>/dev/null | cut -d/ -f3); do
+            echo "$p $(ls /proc/$p/task 2>/dev/null | grep -c .) $(awk "$1" /proc/$p/smaps 2>/dev/null)"
+          done' sh "$split" 2>/dev/null | sed "s|^|$ts |" || true
+        sleep 2
+      done
+    ) >> "$dir/mem.txt" < /dev/null 2>/dev/null &
     echo $! >> "$dir/watch.pids"
     ;;
   stop)
