@@ -13,9 +13,17 @@ const answers: Record<string, [number, string]> = {
   '/html': [404, '<html>nope</html>'],
   '/auth': [401, '{"error":{"type":"unauthenticated","message":"Sign in."}}'],
 };
+// A route that sends the browser elsewhere (`/redirect` → `/generic`, as GitHub's install callback sends it to the
+// console, which the bench's server answers with its generic 404).
+const redirects: Record<string, string> = { '/redirect': '/generic' };
 
 beforeAll(async () => {
   server = createServer((req, res) => {
+    const to = redirects[req.url ?? ''];
+    if (to !== undefined) {
+      res.writeHead(302, { location: to }).end();
+      return;
+    }
     const [status, body] = req.method === 'POST' && req.url === '/post-only' ? ([200, '{}'] as [number, string]) : (answers[req.url ?? ''] ?? (answers['/generic'] as [number, string]));
     res.writeHead(status, { 'content-type': 'application/json' }).end(body);
   });
@@ -33,6 +41,10 @@ describe('probe', () => {
     expect(await isServed(base, '/html')).toBe(true);
     expect(await isServed(base, '/auth')).toBe(true);
     expect(await isServed(base, '/post-only', 'POST')).toBe(true);
+  });
+
+  it('reads a redirect as served, without following it to where it points', async () => {
+    expect(await isServed(base, '/redirect')).toBe(true);
   });
 
   it('picks the first served path', async () => {
