@@ -3104,6 +3104,16 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ## DOGFOOD : Le harnais d'une équipe pilote en workflows Ostrom (dogfood)
 
+
+### E2E-LOAD-012 — Rafales sans identifiant puis authentifiées : le serveur tient
+
+- Étapes : k6 `load/burst.js` après la course, dans ci-e2e de chaque PR serveur (image de la PR) : 100 `POST /api/v1/gates` simultanés sans identifiant, puis 100 demandes de porte authentifiées simultanées (actions sans porte).
+- Attendu : 100 × 401 puis 100 × 200, rien d'autre (0 : connexion coupée) ; le conteneur ne s'arrête pas, ne redémarre pas, n'est pas tué (OOM) ; le pic mémoire du conteneur (`memory.peak` de son cgroup) reste sous la limite du chart (512Mi).
+- Surfaces : serveur (image), PostgreSQL (k6, cgroup du conteneur)
+- Source : consigne du coordinateur 14:0x (P1 de 13:5x : 100 requêtes sans identifiant tuent le serveur à 512Mi, propriétaire RELAY, ostrom-server#266)
+- Priorité : P1
+- Statut : codé ; en avertissement dans ci-e2e jusqu'à la fusion de ostrom-server#266, bloquant ensuite
+
 ### E2E-DOGFOOD-001 — Les 8 workflows du harnais pilote compilent en paquets signés
 
 - Étapes : compiler les 8 workflows `wf-*.ts` du dogfood (performance de la base, déploiement, correction d'un ticket, gardes MCP, flux de PR, garde du push, revue, poste) par le compilateur de la réécriture, publier les paquets, `ostrom verify` sur chacun.
