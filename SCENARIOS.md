@@ -2940,7 +2940,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 ### E2E-AUTH-001 — Connexion par lien e-mail, une seule fois
 
 - Étapes : `POST /api/v1/auth/email` (adresse propre à la personne, `X-Forwarded-For` d'une adresse à elle), le lien est lu dans `OSTROM_MAIL_DIR`, `POST /api/v1/auth/email/verify` ; puis le même lien une seconde fois, et un jeton inventé.
-- Attendu : 200 `{redirect, csrfToken}`, cookie de session `HttpOnly`, `SameSite`, `Path=/` ; `GET /api/v1/auth/me/account` rend l'adresse (le compte quitte `GET /auth/me`, qui devient le `Me` du contrat : décision du 30/10 11:50, JOURNAL 12:10 ; le banc lit `/auth/me` tant que `/me/account` n'est pas servi) ; le lien réutilisé et le jeton inventé : 4xx, aucun cookie de session.
+- Attendu : 200 `{redirect, csrfToken}`, cookie de session `HttpOnly`, `SameSite`, `Path=/` ; `GET /api/v1/auth/me/account` rend l'adresse (le compte quitte `GET /auth/me`, qui devient le `Me` du contrat : décision du 30/10 11:50, JOURNAL 12:10 ; le banc lit `/auth/me` tant que `/me/account` n'est pas servi) ; le lien réutilisé et le jeton inventé : 4xx, aucun cookie de session. Depuis ostrom-server#176 (dbb2dd8, audit web 2 M4) : la demande pose le cookie `ostrom_email_link` ; le lien présenté sans lui reçoit 403 `email_link_other_browser`, sans session et sans être consommé, puis signe dans le navigateur qui l'a demandé.
 - Surfaces : serveur (image), identité
 - Source : ostrom-server#10 (`SignInRoutes.kt`) ; contrat 0.1.140 `requestMagicLink`, `verifyMagicLink`
 - Priorité : jalon
@@ -3411,7 +3411,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 ### E2E-PARC-011 — 2.11 Clés de service, appareils et sessions du navigateur
 
 - Étapes : Le propriétaire crée une clé de service (`POST /api/v1/service-keys`), liste les clés, les appareils (`GET /devices`) et ses sessions (`GET /auth/sessions`) ; une autre org liste les clés.
-- Attendu : 201 `{id, name, scopes, createdAt, secret}`, le secret absent de la liste ; aucun appareil pour une personne sans `ostrom login` ; au moins la session courante ; l'autre org ne voit pas la clé ; 401 sans identifiant sur les trois listes.
+- Attendu : 201 `{id, name, scopes, createdAt, secret}`, le secret absent de la liste ; aucun appareil pour une personne sans `ostrom login` ; au moins la session courante ; l'autre org ne voit pas la clé ; 401 sans identifiant sur les trois listes. Depuis ostrom-server#158 : une clé de service ne tient que `sessions:write` et `rules:read` (une autre portée, `receipts:read` par exemple : 400).
 - Surfaces : serveur (Écrans hors du banc : le scénario prouve la route que l'écran lit.)
 - Source : `demo/PARCOURS.md` 2.11
 - Priorité : P1

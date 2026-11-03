@@ -39,8 +39,10 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/auth/{provider}': 'provider',
   '/api/v1/automations/{id}': 'automation',
   '/api/v1/cloud/sessions/{id}': 'cloudSession',
+  '/api/v1/confirmations/{id}': 'confirmation',
   '/api/v1/devices/{id}': 'device',
   '/api/v1/gates/{id}': 'gate',
+  '/api/v1/launches/{launchId}': 'launch',
   '/api/v1/mcp/servers/{name}': 'mcpServer',
   '/api/v1/mcp/servers/{}/assignments/{member}': 'member',
   '/api/v1/mcp/servers/{}/policies/{policyId}': 'mcpPolicy',
@@ -51,6 +53,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/orgs/{}/members/{login}': 'login',
   '/api/v1/packages/{digest}': 'package',
   '/api/v1/receipts/{id}': 'receipt',
+  '/api/v1/push-devices/{id}': 'pushDevice',
   '/api/v1/rules/{id}': 'rule',
   '/api/v1/runners/{id}': 'runner',
   '/api/v1/secrets/{name}': 'secret',
@@ -238,7 +241,7 @@ async function makeWorld(): Promise<World> {
     return id;
   });
   await make('token', () => post('/api/v1/tokens', { name: `sweep a ${tag}`, scopes: ['profile:read'], expiresInDays: 1 }, 'createToken', ['token', 'id'], ['id']));
-  await make('serviceKey', () => post('/api/v1/service-keys', { name: `sweep a ${tag}`, scopes: ['receipts:read'] }, 'createServiceKey', ['id']));
+  await make('serviceKey', () => post('/api/v1/service-keys', { name: `sweep a ${tag}`, scopes: SERVICE_KEY_SCOPES }, 'createServiceKey', ['id']));
   await make('device', async () => {
     const got = await deviceToken(c, { clientName: `sweep a ${tag}` });
     if (!got.token) throw new Error(got.why);
@@ -246,6 +249,8 @@ async function makeWorld(): Promise<World> {
     if (!id) throw new Error('no device listed');
     return id;
   });
+  // A's phone for push (ostrom-server#196): the console's browser session holds notifications:write.
+  await make('pushDevice', () => post('/api/v1/push-devices', { pushToken: `ExponentPushToken[sweep-${tag}]`, provider: 'expo', platform: 'ios' }, 'registerPushDevice', ['id']));
   const workflowId = `sweep-${tag}`;
   await make('workflow', () =>
     post(
@@ -270,11 +275,14 @@ async function makeWorld(): Promise<World> {
     const launch = await call(c, 'POST', '/api/v1/launches', { agent: 'claude', repo: 'acme/sweep' });
     if (launch.status >= 300) throw new Error(`launch → ${text(launch)}`);
     agent = { token: String(launch.body['agentToken']), org: org.id, from: address() };
+    values['launch'] = String(launch.body['launchId']);
     const id = randomUUID();
     const opened = await call(agent, 'POST', '/api/v1/sessions', { id, launchId: launch.body['launchId'], repo: 'acme/sweep', agent: 'claude', ...(values['package'] ? { packageDigest: values['package'] } : {}) });
     if (opened.status >= 300) throw new Error(`session → ${text(opened)}`);
     return field(opened.body, 'id') ?? id;
   });
+  // A governance write waits for a confirmation in the console (ostrom-server#146): A's pending one, by its id.
+  await make('confirmation', () => post('/api/v1/rules/bulk', {}, 'bulkUpdateRules', ['confirmationId']));
   const sha = 'a'.repeat(8) + tag.replace(/[^0-9a-f]/g, '0').padEnd(32, '0');
   await make('gate', async () => {
     if (!agent) throw new Error('no session');
@@ -444,6 +452,9 @@ const contractDoc = () => (docOnce ??= contract().doc);
 // ---------------------------------------------------------------------------------------------------------------------
 // The intruders: five credentials of organization B
 
+/** The only scopes a service key may hold since ostrom-server#158: the CI's report and rule reads. */
+const SERVICE_KEY_SCOPES = ['sessions:write', 'rules:read'];
+
 const scopesOf = async (caller: Caller): Promise<string[]> => {
   const r = await call(caller, 'GET', '/api/v1/tokens/scopes');
   const list = (r.body?.['scopes'] as { scope?: string }[] | undefined) ?? [];
@@ -490,7 +501,7 @@ const INTRUDERS: Record<string, () => Promise<Intruder | string>> = {
   },
   'service key': async () => {
     const b = await sideB();
-    const r = await call(b.caller, 'POST', '/api/v1/service-keys', { name: 'sweep b', scopes: await scopesOf(b.caller) });
+    const r = await call(b.caller, 'POST', '/api/v1/service-keys', { name: 'sweep b', scopes: SERVICE_KEY_SCOPES });
     const secret = field(r.body, 'secret');
     if (!secret) throw new Error(`POST /api/v1/service-keys → ${text(r)}`);
     return { name: 'service key', caller: { token: secret, from: address() }, org: b.org };

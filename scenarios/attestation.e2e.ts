@@ -88,7 +88,7 @@ async function sessionWithCheck(who: string) {
   const a = await owner(who);
   const workflowId = `att-${randomUUID().slice(0, 8)}`;
   const made = await call(a.c, 'POST', '/api/v1/workflows', {
-    id: workflowId, name: 'tests before push', domain: 'delivery', status: 'accepted', foundAt: new Date().toISOString(),
+    id: workflowId, name: 'tests before push to acme/att', domain: 'delivery', status: 'accepted', foundAt: new Date().toISOString(),
     nodes: [
       { id: 'start', kind: 'trigger', label: 'Session start' },
       { id: 'tests', kind: 'check', label: 'Tests', run: { command: 'npm test' } },
@@ -96,7 +96,9 @@ async function sessionWithCheck(who: string) {
     edges: [{ from: 'start', to: 'tests' }],
   });
   expect(made.status, JSON.stringify(made.body)).toBeLessThan(300);
-  const pkg = await call(a.c, 'GET', '/api/v1/packages/current');
+  // The package of the launch's repository: since ostrom-server#174 a session reports only under it. A repository's
+  // package holds the workflows that name it (PackageCompiler.workflowsFor), hence the repository in the name.
+  const pkg = await call(a.c, 'GET', '/api/v1/packages/current?repo=acme%2Fatt');
   expect(pkg.status, JSON.stringify(pkg.body)).toBe(200);
   const digest = String(pkg.body['digest'] ?? (pkg.body['package'] as Record<string, unknown> | undefined)?.['digest'] ?? '');
   // The server serves the digest as bare hex (run 41483058195); a `sha256:` prefix is accepted too.
