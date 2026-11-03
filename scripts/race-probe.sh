@@ -1,38 +1,52 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Measurement only (perf/race-memory-probe, never merged): the server container's memory around bursts of N
-# simultaneous requests (load/race-probe.js). The kernel's peak (VmHWM) is reset before each burst through
-# /proc/<pid>/clear_refs, so `peak` is the burst's own peak; a 50 ms sampler backs it up when the reset is refused.
+# Measurement only (perf/race-memory-probe, never merged): the server container's memory and threads around bursts of
+# N simultaneous requests (load/race-probe.js). VmHWM is reset before each burst (clear_refs), so `peak` is the burst's
+# own; a 50 ms sampler backs it up and snapshots the thread names when the thread count reaches its maximum.
 set -uo pipefail
 CONTAINER="${1:-ostrom-e2e-server}"
 PID=$(docker inspect -f '{{.State.Pid}}' "$CONTAINER")
 field() { sudo awk -v k="$1:" '$1==k {print $2}' "/proc/$PID/status" 2>/dev/null; }
 mib() { awk -v kb="${1:-0}" 'BEGIN { printf "%.1f", kb / 1024 }'; }
-echo "| stage | codes | med / p95 / max | before | peak (VmHWM) | peak (50 ms) | +0 s | +10 s | +30 s | threads before / peak |"
+# Thread names, trailing digits folded: "name×count" sorted by count.
+names() { sudo sh -c "cat /proc/$PID/task/*/comm" 2>/dev/null | sed 's/[-_ #]*[0-9]*$//' | sort | uniq -c | sort -rn | awk '{c=$1; $1=""; sub(/^ /,""); printf "%s×%s, ", $0, c}' | sed 's/, $//'; }
+NAMES=$(mktemp)
+echo "| stage | codes | 503 / Retry-After | med / p95 / max (ms) | before | peak (VmHWM) | peak (50 ms) | +10 s | +60 s | threads before / peak / +60 s |"
 echo "|---|---|---|---|---|---|---|---|---|---|"
 stage() { # $1 = kind, $2 = N
-  local before threads0 tmax=0 smax=0 out
+  local before threads0 out
   sleep 2
   before=$(field VmRSS); threads0=$(field Threads)
   echo 5 | sudo tee "/proc/$PID/clear_refs" >/dev/null 2>&1 || echo "clear_refs refused" >&2
-  ( m=0; t=0; while :; do r=$(field VmRSS); th=$(field Threads); [ "${r:-0}" -gt "$m" ] && m=$r; [ "${th:-0}" -gt "$t" ] && t=$th; echo "$m $t" > /tmp/probe-max; sleep 0.05; done ) &
+  names > /tmp/probe-names
+  ( m=0; t=0; while :; do r=$(field VmRSS); th=$(field Threads); [ "${r:-0}" -gt "$m" ] && m=$r; if [ "${th:-0}" -gt "$t" ]; then t=$th; names > /tmp/probe-names; fi; echo "$m $t" > /tmp/probe-max; sleep 0.05; done ) &
   local sampler=$!
   out=$(OSTROM_PROBE_KIND="$1" OSTROM_PROBE_VUS="$2" k6 run -q load/race-probe.js 2>&1 | grep '^PROBE' || true)
-  local a0; a0=$(field VmRSS)
   kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null
-  read -r smax tmax < /tmp/probe-max || true
+  local smax tmax; read -r smax tmax < /tmp/probe-max || true
   local hwm; hwm=$(field VmHWM)
+  local peaknames; peaknames=$(cat /tmp/probe-names)
   sleep 10; local a10; a10=$(field VmRSS)
-  sleep 20; local a30; a30=$(field VmRSS)
-  local codes med
+  sleep 50; local a60 t60 names60; a60=$(field VmRSS); t60=$(field Threads); names60=$(names)
+  local codes med ra s503
   codes=$(sed -n 's/.*codes=\[\([^]]*\)\].*/\1/p' <<< "$out")
+  ra=$(sed -n 's/.* retry_after=\([0-9]*\).*/\1/p' <<< "$out")
+  s503=$(grep -o '503x[0-9]*' <<< "$codes" | cut -dx -f2)
   med=$(sed -n 's/.* med=\([^ ]*\) p95=\([^ ]*\) max=\([^ ]*\).*/\1 \/ \2 \/ \3/p' <<< "$out")
-  echo "| $1 × $2 | ${codes:-$out} | $med | $(mib "$before") | $(mib "$hwm") | $(mib "$smax") | $(mib "$a0") | $(mib "$a10") | $(mib "$a30") | $threads0 / $tmax |"
-  docker inspect -f '{{.State.Running}}' "$CONTAINER" | grep -q true || { echo "server died: $(docker inspect -f '{{.State.ExitCode}} oom={{.State.OOMKilled}}' "$CONTAINER")"; exit 1; }
+  echo "| $1 × $2 | ${codes:-$out} | ${s503:-0} / ${ra:-?} | $med | $(mib "$before") | $(mib "$hwm") | $(mib "$smax") | $(mib "$a10") | $(mib "$a60") | $threads0 / $tmax / $t60 |"
+  echo "$1 × $2 | peak: $peaknames | +60 s: $names60" >> "$NAMES"
+  if ! docker inspect -f '{{.State.Running}}' "$CONTAINER" | grep -q true; then
+    echo "server died: $(docker inspect -f '{{.State.ExitCode}} oom={{.State.OOMKilled}}' "$CONTAINER")"
+    echo; echo "Thread names:"; cat "$NAMES"; exit 1
+  fi
 }
+stage race 100
+stage race 200
+stage race 500
 stage unauth 100
 stage unauth 200
 stage unauth 500
 stage read 100
 stage read 200
 stage read 500
+echo; echo "Thread names (trailing digits folded):"; cat "$NAMES"

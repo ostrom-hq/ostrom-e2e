@@ -14,6 +14,7 @@ import { approvalOf, approve, approverHeaders, askPushToMain, requireTokens, rou
 const KIND = __ENV.OSTROM_PROBE_KIND || 'race';
 const N = Number(__ENV.OSTROM_PROBE_VUS || 100);
 const codes = new Counter('probe_status');
+const retryAfter = new Counter('probe_retry_after');
 
 export const options = {
   scenarios: { probe: { executor: 'per-vu-iterations', vus: N, iterations: 1, maxDuration: '60s' } },
@@ -42,6 +43,7 @@ export default function (approval) {
   else if (KIND === 'unauth') r = http.post(route('answer', approval.id), JSON.stringify({ answer: 'approve', shownDigest: approval.shownDigest }), { headers: { 'content-type': 'application/json' }, tags: { name: 'probe' } });
   else exec.test.abort(`unknown OSTROM_PROBE_KIND ${KIND}`);
   codes.add(1, { status: String(r.status) });
+  if (r.headers['Retry-After'] !== undefined) retryAfter.add(1);
 }
 
 export function handleSummary(data) {
@@ -52,5 +54,6 @@ export function handleSummary(data) {
     .join(' ');
   const d = data.metrics['http_req_duration{name:probe}'] || data.metrics.http_req_duration;
   const p = (q) => (d && d.values[q] !== undefined ? d.values[q].toFixed(0) : '?');
-  return { stdout: `PROBE kind=${KIND} n=${N} codes=[${byStatus}] med=${p('med')}ms p95=${p('p(95)')}ms max=${p('max')}ms\n` };
+  const ra = data.metrics.probe_retry_after ? data.metrics.probe_retry_after.values.count : 0;
+  return { stdout: `PROBE kind=${KIND} n=${N} codes=[${byStatus}] retry_after=${ra} med=${p('med')}ms p95=${p('p(95)')}ms max=${p('max')}ms\n` };
 }
