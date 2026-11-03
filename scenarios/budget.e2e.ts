@@ -170,17 +170,29 @@ describe('E2E-BUDGET: the gateway keeps a model call within the monthly budget',
     expect(Number(refused.retryAfter), 'at most until tomorrow').toBeLessThanOrEqual(86_400);
     expect(provider.calls.length - before, 'the refused call never reached the provider').toBe(1);
 
-    // Another member of the same org is not held by that person's budget.
+    // Another member of the same org is not held by that person's budget. The shared account was created without
+    // `allowedMembers`, so it is lent to the whole org (SharedAccountPool.allowed, ostrom-server main): the gateway
+    // leases it to that member too, and the call is served and counted under them, not under the owner.
     const otherEmail = email('parc-047-other');
     expect((await invite(owner, org.id, [otherEmail])).status).toBeLessThan(300);
     const { person: other, accepted } = await join(otherEmail);
     expect(accepted.status, JSON.stringify(accepted.body)).toBeLessThan(300);
+    const otherId = String(((await membersOf(owner, org.id)) as Record<string, unknown>[]).find((m) => m['id'] !== self)?.['id']);
+    expect(otherId).toMatch(/^[0-9a-f-]{36}$/);
     const otherLaunch = await call({ ...other.caller, org: org.id }, 'POST', '/api/v1/launches', { agent: 'claude', repo: 'acme/parc-047' });
     expect(otherLaunch.status, JSON.stringify(otherLaunch.body)).toBe(201);
-    provider.usage = { input_tokens: 10, output_tokens: 1 };
+    const person = (b: Record<string, unknown>, id: string) =>
+      Number(((b['byPerson'] ?? []) as Record<string, unknown>[]).find((l) => l['key'] === id)?.['usd'] ?? 0);
+    const ownerSpent = person(await call(c, 'GET', '/api/v1/spending?period=month').then((r) => r.body), self);
+    expect(ownerSpent, 'the owner\u2019s $1.50').toBeGreaterThanOrEqual(1.5);
+    // $0.50 billed ($5 per million input tokens) to the other member.
+    provider.usage = { input_tokens: 100_000, output_tokens: 1 };
     const passes = await infer(String(otherLaunch.body['agentToken']), 1, hello);
-    expect(passes.status, JSON.stringify(passes.body)).not.toBe(429);
-    expect(passes.error.message ?? '').not.toMatch(/budget/i);
+    expect(passes.status, JSON.stringify(passes.body)).toBe(200);
+    expect(provider.calls.length - before, 'served by the provider, on the shared account').toBe(2);
+    const counted = await readUntil(c, '/api/v1/spending?period=month', (b) => person(b, otherId) >= 0.5);
+    expect(person(counted, otherId), JSON.stringify(counted['byPerson'])).toBeGreaterThanOrEqual(0.5);
+    expect(person(counted, self), 'nothing more under the owner').toBe(ownerSpent);
 
     // « warn », the same $1 a day: the call goes through although today is past it.
     const warn = await call(c, 'PUT', '/api/v1/budgets', { scope: 'member', subject: self, usdPerDay: 1, hardStop: false });
