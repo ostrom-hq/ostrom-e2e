@@ -53,10 +53,16 @@ describe.skipIf(OFF !== '')(title, () => {
       // A quoted path with a space, from a session opened in that checkout: the gate of main.
       ...(await attempts(spaced, [`git -C "${spaced}" push origin HEAD:main`])),
     ];
+    // Each one is refused before it runs: either it asks for the gate of main (a request to say yes to), or the CLI
+    // denies it outright, without asking, because it cannot tie a yes to what git would really send (`-c …`,
+    // `--git-dir`: « the action was not run »). Never through.
     for (const r of results) {
       expect(r.blocked, r.why).toBe(true);
-      expect(r.gate, r.why).toBeDefined();
+      expect(r.gate !== undefined || /action was not run/.test(r.why), r.why).toBe(true);
     }
+    // The plain forms ask for the gate.
+    expect(results[0]?.gate, results[0]?.why).toBeDefined();
+    expect(results[2]?.gate, results[2]?.why).toBeDefined();
     // From a session opened in another checkout, the same push is denied outright: the session's gates do not cover it.
     const [elsewhere] = await attempts(sb.work, [`git -C "${spaced}" push origin HEAD:main`]);
     expect(elsewhere?.blocked, elsewhere?.why).toBe(true);
