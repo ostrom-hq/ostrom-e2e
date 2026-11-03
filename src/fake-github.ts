@@ -5,7 +5,7 @@
 // (the App's own JWT, installation tokens, the web-flow code of the install's return and `GET /user/installations`),
 // pull requests, compare, check runs, and signed webhooks sent to the Ostrom server. Every request is recorded for the
 // scenario to assert on.
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -20,6 +20,11 @@ export interface FakePull {
   readonly headSha: string;
   readonly baseRef: string;
   readonly headRef: string;
+  /** The GitHub login that opened it (GitHub's `user.login`); `octocat` when the scenario does not care. */
+  readonly author?: string;
+  /** GitHub's `state`: `open` unless the scenario closes it. */
+  readonly state?: 'open' | 'closed';
+  readonly merged?: boolean;
 }
 
 export interface Recorded {
@@ -70,6 +75,10 @@ export class FakeGitHub {
   private readonly webCodes = new Map<string, string>();
   private server: Server | undefined;
   private nextId = 1;
+  // Each instance numbers its users from its own base: the scenarios share one server and its database, so two fakes
+  // started by two files must never give one GitHub id to two logins (a later file would find its user linked to an
+  // earlier file's person).
+  private readonly idBase = 1000 + Math.floor(Math.random() * 100_000) * 1000;
   url = '';
 
   readonly approveAfter: number;
@@ -82,7 +91,7 @@ export class FakeGitHub {
 
   /** Registers a user; returns the token that identifies them. */
   user(login: string, token = `gho_${login}`): string {
-    const id = this.ids.get(login) ?? 1000 + this.ids.size;
+    const id = this.ids.get(login) ?? this.idBase + this.ids.size;
     this.ids.set(login, id);
     this.tokens.set(token, { login, id });
     return token;
@@ -95,7 +104,7 @@ export class FakeGitHub {
   oauthCode(login: string, email: string): string {
     const code = `code_${this.nextId++}`;
     this.codes.set(code, login);
-    const id = this.ids.get(login) ?? 1000 + this.ids.size;
+    const id = this.ids.get(login) ?? this.idBase + this.ids.size;
     this.ids.set(login, id);
     this.tokens.set(`gho_${login}`, { login, id, email });
     return code;
@@ -149,7 +158,7 @@ export class FakeGitHub {
     const signature = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
     const r = await fetch(target, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-github-event': event, 'x-github-delivery': `d-${this.nextId++}`, 'x-hub-signature-256': signature },
+      headers: { 'content-type': 'application/json', 'x-github-event': event, 'x-github-delivery': randomUUID(), 'x-hub-signature-256': signature },
       body,
     });
     return r.status;
@@ -220,7 +229,10 @@ export class FakeGitHub {
     const pull = /^pulls\/(\d+)$/.exec(rest);
     if (method === 'GET' && pull) {
       const p = this.pulls.get(`${repo}#${pull[1]}`);
-      return p ? [200, { number: p.number, head: { sha: p.headSha, ref: p.headRef }, base: { ref: p.baseRef } }] : [404, { message: 'Not Found' }];
+      // As GitHub's: the server reads `state`, `merged` and `user.login` besides the head and the base.
+      return p
+        ? [200, { number: p.number, state: p.state ?? 'open', merged: p.merged ?? false, head: { sha: p.headSha, ref: p.headRef }, base: { ref: p.baseRef }, user: { login: p.author ?? 'octocat' } }]
+        : [404, { message: 'Not Found' }];
     }
     const cmp = /^compare\/(.+)$/.exec(rest);
     if (method === 'GET' && cmp) {
