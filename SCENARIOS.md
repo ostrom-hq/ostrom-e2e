@@ -3565,6 +3565,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur
 - Source : `demo/PARCOURS.md` 4.3
 - Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
 
 ### E2E-PARC-025 — 5.2 Lancement : jeton d'agent, session tenue en vie, vue, close, rouverte
 
@@ -3654,6 +3655,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (l'onglet Activity de l'app)
 - Source : `demo/PARCOURS.md` 6.3
 - Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
 
 ### E2E-PARC-034 — 6.4 Usage d'une org neuve
 
