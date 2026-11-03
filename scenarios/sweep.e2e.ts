@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // E2E-SWEEP : isolation between organizations, generated from the contract (second security audit, consigne du 02/11).
-// Every route the server serves (ostrom-core's served-routes.txt, plus what scripts/served-routes.py reads in the
-// server under test) gets a case from its OpenAPI operation (src/sweep.ts). A member of organization B calls each one
-// on A's resources, A's real ids and `Ostrom-Org: A`, and again with B's own organization named; each answer is set
-// beside the one a missing resource gets. Five kinds of caller: browser session, personal token, CLI token, the
-// elevated `osg_` token of `ostrom login --admin`, service key. A served route without a case fails E2E-SWEEP-001, so a
-// new route cannot be forgotten. A leak not in KNOWN fails its caller's scenario; a known leak that stops happening too.
+// Every route the server serves (ostrom-core's served-routes.txt, what scripts/served-routes.py reads in the server
+// under test, and every operation the contract marks `served`) gets a case from its OpenAPI operation (src/sweep.ts). A
+// member of organization B calls each one on A's resources, A's real ids and `Ostrom-Org: A`, and again with B's own
+// organization named; each answer is set beside the one a missing resource gets. Five kinds of caller: browser session,
+// personal token, CLI token, the elevated `osg_` token of `ostrom login --admin`, service key. A served route without a
+// case fails E2E-SWEEP-001, so a new route cannot be forgotten. A leak not in KNOWN fails its caller's scenario; a
+// known leak that stops happening too.
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
 import { type Caller, headersOf } from '../src/isolation.ts';
-import { type Answer, type Case, type CaseClass, type Leak, fill, judge, leakKey, mimic, operations, parseServed, plan, reconcile, sample } from '../src/sweep.ts';
+import { type Answer, type Case, type CaseClass, type Leak, fill, judge, leakKey, mergeServed, mimic, operations, parseServed, plan, reconcile, sample, servedInContract } from '../src/sweep.ts';
 import { SERVER_URL } from './env.ts';
 import { receiptIdIn } from './lib.ts';
 import { type Org, type Person, address, call, email, invite, orgOf, orgsUnavailable, profileOf, signIn, url } from './org.ts';
@@ -132,7 +133,8 @@ const CONTRACT_MISSING = SERVED_FILE === '' || OPENAPI_FILE === '' ? 'no OSTROM_
 
 function contract(): Contract {
   const doc: unknown = JSON.parse(readFileSync(OPENAPI_FILE, 'utf8'));
-  const served = parseServed(readFileSync(SERVED_FILE, 'utf8'));
+  // The served list and the scan of the server, then every operation the contract marks served (a route the scan missed).
+  const served = mergeServed(parseServed(readFileSync(SERVED_FILE, 'utf8')), servedInContract(doc));
   return { doc, ...plan(served, operations(doc), PARAM_KINDS, SKIPPED) };
 }
 
