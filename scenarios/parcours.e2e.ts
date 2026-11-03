@@ -8,8 +8,9 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { Caller } from '../src/isolation.ts';
 import { invitationToken } from '../src/mail.ts';
+import { FakeTokens } from '../src/fake-tokens.ts';
 import { isServed } from '../src/probe.ts';
-import { MAIL_DIR, SERVER_URL } from './env.ts';
+import { FAKE_TOKENS_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
 import { type Org, type Person, call, email, invite, join, orgOf, orgsUnavailable, profileOf, signIn } from './org.ts';
 
 const ORGS = await orgsUnavailable();
@@ -92,6 +93,7 @@ const W009 = (await needs(['POST', '/api/v1/secrets'], ['GET', '/api/v1/secrets'
 const W010 = await needs(['POST', '/api/v1/tokens'], ['GET', '/api/v1/tokens'], ['POST', '/api/v1/tokens/{id}/rotate'], ['DELETE', '/api/v1/tokens/{id}']);
 const W011 = await needs(['GET', '/api/v1/service-keys'], ['POST', '/api/v1/service-keys'], ['GET', '/api/v1/devices'], ['GET', '/api/v1/auth/sessions']);
 const W039 = (await needs(['GET', '/api/v1/groups'], ['POST', '/api/v1/groups'], ['GET', '/api/v1/groups/{id}'], ['PATCH', '/api/v1/groups/{id}'], ['DELETE', '/api/v1/groups/{id}'], ['PUT', '/api/v1/groups/{id}/members/{id}'], ['DELETE', '/api/v1/groups/{id}/members/{id}'], ['POST', '/api/v1/groups/{id}/members/{id}/pause'])) || ORG64 || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
+const W043 = (await needs(['POST', '/api/v1/groups'], ['POST', '/api/v1/groups/{id}/members/{id}/pause'], ['POST', '/api/v1/secrets'], ['POST', '/api/v1/accounts'], ['PATCH', '/api/v1/accounts/{id}'], ['POST', '/api/v1/tokens'], ['POST', '/api/v1/inference/v1/messages'])) || ORG64 || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '') || (FAKE_TOKENS_PORT <= 0 ? 'no fake provider (OSTROM_E2E_FAKE_TOKENS_PORT)' : '');
 const W041 = (await needs(['GET', '/api/v1/orgs/{id}'], ['PATCH', '/api/v1/orgs/{id}'], ['POST', '/api/v1/orgs/{id}/members/invites'])) || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
 const W042 = (await needs(['DELETE', '/api/v1/orgs/{id}'], ['PATCH', '/api/v1/orgs/{id}'], ['GET', '/api/v1/orgs/{id}/members'], ['POST', '/api/v1/orgs/{id}/members/invites'], ['POST', '/api/v1/secrets'], ['POST', '/api/v1/tokens'])) || ORG64 || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
 
@@ -302,6 +304,79 @@ describe('E2E-PARC: 2. organization setup', () => {
     expect((await call(a.c, 'GET', `/api/v1/groups/${id}`)).status).toBe(404);
     await needsCredential('GET', '/api/v1/groups');
     await needsCredential('POST', '/api/v1/groups', { name });
+  }, T);
+
+  // An account lent to a group (`sharedWith: group:<id>`, ostrom-server#245): the gateway serves it to the group's members
+  // who are not paused and to no one else, its owner included; a group of another organization is refused. The fake
+  // provider of src/fake-tokens.ts stands for Anthropic's API behind the gateway, so a served call is seen there.
+  it.skipIf(W043 !== '')(named('E2E-PARC-043 — 2.8 an account lent to a group serves its members who are not paused, and no one else, not even its owner', W043), async () => {
+    const provider = await new FakeTokens().start(FAKE_TOKENS_PORT);
+    try {
+      const a = await owner('parc-043');
+      const member = async (who: string) => {
+        const address = email(who);
+        expect((await invite(a.person, a.org.id, [address])).status).toBeLessThan(300);
+        const { person, accepted } = await join(address);
+        expect(accepted.status, JSON.stringify(accepted.body)).toBeLessThan(300);
+        return { c: { ...person.caller, org: a.org.id } as Caller, login: (await profileOf(person.caller)).login };
+      };
+      const inside = await member('parc-043-in');
+      const outside = await member('parc-043-out');
+      // Each person's agent reaches the gateway with a personal token of `inference:use`.
+      const tokenOf = async (c: Caller) => {
+        const pat = await call(c, 'POST', '/api/v1/tokens', { name: 'e2e parc-043', scopes: ['inference:use'], expiresInDays: 1 });
+        expect(pat.status, JSON.stringify(pat.body)).toBe(201);
+        return String(pat.body['secret']);
+      };
+      const [insideToken, outsideToken, ownerToken] = [await tokenOf(inside.c), await tokenOf(outside.c), await tokenOf(a.c)];
+      // Served: the call answers 200 and reaches the provider; refused: neither.
+      const served = async (token: string) => {
+        const before = provider.calls.length;
+        const r = await call({ token }, 'POST', '/api/v1/inference/v1/messages', { model: 'claude-sonnet-4-5', max_tokens: 16, messages: [{ role: 'user', content: 'hello' }] });
+        const reached = provider.calls.length > before;
+        expect(reached, `${r.status} ${JSON.stringify(r.body)}`).toBe(r.status === 200);
+        return reached ? (provider.calls.at(-1)?.authorization ?? '') : '';
+      };
+
+      const made = await call(a.c, 'POST', '/api/v1/groups', { name: `Parc 043 ${randomUUID().slice(0, 6)}`, members: [inside.login] });
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      const group = `group:${made.body['id'] as string}`;
+      const value = `sk-ant-oat01-parc043-${randomUUID()}`;
+      const secret = `PARC043_${randomUUID().slice(0, 8).toUpperCase()}`;
+      expect((await call(a.c, 'POST', '/api/v1/secrets', { name: secret, value })).status).toBeLessThan(300);
+      const lent = await call(a.c, 'POST', '/api/v1/accounts', { provider: 'anthropic', label: 'Max of parc-043', credentialSecret: secret, sharedWith: [group] });
+      expect(lent.status, JSON.stringify(lent.body)).toBe(201);
+      expect(lent.body['sharedWith']).toEqual([group]);
+      const account = lent.body['id'] as string;
+      expect((await call(a.c, 'GET', `/api/v1/groups/${made.body['id'] as string}`)).body['accounts']).toEqual([account]);
+
+      expect(await served(insideToken), 'a member of the group').toContain(value);
+      expect(await served(outsideToken), 'a member outside the group').toBe('');
+      expect(await served(ownerToken), 'its owner: lent to the group only').toBe('');
+
+      const pause = `/api/v1/groups/${made.body['id'] as string}/members/${inside.login}/pause`;
+      expect((await call(a.c, 'POST', pause, { until: '2099-01-01T00:00:00Z' })).status).toBe(204);
+      expect(await served(insideToken), 'paused in the group').toBe('');
+      // The pause is over: the member is served again.
+      expect((await call(a.c, 'POST', pause, { until: new Date(Date.now() - 1_000).toISOString() })).status).toBe(204);
+      expect(await served(insideToken), 'back from the pause').toContain(value);
+
+      // A group of another organization lends nothing: 400, and the account keeps its group.
+      const b = await owner('parc-043-b');
+      const theirs = await call(b.c, 'POST', '/api/v1/groups', { name: 'Parc 043 theirs' });
+      expect(theirs.status, JSON.stringify(theirs.body)).toBe(201);
+      const foreign = `group:${theirs.body['id'] as string}`;
+      expect((await call(a.c, 'PATCH', `/api/v1/accounts/${account}`, { sharedWith: [foreign] })).status).toBe(400);
+      expect((await call(a.c, 'POST', '/api/v1/accounts', { provider: 'anthropic', label: 'Max of parc-043 b', credentialSecret: secret, sharedWith: [foreign] })).status).toBe(400);
+      expect((await call(a.c, 'PATCH', `/api/v1/accounts/${account}`, { sharedWith: ['group:not-an-id'] })).status).toBe(400);
+      const kept = itemsOf((await call(a.c, 'GET', '/api/v1/accounts')).body).find((x) => x['id'] === account);
+      expect(kept?.['sharedWith']).toEqual([group]);
+      expect((await call(b.c, 'GET', `/api/v1/groups/${theirs.body['id'] as string}`)).body['accounts']).toEqual([]);
+      expect((await call(b.c, 'PATCH', `/api/v1/accounts/${account}`, { sharedWith: [foreign] })).status).toBe(404);
+      expect(await served(insideToken), 'still lent to its group').toContain(value);
+    } finally {
+      await provider.stop();
+    }
   }, T);
 
   it.skipIf(W009 !== '')(named('E2E-PARC-009 — 2.10 a secret is written, rotated and deleted; its value is never read back', W009), async () => {
