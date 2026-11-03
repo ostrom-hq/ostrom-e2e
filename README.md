@@ -95,8 +95,9 @@ through the ingress; its job summary gives p95/p99, errors and requests/s per sc
 every pod. It also loads the inference gateway and the MCP relay against fake upstreams (`src/fake-upstreams.ts`, in a
 namespace of their own; `scripts/relay-load-setup.ts` makes the member, its token and the MCP servers): the gateway's
 overhead against the fake provider called directly, at p50, p95 and p99 of the first byte and of the end, JSON and
-stream (`load/inference.js`, under 15 ms at p95); 50 then 200 streams open at once and the memory each costs, with no
-server restart (`load/streams.js`); a client that leaves mid-stream, whose upstream connection and usage must be
+stream (`load/inference.js`, under 15 ms at p95); a ramp of 50 to 300 streams open at once (`STREAM_RAMP`) and the
+memory each costs, with no server restart: each stream ends whole or, past what the replicas hold
+(`OSTROM_GATEWAY_MAX_OPEN_CALLS`), is refused at once as overloaded (`load/streams.js`); a client that leaves mid-stream, whose upstream connection and usage must be
 released within 2 s (`load/cut.js`); and MCP servers that answer at once, late, never or not at all, at the same time
 (`load/mcp.js`). `scripts/relay-summary.ts` writes the overhead and memory tables. Each of these phases starts on Ready
 server pods and fails on a restart of its own, with the crashed container's last lines (`scripts/server-pods.sh`).
@@ -104,7 +105,8 @@ The workflow runs in two legs, each on its own runner and kind cluster: `gates` 
 and the race) and `relay` (the smoke, the journeys, then the gateway and the relay). Both build the server image and
 open the port-forward and the mail directory of the sign-in; only `gates` runs `scripts/load-setup.ts`, only `relay` the
 CA and the fakes. A crash in one never decides the other's numbers. Their artifacts are `chart-load-k6` and
-`chart-load-k6-relay`; a dispatch may run one leg only (`pass`). The relay leg also keeps each server container's log,
+`chart-load-k6-relay`; a dispatch may run one leg only (`pass`), and build another ostrom-server ref (`server_ref`, a PR's branch) to prove a
+fix before it merges. The relay leg also keeps each server container's log,
 followed across restarts, and its open descriptors every second (`scripts/server-watch.sh`, in `server-watch/`).
 
 ## Documentation

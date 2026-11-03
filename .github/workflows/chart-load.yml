@@ -22,6 +22,10 @@ on:
         type: choice
         options: [both, gates, relay]
         default: both
+      server_ref:
+        description: "ostrom-server ref to build and load (a PR's branch, to prove a fix before it merges)"
+        type: string
+        default: main
 # A load pass gates nothing: a newer run of the same ref replaces the one in progress (runners are scarce).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -42,17 +46,19 @@ jobs:
     env:
       NS: ostrom
       CLUSTER: ostrom-load
+      # The open streams asked for, phase by phase (load/streams.js).
+      STREAM_RAMP: "50 100 150 200 300"
       API_URL: http://api.ostrom.test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
       # The server needs ostrom-core next to its checkout (ostrom.core.local): GitHub Packages of another repository
       # are not readable from here, like in ostrom-server's own CI (JOURNAL 05:50).
-      - name: Checkout ostrom-server main
+      - name: Checkout ostrom-server (main, or the dispatch's server_ref)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-server
-          ref: main
+          ref: ${{ inputs.server_ref || 'main' }}
           ssh-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           path: .ostrom/server
           persist-credentials: false
@@ -71,7 +77,7 @@ jobs:
         run: printf '\nostrom.core.local=true\n' >> .ostrom/server/gradle.properties
       # The action builds the image and then starts it against `database-url`; only the image is wanted here, so the
       # start is let fail (nothing listens there, `required: "false"`) and the next step checks the image.
-      - name: Server image (ostrom-server main, its own Dockerfile)
+      - name: Server image (that ostrom-server checkout, its own Dockerfile)
         id: server
         uses: ./.github/actions/server
         with:
@@ -443,21 +449,23 @@ jobs:
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export mcp-summary.json load/mcp.js || rc=$?
           scripts/server-pods.sh crashed "$before" || rc=1
           exit "$rc"
-      # Each phase's start and end go to phases.txt: scripts/relay-summary.ts reads the pods' memory in each window. A
-      # restart of a server pod (an OOM kill at the chart's 256 Mi, or a crash) fails the phase, and the 200 streams
-      # then start on Ready pods again.
-      - name: k6 open streams (50, then 200, a minute each) and the pods' memory
+      # Each phase's start and end go to phases.txt, with the streams held open (refused ones hold nothing):
+      # scripts/relay-summary.ts reads the pods' memory in each window. The ramp goes past what two replicas hold
+      # (OSTROM_GATEWAY_MAX_OPEN_CALLS each): the last phases are refused in part, never cut. A restart of a server pod
+      # (an OOM kill at the chart's 256 Mi, or a crash) fails the phase, and the next one starts on Ready pods again.
+      - name: k6 open streams (a ramp from 50 to 300, a minute each) and the pods' memory
         if: always() && steps.relaysetup.outputs.inference == 'true'
         env:
           OSTROM_URL: ${{ env.API_URL }}
         run: |
           rc=0
-          for n in 50 200; do
+          for n in $STREAM_RAMP; do
             scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts)
             start=$(date +%s)
             k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export "streams-$n-summary.json" \
               -e OSTROM_LOAD_STREAMS="$n" load/streams.js || rc=$?
-            echo "streams-$n $n $start $(date +%s)" >> phases.txt
+            held=$(jq '.metrics.streams_whole.count // 0' "streams-$n-summary.json" 2>/dev/null || echo 0)
+            echo "streams-$n ${held:-0} $start $(date +%s)" >> phases.txt
             sleep 30
             scripts/server-pods.sh crashed "$before" || rc=1
           done
@@ -490,9 +498,10 @@ jobs:
               echo
               echo "gateway and relay: not in this leg"
             else
+              ramp=(); for n in $STREAM_RAMP; do ramp+=("$n streams=streams-$n-summary.json"); done
               node scripts/k6-summary.ts "smoke (health, instance)=smoke-summary.json" "chart journeys=journeys-summary.json" \
                 "inference=inference-summary.json" "cut streams=cut-summary.json" "mcp relay=mcp-summary.json" \
-                "50 streams=streams-50-summary.json" "200 streams=streams-200-summary.json" || echo "(no k6 summary)"
+                "${ramp[@]}" || echo "(no k6 summary)"
               echo
               echo "gateway and relay: inference $RELAY_INFERENCE, mcp $RELAY_MCP${RELAY_REASON:+ ($RELAY_REASON)}"
               echo

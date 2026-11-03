@@ -9,7 +9,8 @@
 // With `--check`, exits 1 when an overhead at p95 is over OSTROM_LOAD_MAX_OVERHEAD_MS (15), or cannot be computed
 // (a series or a statistic missing from the summary): a check that checks nothing is not a pass.
 // Usage: node scripts/relay-summary.ts [--check] inference-summary.json top-samples.txt phases.txt [replicas]
-//   phases.txt: one `<name> <streams> <start epoch s> <end epoch s>` line per phase of load/streams.js.
+//   phases.txt: one `<name> <streams held open> <start epoch s> <end epoch s>` line per phase of load/streams.js (the
+//   streams asked for are in the name, `streams-<asked>`; those refused as overloaded hold nothing).
 import { existsSync, readFileSync } from 'node:fs';
 
 type Trend = Record<string, number | undefined>;
@@ -73,9 +74,10 @@ if (existsSync(samplesFile) && existsSync(phasesFile)) {
       if (during.length === 0) continue;
       const base = rest.length ? Math.min(...rest) : Math.min(...during);
       const peak = Math.max(...during);
-      const perStream = ((peak - base) * 1024) / (Number(streams) / replicas);
+      const held = Number(streams);
+      const perStream = held > 0 ? (((peak - base) * 1024) / (held / replicas)).toFixed(0) : 'n/a (none held)';
       // Under its rest: the pod restarted in the phase, and the figure means nothing.
-      out += `| ${name} (${streams} streams) | ${pod} | ${base} | ${peak} | ${peak < base ? 'n/a (restarted)' : perStream.toFixed(0)} |\n`;
+      out += `| ${name} (${streams} held open) | ${pod} | ${base} | ${peak} | ${peak < base ? 'n/a (restarted)' : perStream} |\n`;
     }
   }
   out += '\n';
