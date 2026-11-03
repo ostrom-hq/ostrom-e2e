@@ -139,8 +139,9 @@ const JSON_TYPE = { 'content-type': 'application/json' };
 
 /** The fake provider and the fake MCP servers, on one plain HTTP port and, given a key and a certificate, one HTTPS port. */
 export class FakeUpstreams {
-  readonly provider: Counts = zero();
-  readonly mcp: Counts = zero();
+  // Replaced, not zeroed, by [reset]: a call still open keeps counting in the counts it started in.
+  provider: Counts = zero();
+  mcp: Counts = zero();
   private readonly servers: (Server | HttpsServer)[] = [];
   private readonly slowMs: number;
 
@@ -150,7 +151,8 @@ export class FakeUpstreams {
 
   /** Listens on `port` (HTTP) and, with `tls`, on `tlsPort` (HTTPS); returns the URLs. */
   async start(port = 0, tls?: { key: string; cert: string; port?: number }, host = '127.0.0.1'): Promise<{ http: string; https?: string }> {
-    const handler = (req: IncomingMessage, res: ServerResponse) => void this.handle(req, res);
+    // A client gone in the middle of its request body rejects the read: the answer is dropped, the fakes go on.
+    const handler = (req: IncomingMessage, res: ServerResponse) => void this.handle(req, res).catch(() => res.destroy());
     const plain = await this.listen(createServer(handler), port, host);
     if (!tls) return { http: `http://${host}:${plain}` };
     const secure = await this.listen(createTlsServer({ key: tls.key, cert: tls.cert }, handler), tls.port ?? 0, host);
@@ -168,8 +170,8 @@ export class FakeUpstreams {
   }
 
   reset(): void {
-    Object.assign(this.provider, zero());
-    Object.assign(this.mcp, zero());
+    this.provider = zero();
+    this.mcp = zero();
   }
 
   private async listen(server: Server | HttpsServer, port: number, host: string): Promise<number> {
@@ -224,11 +226,15 @@ export class FakeUpstreams {
     call.after(shape.ttfbMs, () => {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
       call.write(frames.head);
+      if (shape.gapMs === 0) {
+        // A loop, not a recursion: 10 000 gapless chunks would overflow the stack.
+        for (let left = shape.chunks; left > 0; left--) call.write(frames.delta);
+        return call.finish(200, {}, frames.tail);
+      }
       const next = (left: number): void => {
         if (left === 0) return call.finish(200, {}, frames.tail);
         call.write(frames.delta);
-        if (shape.gapMs === 0) next(left - 1);
-        else call.after(shape.gapMs, () => next(left - 1));
+        call.after(shape.gapMs, () => next(left - 1));
       };
       next(shape.chunks);
     });
@@ -240,6 +246,8 @@ export class FakeUpstreams {
     const answer = (status: number, out: unknown, headers: Record<string, string> = JSON_TYPE) =>
       call.after(mode === 'slow' ? this.slowMs : 0, () => call.finish(status, headers, out === undefined ? '' : JSON.stringify(out)));
     if (method === 'DELETE') return answer(204, undefined, {});
+    // No SSE stream on GET: 405, as Streamable HTTP says, so a client never takes the server for a broken one.
+    if (method === 'GET') return answer(405, { error: 'no SSE stream' }, { ...JSON_TYPE, allow: 'POST, DELETE' });
     const rpc = obj(body);
     const params = obj(rpc['params']);
     const id = rpc['id'];

@@ -110,7 +110,7 @@ describe('FakeUpstreams provider', () => {
 
   it('streams a long answer with no gap without growing the stack', async () => {
     const long = await post('/v1/messages', { model: 'm', stream: true, ostrom_fake: { chunks: 10_000, gapMs: 0 } });
-    expect(long.text.split('content_block_delta').length - 1).toBe(10_000);
+    expect(long.text.split('event: content_block_delta').length - 1).toBe(10_000);
     expect(long.text).toContain('message_stop');
   });
 

@@ -76,14 +76,18 @@ jobs:
           docker images ostrom-server:e2e --format 'ostrom-server:e2e {{.Size}} (ostrom-server@'"$SHA"')'
       # The MCP relay reaches HTTPS servers only: the fake MCP servers get a certificate of a CA made for this run, and
       # the bench runs the server image with that CA appended to its system bundle (the binary is the same).
+      # It never stops the job: on a failure the bench runs the server image as built, and the relay setup skips the MCP
+      # passes with the reason (the server does not trust the fakes' certificate).
       - name: Bench CA, the fake MCP servers' certificate, and the server image that trusts it
+        continue-on-error: true
         run: |
+          docker tag ostrom-server:e2e ostrom-server:e2e-load
           d="$RUNNER_TEMP/fakes-tls"; mkdir -p "$d"; cd "$d"
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=Ostrom load bench CA" -keyout ca.key -out ca.crt \
-            -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
-          openssl req -newkey rsa:2048 -nodes -subj "/CN=fakes.ostrom-fakes.svc" -keyout tls.key -out tls.csr 2>/dev/null
+            -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign"
+          openssl req -newkey rsa:2048 -nodes -subj "/CN=fakes.ostrom-fakes.svc" -keyout tls.key -out tls.csr
           printf 'subjectAltName=DNS:fakes.ostrom-fakes.svc,DNS:fakes.ostrom-fakes.svc.cluster.local\nextendedKeyUsage=serverAuth\n' > ext.cnf
-          openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 1 -out tls.crt -extfile ext.cnf 2>/dev/null
+          openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 1 -out tls.crt -extfile ext.cnf
           id=$(docker create ostrom-server:e2e)
           # Copied out read-only, as in the image: the bench's bundle is a new file.
           docker cp "$id:/etc/ssl/certs/ca-certificates.crt" system.crt
@@ -151,9 +155,13 @@ jobs:
       # src/fake-upstreams.ts run by Node from a ConfigMap. Reached by the server (an extraEgress rule of the chart's
       # NetworkPolicy, below) and by k6 through the ingress (fake.ostrom.test), the baseline of the gateway's overhead.
       - name: Fake upstreams of the gateway and the MCP relay (namespace ostrom-fakes)
+        # Like the CA: a failure here skips the relay passes (their setup gives the reason), never the passes before.
+        continue-on-error: true
         run: |
-          docker pull -q node:24-alpine
-          kind load docker-image node:24-alpine --name "$CLUSTER"
+          # node:24-alpine pinned by digest (2026-11-03), loaded into kind under a local tag.
+          docker pull -q node@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
+          docker tag node@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 ostrom-fakes-node:24
+          kind load docker-image ostrom-fakes-node:24 --name "$CLUSTER"
           kubectl create namespace ostrom-fakes
           kubectl -n ostrom-fakes create secret tls fakes-tls --cert="$RUNNER_TEMP/fakes-tls/tls.crt" --key="$RUNNER_TEMP/fakes-tls/tls.key"
           echo '{"type":"module"}' > "$RUNNER_TEMP/fakes-package.json"
@@ -172,7 +180,7 @@ jobs:
                 securityContext: { runAsNonRoot: true, runAsUser: 1000, seccompProfile: { type: RuntimeDefault } }
                 containers:
                   - name: fakes
-                    image: node:24-alpine
+                    image: ostrom-fakes-node:24
                     imagePullPolicy: IfNotPresent
                     command: ["node", "/app/bin/fake-upstreams.ts"]
                     env:
@@ -437,7 +445,9 @@ jobs:
         env:
           SERVER_SHA: ${{ steps.server.outputs.sha }}
           GATES: ${{ steps.loadsetup.outputs.ready == 'true' && 'run' || steps.loadsetup.outputs.reason }}
-          RELAY: ${{ steps.relaysetup.outputs.reason || (steps.relaysetup.outputs.inference == 'true' && 'run') || '' }}
+          RELAY: >-
+            inference ${{ steps.relaysetup.outputs.inference == 'true' && 'run' || 'not run' }},
+            mcp ${{ steps.relaysetup.outputs.mcp == 'true' && 'run' || 'not run' }}${{ steps.relaysetup.outputs.reason && format(' ({0})', steps.relaysetup.outputs.reason) || '' }}
         run: |
           {
             echo "### Chart load pass (kind, ingress-nginx, 2 server replicas)"
