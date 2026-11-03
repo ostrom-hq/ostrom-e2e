@@ -831,6 +831,10 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
 
 const W021 = (await needs(['GET', '/api/v1/workflows'], ['POST', '/api/v1/workflows'], ['PUT', '/api/v1/workflows/{id}'], ['DELETE', '/api/v1/workflows/{id}'], ['GET', '/api/v1/packages/current'])) || ACTORS;
 const W022 = await needs(['GET', '/api/v1/workflows/{id}/runs'], ['POST', '/api/v1/workflows/{id}/runs'], ['GET', '/api/v1/runs']);
+// The engine that plays a run comes with the run's own routes (ostrom-server, feat/workflow-run-engine): before them a
+// run stays queued; with them a lone trigger ends succeeded, and an agent then a gate are played to the end.
+const PLAYED = (await needs(['GET', '/api/v1/runs/{id}'], ['POST', '/api/v1/runs/{id}/cancel'])) === '';
+const W022P = W022 || (PLAYED ? '' : 'not served yet: GET /api/v1/runs/{id}, POST /api/v1/runs/{id}/cancel') || ACTORS;
 const W023 = (await needs(['POST', '/api/v1/automations'], ['POST', '/api/v1/automations/{id}/enable'], ['PUT', '/api/v1/automations/{id}'], ['POST', '/api/v1/automations/{id}/run'], ['POST', '/api/v1/automations/{id}/webhook/rotate-secret'], ['DELETE', '/api/v1/automations/{id}'])) || ORG64;
 const W024 = (await needs(['POST', '/api/v1/waits'], ['GET', '/api/v1/waits/{id}'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/waits/{id}/cancel'])) || ORG64;
 const W044 = (await needs(['POST', '/api/v1/waits/mcp'], ['POST', '/api/v1/waits'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/launches'], ['POST', '/api/v1/sessions'])) || ACTORS || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
@@ -852,6 +856,18 @@ async function waitsTool(caller: Caller, session: string, name: string, args: Re
 
 /** The wait id of an `ask_human` text (« Asked: wait <id> is open, for member <member>. »). */
 const askedWait = (text: string) => /wait ([0-9a-f-]{36}) is open/.exec(text)?.[1] ?? '';
+
+/** The run `id` as `caller` reads it once `done` holds, read again every half second for up to `ms`. */
+async function runUntil(caller: Caller, id: string, done: (run: Record<string, unknown>) => boolean, ms = 60_000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const r = await call(caller, 'GET', `/api/v1/runs/${id}`);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    if (done(r.body)) return r.body;
+    if (Date.now() > until) throw new Error(`run ${id} after ${ms} ms: ${JSON.stringify(r.body)}`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
 
 /** A workflow of the contract (`Workflow`): one trigger node, no edge. */
 const workflow = (id: string, name: string, status = 'proposed', extra: Record<string, unknown> = {}) => ({ id, name, domain: 'git', nodes: [{ id: 'start', kind: 'trigger', label: 'Session start' }], edges: [], start: 'start', status, foundAt: new Date().toISOString(), ...extra });
@@ -903,14 +919,19 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect((await call(a.c, 'POST', runs, { inputs: { branch: 'main', note: 'far too long' } })).status).toBe(400);
     const run = await call(a.c, 'POST', runs, { inputs: { branch: 'main' } });
     expect(run.status, JSON.stringify(run.body)).toBe(201);
-    // No engine plays a run yet: it is recorded queued, with the version it started from and its inputs (default taken).
+    // It is recorded queued, with the version it started from and its inputs (default taken).
     expect(run.body).toMatchObject({ workflowId: wid, workflowName: 'Parc 022', workflowVersion: version, status: 'queued', source: 'manual', inputs: { branch: 'main', note: 'none' } });
     for (const k of ['id', 'startedBy', 'startedAt']) expect(run.body).toHaveProperty(k);
     const id = run.body['id'] as string;
     expect(itemsOf((await call(a.c, 'GET', runs)).body).map((r) => r['id'])).toContain(id);
     expect(itemsOf((await call(a.c, 'GET', '/api/v1/runs')).body).map((r) => r['id'])).toContain(id);
-    expect(itemsOf((await call(a.c, 'GET', '/api/v1/runs?status=queued')).body).map((r) => r['id'])).toContain(id);
-    expect(itemsOf((await call(a.c, 'GET', '/api/v1/runs?status=succeeded')).body).map((r) => r['id'])).not.toContain(id);
+    // Without the engine it stays queued; with it, its lone trigger has nothing after it and the run ends succeeded.
+    const status = PLAYED ? 'succeeded' : 'queued';
+    // A field without a value is left out of the answer (no null): an ended run has no current node.
+    if (PLAYED) expect((await runUntil(a.c, id, (r) => r['status'] === 'succeeded'))['currentNodeId']).toBeUndefined();
+    const ids = async (s: string) => itemsOf((await call(a.c, 'GET', `/api/v1/runs?status=${s}`)).body).map((r) => r['id']);
+    expect(await ids(status)).toContain(id);
+    expect(await ids(PLAYED ? 'queued' : 'succeeded')).not.toContain(id);
     expect((await call(a.c, 'GET', '/api/v1/runs?status=lost')).status).toBe(400);
     // A proposed workflow is accepted before it runs; an unknown one is not found.
     const proposed = `parc-${randomUUID().slice(0, 8)}`;
@@ -932,6 +953,85 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     await needsCredential('GET', '/api/v1/runs');
     await needsCredential('POST', runs, { inputs: {} });
   }, T);
+
+  it.skipIf(W022P !== '')(named('E2E-PARC-022 — 4.1 a run is played: its agent node runs a cloud session, its gate waits for the yes, the run succeeds; another is cancelled', W022P), async () => {
+    const a = await owner('parc-022-p');
+    const login = (await profileOf(a.person.caller)).login;
+    const wid = `parc-${randomUUID().slice(0, 8)}`;
+    const nodes = [
+      { id: 'build', kind: 'agent', label: 'Build', run: { instructions: 'Fix the build of {{inputs.branch}}', agent: 'claude' } },
+      { id: 'review', kind: 'gate', label: 'Review', approvers: [login] },
+    ];
+    const edges = [{ from: 'build', to: 'review' }, { from: 'review', to: null, on: 'approved' }];
+    const inputs = [{ id: 'branch', label: 'Branch', required: true }];
+    const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(wid, 'Parc 022 played', 'accepted', { nodes, edges, start: 'build', inputs }));
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const start = async () => {
+      const r = await call(a.c, 'POST', `/api/v1/workflows/${wid}/runs`, { inputs: { branch: 'main' } });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      return r.body['id'] as string;
+    };
+    const id = await start();
+
+    // 1. The agent node: a cloud session of the starter, with the node's prompt; the run is running on it.
+    const running = await runUntil(a.c, id, (r) => typeof r['sessionId'] === 'string');
+    expect(running).toMatchObject({ status: 'running', currentNodeId: 'build' });
+    const session = running['sessionId'] as string;
+    expect((running['visits'] as Record<string, unknown>[])[0]).toMatchObject({ seq: 1, nodeId: 'build', kind: 'agent', status: 'running', sessionId: session });
+    const cloud = await call(a.c, 'GET', `/api/v1/cloud/sessions/${session}`);
+    expect(cloud.status, JSON.stringify(cloud.body)).toBe(200);
+    expect(cloud.body).toMatchObject({ id: session, agent: 'claude', name: 'Parc 022 played · Build' });
+    // The session ends (no runner takes it on the bench): the node is done, and the gate opens for its approver.
+    expect((await call(a.c, 'DELETE', `/api/v1/cloud/sessions/${session}`)).status).toBeLessThan(300);
+    const waiting = await runUntil(a.c, id, (r) => r['status'] === 'waiting');
+    const [agent, review] = waiting['visits'] as Record<string, unknown>[];
+    expect(agent).toMatchObject({ nodeId: 'build', status: 'done', outcome: 'next' });
+    expect(review).toMatchObject({ seq: 2, nodeId: 'review', kind: 'gate', status: 'waiting' });
+    expect(waiting['currentNodeId']).toBe('review');
+
+    // 2. The gate node: its approver's pending approval; the yes ends the run succeeded.
+    const pending = await call(a.person.caller, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
+    const mine = itemsOf(pending.body).find((x) => x['group'] === review?.['gateId']);
+    expect(mine, JSON.stringify({ run: waiting, pending: pending.body })).toBeDefined();
+    const yes = await call(a.person.caller, 'POST', `/api/v1/approvals/${String(mine?.['id'])}/answer`, { answer: 'approve', shownDigest: mine?.['shownDigest'] });
+    expect(yes.status, JSON.stringify(yes.body)).toBe(200);
+    const ended = await runUntil(a.c, id, (r) => r['status'] !== 'waiting');
+    expect(ended['status'], JSON.stringify(ended)).toBe('succeeded');
+    expect(ended['currentNodeId']).toBeUndefined();
+    expect((ended['visits'] as Record<string, unknown>[]).map((v) => [v['nodeId'], v['status'], v['outcome']])).toEqual([
+      ['build', 'done', 'next'],
+      ['review', 'done', 'approved'],
+    ]);
+    expect(typeof ended['endedAt']).toBe('string');
+    // An ended run is not cancelled.
+    expect((await call(a.c, 'POST', `/api/v1/runs/${id}/cancel`)).status).toBe(409);
+
+    // 3. Another run is cancelled while its agent works: a member may not, the owner does, its session is ended.
+    const other = await start();
+    const second = (await runUntil(a.c, other, (r) => typeof r['sessionId'] === 'string'))['sessionId'] as string;
+    const member = await invited(a, 'parc-022-pm');
+    const m: Caller = { ...member.caller, org: a.org.id };
+    expect((await call(m, 'GET', `/api/v1/runs/${other}`)).status).toBe(200);
+    expect((await call(m, 'POST', `/api/v1/runs/${other}/cancel`)).status).toBe(403);
+    const b = await owner('parc-022-pb');
+    expect((await call(b.c, 'GET', `/api/v1/runs/${other}`)).status).toBe(404);
+    expect((await call(b.c, 'POST', `/api/v1/runs/${other}/cancel`)).status).toBe(404);
+    const cancelled = await call(a.c, 'POST', `/api/v1/runs/${other}/cancel`);
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    expect(cancelled.body).toMatchObject({ id: other, status: 'cancelled' });
+    expect((cancelled.body['visits'] as Record<string, unknown>[])[0]).toMatchObject({ nodeId: 'build', status: 'failed', outcome: 'cancelled' });
+    expect((await call(a.c, 'POST', `/api/v1/runs/${other}/cancel`)).status).toBe(409);
+    const until = Date.now() + 60_000;
+    for (;;) {
+      const s = await call(a.c, 'GET', `/api/v1/cloud/sessions/${second}`);
+      if (s.body['desiredStatus'] === 'terminated' || s.body['status'] === 'terminated' || s.status === 404) break;
+      if (Date.now() > until) throw new Error(`session ${second} of a cancelled run: ${JSON.stringify(s.body)}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    expect((await call(a.c, 'GET', `/api/v1/runs/${randomUUID()}`)).status).toBe(404);
+    await needsCredential('GET', `/api/v1/runs/${id}`);
+    await needsCredential('POST', `/api/v1/runs/${id}/cancel`);
+  }, 180_000);
 
   it.skipIf(W023 !== '')(named('E2E-PARC-023 — 4.2 an automation is created, edited, disabled, dry-run, its webhook secret rotated, deleted', W023), async () => {
     const a = await owner('parc-023');
