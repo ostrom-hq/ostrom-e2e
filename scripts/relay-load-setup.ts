@@ -70,14 +70,30 @@ async function setup(): Promise<Ready> {
   return { inference: inference === '', mcp: mcp === '', reasons: [inference, mcp].filter((r) => r !== '') };
 }
 
+function report(ready: Ready): void {
+  const reason = ready.reasons.join('; ').replaceAll('\n', ' ').slice(0, 500);
+  out(process.env['GITHUB_OUTPUT'], `inference=${ready.inference}`);
+  out(process.env['GITHUB_OUTPUT'], `mcp=${ready.mcp}`);
+  out(process.env['GITHUB_OUTPUT'], `reason=${reason}`);
+  if (reason) console.log(`::notice title=relay load tests::${reason}`);
+}
+
+// A rejection outside `setup`'s awaits (a request of a helper left running) still ends in a reason, never in a failed
+// step (run 41549238361: "fetch failed, other side closed", the server pod behind the port-forward OOMKilled).
+let reported = false;
+const fail = (error: unknown) => {
+  if (!reported) report({ inference: false, mcp: false, reasons: [`setup failed: ${String(error)}`] });
+  reported = true;
+  process.exit(0);
+};
+process.on('unhandledRejection', fail);
+process.on('uncaughtException', fail);
+
 let ready: Ready;
 try {
   ready = await setup();
 } catch (error) {
   ready = { inference: false, mcp: false, reasons: [`setup failed: ${String(error)}`] };
 }
-const reason = ready.reasons.join('; ').replaceAll('\n', ' ').slice(0, 500);
-out(process.env['GITHUB_OUTPUT'], `inference=${ready.inference}`);
-out(process.env['GITHUB_OUTPUT'], `mcp=${ready.mcp}`);
-out(process.env['GITHUB_OUTPUT'], `reason=${reason}`);
-if (reason) console.log(`::notice title=relay load tests::${reason}`);
+reported = true;
+report(ready);

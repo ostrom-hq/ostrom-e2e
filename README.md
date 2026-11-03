@@ -100,6 +100,9 @@ server restart (`load/streams.js`); a client that leaves mid-stream, whose upstr
 released within 2 s (`load/cut.js`); and MCP servers that answer at once, late, never or not at all, at the same time
 (`load/mcp.js`). `scripts/relay-summary.ts` writes the overhead and memory tables. Each of these phases starts on Ready
 server pods and fails on a restart of its own, with the crashed container's last lines (`scripts/server-pods.sh`).
+The workflow runs in two legs, each on its own runner and kind cluster: `gates` (the smoke, the journeys, the gates
+and the race) and `relay` (the smoke, the journeys, then the gateway and the relay). A crash in one never decides the
+other's numbers. Their artifacts are `chart-load-k6` and `chart-load-k6-relay`.
 
 ## Documentation
 

@@ -5,6 +5,9 @@
 # chart's `resources` are set from). The inference gateway and the MCP relay are loaded against fake upstreams in a
 # namespace of their own (src/fake-upstreams.ts): the gateway's overhead against the fake called directly, the memory
 # of open streams, a client that leaves mid-stream, and MCP servers that are slow or down.
+# Two legs, each on its own runner and kind cluster: `gates` (smoke, journeys, gates and the race) and `relay` (smoke,
+# journeys, then the gateway and the relay). A pod the race kills (OOMKilled, run 41549238361) then never takes the
+# relay's setup down with it, and the 200 streams never crash the pods the gates are measured on.
 # Not on pull requests: the organisation runs a single `ci` job per PR.
 name: Chart load
 on:
@@ -13,6 +16,12 @@ on:
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
+    inputs:
+      pass:
+        description: "Which leg: gates, relay, or both"
+        type: choice
+        options: [both, gates, relay]
+        default: both
 # A load pass gates nothing: a newer run of the same ref replaces the one in progress (runners are scarce).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,7 +31,12 @@ permissions:
 
 jobs:
   chart-load:
-    name: chart-load
+    name: chart-load (${{ matrix.pass }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both on push and schedule; a dispatch may run one leg only.
+        pass: ${{ fromJSON(inputs.pass == 'gates' && '["gates"]' || inputs.pass == 'relay' && '["relay"]' || '["gates","relay"]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -155,6 +169,7 @@ jobs:
       # src/fake-upstreams.ts run by Node from a ConfigMap. Reached by the server (an extraEgress rule of the chart's
       # NetworkPolicy, below) and by k6 through the ingress (fake.ostrom.test), the baseline of the gateway's overhead.
       - name: Fake upstreams of the gateway and the MCP relay (namespace ostrom-fakes)
+        if: matrix.pass == 'relay'
         # Like the CA: a failure here skips the relay passes (their setup gives the reason), never the passes before.
         continue-on-error: true
         run: |
@@ -357,7 +372,7 @@ jobs:
           echo "OSTROM_LOAD_MAIL_DIR=$mail" >> "$GITHUB_ENV"
           OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="$mail" node scripts/load-setup.ts
       - name: k6 gates (push to main + yes) and race (100 simultaneous yes → 1 × 200, 99 × 409)
-        if: steps.loadsetup.outputs.ready == 'true'
+        if: matrix.pass == 'gates' && steps.loadsetup.outputs.ready == 'true'
         env:
           OSTROM_URL: ${{ env.API_URL }}
           OSTROM_LOAD_SCENARIOS: gates
@@ -375,7 +390,7 @@ jobs:
       # through the same pod and mail directory as the gate setup.
       - name: Gateway and relay load setup (member token, MCP servers on the fakes)
         id: relaysetup
-        if: always() && steps.loadsetup.outcome != 'skipped'
+        if: always() && matrix.pass == 'relay' && steps.loadsetup.outcome != 'skipped'
         env:
           OSTROM_E2E_CONSOLE_ORIGIN: http://app.ostrom.test
           OSTROM_LOAD_FAKE_MCP_URL: https://fakes.ostrom-fakes.svc:8443
@@ -450,7 +465,7 @@ jobs:
             mcp ${{ steps.relaysetup.outputs.mcp == 'true' && 'run' || 'not run' }}${{ steps.relaysetup.outputs.reason && format(' ({0})', steps.relaysetup.outputs.reason) || '' }}
         run: |
           {
-            echo "### Chart load pass (kind, ingress-nginx, 2 server replicas)"
+            echo "### Chart load pass, ${{ matrix.pass }} (kind, ingress-nginx, 2 server replicas)"
             echo
             echo "ostrom-server@${SERVER_SHA:-?} · gates and race: ${GATES:-not run}"
             echo
@@ -504,7 +519,8 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: chart-load-k6
+          # The gates leg keeps the artifact's name of before; the relay leg's has its own.
+          name: chart-load-k6${{ matrix.pass == 'relay' && '-relay' || '' }}
           path: "*-summary.json\ntop-samples.txt\nphases.txt"
           retention-days: 7
           if-no-files-found: ignore
