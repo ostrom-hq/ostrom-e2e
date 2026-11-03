@@ -2940,7 +2940,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 ### E2E-AUTH-001 — Connexion par lien e-mail, une seule fois
 
 - Étapes : `POST /api/v1/auth/email` (adresse propre à la personne, `X-Forwarded-For` d'une adresse à elle), le lien est lu dans `OSTROM_MAIL_DIR`, `POST /api/v1/auth/email/verify` ; puis le même lien une seconde fois, et un jeton inventé.
-- Attendu : 200 `{redirect, csrfToken}`, cookie de session `HttpOnly`, `SameSite`, `Path=/` ; `GET /api/v1/auth/me/account` rend l'adresse (le compte quitte `GET /auth/me`, qui devient le `Me` du contrat : décision du 30/10 11:50, JOURNAL 12:10 ; le banc lit `/auth/me` tant que `/me/account` n'est pas servi) ; le lien réutilisé et le jeton inventé : 4xx, aucun cookie de session.
+- Attendu : 200 `{redirect, csrfToken}`, cookie de session `HttpOnly`, `SameSite`, `Path=/` ; `GET /api/v1/auth/me/account` rend l'adresse (le compte quitte `GET /auth/me`, qui devient le `Me` du contrat : décision du 30/10 11:50, JOURNAL 12:10 ; le banc lit `/auth/me` tant que `/me/account` n'est pas servi) ; le lien réutilisé et le jeton inventé : 4xx, aucun cookie de session. Depuis ostrom-server#176 (dbb2dd8, audit web 2 M4) : la demande pose le cookie `ostrom_email_link` ; le lien présenté sans lui reçoit 403 `email_link_other_browser`, sans session et sans être consommé, puis signe dans le navigateur qui l'a demandé.
 - Surfaces : serveur (image), identité
 - Source : ostrom-server#10 (`SignInRoutes.kt`) ; contrat 0.1.140 `requestMagicLink`, `verifyMagicLink`
 - Priorité : jalon
