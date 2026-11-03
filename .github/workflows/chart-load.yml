@@ -412,11 +412,33 @@ jobs:
           OSTROM_E2E_ANSWER_RECEIPT: "1"
         run: |
           # The race runs even when a check of the gates fails: its own thresholds (1 × 200, 99 × 409) are
-          # another question, and its numbers would be lost. The step fails if either run fails.
+          # another question, and its numbers would be lost. The step fails if either run fails. Each phase starts on
+          # Ready server pods and fails on its own restart, with the pod's last termination (reason OOMKilled, Error…,
+          # exit code) and the crashed container's last lines (scripts/server-pods.sh): a pod that died in the gates
+          # phase never passes for a race result.
           rc=0
+          scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts)
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js || rc=$?
+          scripts/server-pods.sh crashed "$before" || rc=1
+          scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts)
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js || rc=$?
+          scripts/server-pods.sh crashed "$before" || rc=1
+          kubectl -n "$NS" get events --field-selector involvedObject.kind=Pod --sort-by=.lastTimestamp | grep -E 'Unhealthy|Killing|BackOff|OOM' | tail -20 || true
           exit "$rc"
+      # The server exports its metrics every minute: two exports after the last gate, then the queries of the alerts and
+      # of the product dashboard (ostrom-infra), against what the real server sent. Right after the gates, before the
+      # gateway and relay phases: the counters' queries look at the last 5 minutes (run 41614001097).
+      - name: Alert and dashboard queries against the server's metrics
+        if: always() && steps.image.outcome == 'success'
+        env:
+          OSTROM_OBS_REQUIRED: ${{ inputs.observability_required }}
+          OSTROM_PROMETHEUS_URL: http://127.0.0.1:19090
+        run: |
+          sleep 130
+          kubectl -n observe port-forward svc/prometheus 19090:9090 > "$RUNNER_TEMP/prometheus-forward.log" 2>&1 < /dev/null &
+          echo $! > "$RUNNER_TEMP/prometheus-forward.pid"
+          for _ in $(seq 1 30); do curl -fsS "$OSTROM_PROMETHEUS_URL/-/ready" >/dev/null 2>&1 && break; sleep 1; done
+          node scripts/observability-check.ts >> "$GITHUB_STEP_SUMMARY"
       # The member, its token and the MCP servers of the gateway and relay load tests (scripts/relay-load-setup.ts),
       # through the same pod and mail directory as the gate setup.
       - name: Gateway and relay load setup (member token, MCP servers on the fakes)
@@ -480,19 +502,6 @@ jobs:
             scripts/server-pods.sh crashed "$before" || rc=1
           done
           exit "$rc"
-      # The server exports its metrics every minute: two exports after the last gate, then the queries of the alerts and
-      # of the product dashboard (ostrom-infra), against what the real server sent.
-      - name: Alert and dashboard queries against the server's metrics
-        if: always() && steps.image.outcome == 'success'
-        env:
-          OSTROM_OBS_REQUIRED: ${{ inputs.observability_required }}
-          OSTROM_PROMETHEUS_URL: http://127.0.0.1:19090
-        run: |
-          sleep 130
-          kubectl -n observe port-forward svc/prometheus 19090:9090 > "$RUNNER_TEMP/prometheus-forward.log" 2>&1 < /dev/null &
-          echo $! > "$RUNNER_TEMP/prometheus-forward.pid"
-          for _ in $(seq 1 30); do curl -fsS "$OSTROM_PROMETHEUS_URL/-/ready" >/dev/null 2>&1 && break; sleep 1; done
-          node scripts/observability-check.ts >> "$GITHUB_STEP_SUMMARY"
       - name: Stop the background sampler and port-forward
         if: always()
         run: |
