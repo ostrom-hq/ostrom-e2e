@@ -162,6 +162,7 @@ jobs:
         with:
           repository: ostrom-hq/ostrom-core
           ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
+          ref: fix/served-routes-nested
           path: .ostrom/core-contract
           sparse-checkout: |
             api/openapi.yaml
