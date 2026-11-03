@@ -3009,6 +3009,15 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : jalon
 - Statut : codé : `scenarios/identity.e2e.ts` (bloqué : ostrom-server#43 compilateur pour la demande, #41 pour le step-up)
 
+### E2E-AUTH-008 — StepUp de l'app : un oui exige un déverrouillage lié à sa demande, de moins d'une minute, à usage unique
+
+- Étapes : flux accepté avec une porte sur les pushs vers main, l'approbateur nommé. L'approbateur rejoint l'org par lien, puis connecte son téléphone comme l'app (GitHub, PKCE S256 vers `ostrom://auth/callback`, échange du code). Le demandeur pose la question. Sur cette demande : (1) déverrouillage lié à elle, vieilli de 2 min en base (`identity_api_tokens.authenticated_at`), puis oui ; (2) déverrouillage lié à une autre demande, puis oui ; (3) déverrouillage lié à elle, un premier oui sur un autre `shownDigest` (409), puis oui ; (4) déverrouillage lié à elle, puis oui.
+- Attendu : (1), (2) et (3) : 403 `error.type = step_up_required` avec `error.requestBound = true`. (4) : 200, demande `approved`, reçu signé qui nomme le commit.
+- Surfaces : serveur (image), identité, portes, base
+- Source : Q-APP-STEPUP-RISK (audit sécurité de l'app, A-S1) ; ostrom-core#121 ; ostrom-server `fix/stepup-bound-unlock`
+- Priorité : jalon
+- Statut : codé : `scenarios/phone-yes.e2e.ts`. Mise de côté **temporaire** : sur un serveur qui ne lie pas encore le déverrouillage, le premier oui passe. Le scénario se met alors de côté, avec un `::warning` et une ligne du résumé du run qui nomme PARCOURS 5.4. La PR qui suit la fusion du serveur retire cette mise de côté : ensuite, un serveur qui cesse de lier le déverrouillage fait échouer le scénario.
+
 ## LOAD : Charge (k6)
 
 ### E2E-LOAD-001 — Démarrage à froid du serveur de contrôle
@@ -3321,7 +3330,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | 2.11 Révocation et déconnexion | E2E-AUTH-004 (complété par E2E-PARC-010, 011, 041 et 042) |
 | 5.1 `ostrom login` (appareil) | E2E-LOGIN-001, E2E-AUTH-003 |
 | 5.3 Action protégée, la porte s'ouvre (boucle CLI) | E2E-GATE-001 (complété par E2E-PARC-013 et 027) |
-| 5.4 Le second membre dit oui (step-up) | E2E-YES-001, E2E-AUTH-007 |
+| 5.4 Le second membre dit oui (step-up) | E2E-YES-001, E2E-AUTH-007, E2E-AUTH-008 |
 | 5.6 Auto-approbation refusée | E2E-YES-003 |
 | 5.8 Isolation entre deux orgs | E2E-ISO-001, E2E-ISO-002 |
 | 6.5 Facturation : plan, checkout, portail | E2E-BILL-005, E2E-BILL-006, E2E-BILL-007 |
