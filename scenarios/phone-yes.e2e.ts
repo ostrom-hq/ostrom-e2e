@@ -115,7 +115,8 @@ describe.skipIf(!READY)(`E2E-AUTH: a yes from the phone app${READY ? '' : ' (nee
     if (stale.status === 200) {
       // TEMPORARY (removed right after the server's merge): visible in the run, never a silent pass.
       const why = 'E2E-AUTH-008 skipped: the server takes a phone yes on any unlock of the last 5 minutes, not one bound to its request (PARCOURS 5.4, the second member says yes from the phone; Q-APP-STEPUP-RISK)';
-      console.log(`::warning title=E2E-AUTH-008 skipped::${why}`);
+      // On a line of its own: vitest's colour codes before it would hide the command from the runner.
+      console.log(`\n::warning title=E2E-AUTH-008 skipped::${why}`);
       const summary = process.env['GITHUB_STEP_SUMMARY'];
       if (summary) appendFileSync(summary, `- :warning: ${why}\n`);
       context.skip(why);
