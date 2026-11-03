@@ -245,6 +245,54 @@ describe('E2E-PARC: 2. organization setup', () => {
     await needsCredential('GET', '/api/v1/mcp/servers');
   }, T);
 
+  // The groups of 2.8: owners and admins make them and change their members, every member reads them, people are named
+  // by login, and another organization sees none (ostrom-server, groups pull request).
+  const W039 = (await needs(['GET', '/api/v1/groups'], ['POST', '/api/v1/groups'], ['GET', '/api/v1/groups/{id}'], ['PATCH', '/api/v1/groups/{id}'], ['DELETE', '/api/v1/groups/{id}'], ['PUT', '/api/v1/groups/{id}/members/{id}'], ['DELETE', '/api/v1/groups/{id}/members/{id}'], ['POST', '/api/v1/groups/{id}/members/{id}/pause'])) || ORG64 || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
+  it.skipIf(W039 !== '')(named('E2E-PARC-039 — 2.8 an owner makes a group of members by login, pauses and removes one; members read it, another org sees nothing', W039), async () => {
+    const a = await owner('parc-039');
+    const invited = email('parc-039-m');
+    expect((await invite(a.person, a.org.id, [invited])).status).toBeLessThan(300);
+    const { person, accepted } = await join(invited);
+    expect(accepted.status, JSON.stringify(accepted.body)).toBeLessThan(300);
+    const login = (await profileOf(person.caller)).login;
+    const m: Caller = { ...person.caller, org: a.org.id };
+    const name = `Parc 039 ${randomUUID().slice(0, 6)}`;
+
+    const made = await call(a.c, 'POST', '/api/v1/groups', { name, members: [login] });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body).toMatchObject({ name, members: [login], accounts: [], paused: [] });
+    const id = made.body['id'] as string;
+    expect(itemsOf((await call(m, 'GET', '/api/v1/groups')).body).map((g) => g['id'])).toContain(id);
+    expect((await call(m, 'GET', `/api/v1/groups/${id}`)).body).toMatchObject({ id, name, members: [login] });
+    // A member reads only; a name is taken whatever its case; an account the organization does not share is refused.
+    expect((await call(m, 'POST', '/api/v1/groups', { name: `${name} m` })).status).toBe(403);
+    expect((await call(m, 'PUT', `/api/v1/groups/${id}/members/${login}`)).status).toBe(403);
+    expect((await call(a.c, 'POST', '/api/v1/groups', { name: name.toUpperCase() })).status).toBe(409);
+    expect((await call(a.c, 'POST', '/api/v1/groups', { name: `${name} x`, accounts: [randomUUID()] })).status).toBe(400);
+    expect((await call(a.c, 'POST', '/api/v1/groups', { name: `${name} y`, members: ['nobody-here'] })).status).toBe(400);
+
+    const until = '2099-01-01T00:00:00Z';
+    expect((await call(a.c, 'POST', `/api/v1/groups/${id}/members/${login}/pause`, { until })).status).toBe(204);
+    expect((await call(m, 'GET', `/api/v1/groups/${id}`)).body).toMatchObject({ paused: [{ login, until }] });
+    const renamed = await call(a.c, 'PATCH', `/api/v1/groups/${id}`, { name: `${name} b` });
+    expect(renamed.body, JSON.stringify(renamed.body)).toMatchObject({ id, name: `${name} b`, members: [login] });
+    expect((await call(a.c, 'DELETE', `/api/v1/groups/${id}/members/${login}`)).status).toBe(204);
+    expect((await call(a.c, 'GET', `/api/v1/groups/${id}`)).body).toMatchObject({ members: [], paused: [] });
+    expect((await call(a.c, 'DELETE', `/api/v1/groups/${id}/members/${login}`)).status).toBe(404);
+    expect((await call(a.c, 'PUT', `/api/v1/groups/${id}/members/${login}`)).status).toBe(204);
+
+    const b = await owner('parc-039-b');
+    expect((await call(b.c, 'GET', `/api/v1/groups/${id}`)).status).toBe(404);
+    expect((await call(b.c, 'PATCH', `/api/v1/groups/${id}`, { name: 'taken over' })).status).toBe(404);
+    expect((await call(b.c, 'DELETE', `/api/v1/groups/${id}`)).status).toBe(404);
+    await hidden(b.c, '/api/v1/groups', id);
+
+    expect((await call(a.c, 'DELETE', `/api/v1/groups/${id}`)).status).toBe(204);
+    expect((await call(a.c, 'GET', `/api/v1/groups/${id}`)).status).toBe(404);
+    await needsCredential('GET', '/api/v1/groups');
+    await needsCredential('POST', '/api/v1/groups', { name });
+  }, T);
+
   it.skipIf(W009 !== '')(named('E2E-PARC-009 — 2.10 a secret is written, rotated and deleted; its value is never read back', W009), async () => {
     const a = await owner('parc-009');
     const name = `PARC_${randomUUID().slice(0, 8).toUpperCase()}`;
