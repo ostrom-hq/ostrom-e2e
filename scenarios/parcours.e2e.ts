@@ -100,6 +100,7 @@ const W008 = (await needs(['POST', '/api/v1/mcp/servers'], ['PUT', '/api/v1/mcp/
 const W009 = (await needs(['POST', '/api/v1/secrets'], ['GET', '/api/v1/secrets'], ['PUT', '/api/v1/secrets/{id}'], ['DELETE', '/api/v1/secrets/{id}'])) || ORG64;
 const W010 = await needs(['POST', '/api/v1/tokens'], ['GET', '/api/v1/tokens'], ['POST', '/api/v1/tokens/{id}/rotate'], ['DELETE', '/api/v1/tokens/{id}']);
 const W011 = await needs(['GET', '/api/v1/service-keys'], ['POST', '/api/v1/service-keys'], ['GET', '/api/v1/devices'], ['GET', '/api/v1/auth/sessions']);
+const W039 = (await needs(['GET', '/api/v1/groups'], ['POST', '/api/v1/groups'], ['GET', '/api/v1/groups/{id}'], ['PATCH', '/api/v1/groups/{id}'], ['DELETE', '/api/v1/groups/{id}'], ['PUT', '/api/v1/groups/{id}/members/{id}'], ['DELETE', '/api/v1/groups/{id}/members/{id}'], ['POST', '/api/v1/groups/{id}/members/{id}/pause'])) || ORG64 || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
 
 describe('E2E-PARC: 2. organization setup', () => {
   it.skipIf(W001 !== '')(named('E2E-PARC-001 — 2.2 a new person creates an organization and reads it back, owner', W001), async () => {
@@ -263,6 +264,53 @@ describe('E2E-PARC: 2. organization setup', () => {
     await needsCredential('GET', '/api/v1/mcp/servers');
   }, T);
 
+  // The groups of 2.8: owners and admins make them and change their members, every member reads them, people are named
+  // by login, and another organization sees none (ostrom-server, groups pull request).
+  it.skipIf(W039 !== '')(named('E2E-PARC-039 — 2.8 an owner makes a group of members by login, pauses and removes one; members read it, another org sees nothing', W039), async () => {
+    const a = await owner('parc-039');
+    const invited = email('parc-039-m');
+    expect((await invite(a.person, a.org.id, [invited])).status).toBeLessThan(300);
+    const { person, accepted } = await join(invited);
+    expect(accepted.status, JSON.stringify(accepted.body)).toBeLessThan(300);
+    const login = (await profileOf(person.caller)).login;
+    const m: Caller = { ...person.caller, org: a.org.id };
+    const name = `Parc 039 ${randomUUID().slice(0, 6)}`;
+
+    const made = await call(a.c, 'POST', '/api/v1/groups', { name, members: [login] });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body).toMatchObject({ name, members: [login], accounts: [], paused: [] });
+    const id = made.body['id'] as string;
+    expect(itemsOf((await call(m, 'GET', '/api/v1/groups')).body).map((g) => g['id'])).toContain(id);
+    expect((await call(m, 'GET', `/api/v1/groups/${id}`)).body).toMatchObject({ id, name, members: [login] });
+    // A member reads only; a name is taken whatever its case; an account the organization does not share is refused.
+    expect((await call(m, 'POST', '/api/v1/groups', { name: `${name} m` })).status).toBe(403);
+    expect((await call(m, 'PUT', `/api/v1/groups/${id}/members/${login}`)).status).toBe(403);
+    expect((await call(a.c, 'POST', '/api/v1/groups', { name: name.toUpperCase() })).status).toBe(409);
+    expect((await call(a.c, 'POST', '/api/v1/groups', { name: `${name} x`, accounts: [randomUUID()] })).status).toBe(400);
+    expect((await call(a.c, 'POST', '/api/v1/groups', { name: `${name} y`, members: ['nobody-here'] })).status).toBe(400);
+
+    const until = '2099-01-01T00:00:00Z';
+    expect((await call(a.c, 'POST', `/api/v1/groups/${id}/members/${login}/pause`, { until })).status).toBe(204);
+    expect((await call(m, 'GET', `/api/v1/groups/${id}`)).body).toMatchObject({ paused: [{ login, until }] });
+    const renamed = await call(a.c, 'PATCH', `/api/v1/groups/${id}`, { name: `${name} b` });
+    expect(renamed.body, JSON.stringify(renamed.body)).toMatchObject({ id, name: `${name} b`, members: [login] });
+    expect((await call(a.c, 'DELETE', `/api/v1/groups/${id}/members/${login}`)).status).toBe(204);
+    expect((await call(a.c, 'GET', `/api/v1/groups/${id}`)).body).toMatchObject({ members: [], paused: [] });
+    expect((await call(a.c, 'DELETE', `/api/v1/groups/${id}/members/${login}`)).status).toBe(404);
+    expect((await call(a.c, 'PUT', `/api/v1/groups/${id}/members/${login}`)).status).toBe(204);
+
+    const b = await owner('parc-039-b');
+    expect((await call(b.c, 'GET', `/api/v1/groups/${id}`)).status).toBe(404);
+    expect((await call(b.c, 'PATCH', `/api/v1/groups/${id}`, { name: 'taken over' })).status).toBe(404);
+    expect((await call(b.c, 'DELETE', `/api/v1/groups/${id}`)).status).toBe(404);
+    await hidden(b.c, '/api/v1/groups', id);
+
+    expect((await call(a.c, 'DELETE', `/api/v1/groups/${id}`)).status).toBe(204);
+    expect((await call(a.c, 'GET', `/api/v1/groups/${id}`)).status).toBe(404);
+    await needsCredential('GET', '/api/v1/groups');
+    await needsCredential('POST', '/api/v1/groups', { name });
+  }, T);
+
   it.skipIf(W009 !== '')(named('E2E-PARC-009 — 2.10 a secret is written, rotated and deleted; its value is never read back', W009), async () => {
     const a = await owner('parc-009');
     const name = `PARC_${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -312,9 +360,12 @@ describe('E2E-PARC: 2. organization setup', () => {
 
   it.skipIf(W011 !== '')(named('E2E-PARC-011 — 2.11 service keys, devices and browser sessions are listed and revocable by their owner', W011), async () => {
     const a = await owner('parc-011');
-    const key = await call(a.c, 'POST', '/api/v1/service-keys', { name: 'parc-011 ci', scopes: ['receipts:read'] });
+    const key = await call(a.c, 'POST', '/api/v1/service-keys', { name: 'parc-011 ci', scopes: ['sessions:write', 'rules:read'] });
     expect(key.status, JSON.stringify(key.body)).toBe(201);
-    expect(key.body).toMatchObject({ name: 'parc-011 ci', scopes: ['receipts:read'] });
+    // Since ostrom-server#158 a service key holds only what a CI needs: sessions:write and rules:read.
+    expect((await call(a.c, 'POST', '/api/v1/service-keys', { name: 'parc-011 reader', scopes: ['receipts:read'] })).status).toBe(400);
+    expect(key.body['name']).toBe('parc-011 ci');
+    expect([...(key.body['scopes'] as string[])].sort(), JSON.stringify(key.body)).toEqual(['rules:read', 'sessions:write']);
     expect(typeof key.body['secret']).toBe('string');
     const keys = await call(a.c, 'GET', '/api/v1/service-keys');
     expect(itemsOf(keys.body).map((k) => k['id'])).toContain(key.body['id']);
@@ -341,6 +392,7 @@ const W017 = await needs(['GET', '/api/v1/policy/agents']);
 const W018 = (await needs(['GET', '/api/v1/budgets'], ['PUT', '/api/v1/budgets'], ['GET', '/api/v1/budgets/me'])) || ORG64;
 const W019 = await needs(['GET', '/api/v1/spending']);
 const W020 = await needs(['GET', '/api/v1/decisions']);
+const W040 = (await needs(['GET', '/api/v1/audit'], ['PATCH', '/api/v1/orgs/{id}/members/{id}'])) || ORG64;
 
 describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
   it.skipIf(W012 !== '')(named('E2E-PARC-012 — 3.1 rules: a new org has no rule, the analysis state reads, a rule is edited and bulk-accepted', W012), async () => {
@@ -528,6 +580,52 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     expect(r.status).toBe(200);
     expect(itemsOf(r.body)).toEqual([]);
     await needsCredential('GET', '/api/v1/decisions');
+  }, T);
+
+  it.skipIf(W040 !== '')(named('E2E-PARC-040 — 3.6 the audit log is read by an owner and an admin, refused to a member, and shows nothing of another org', W040), async () => {
+    const a = await owner('parc-040');
+    const invited = email('parc-040-m');
+    expect((await invite(a.person, a.org.id, [invited])).status).toBeLessThan(300);
+    const { person, accepted } = await join(invited);
+    expect(accepted.status).toBeLessThan(300);
+    const member: Caller = { ...person.caller, org: a.org.id };
+
+    // The owner reads the signed lines of the org (`AuditEvent`), newest first: its creation and the member who joined.
+    const read = await call(a.c, 'GET', '/api/v1/audit');
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    const items = itemsOf(read.body);
+    for (const i of items) {
+      for (const k of ['id', 'at', 'event', 'actor', 'subject']) expect(typeof i[k], k).toBe('string');
+      expect(typeof i['meta']).toBe('object');
+    }
+    const ats = items.map((i) => Date.parse(i['at'] as string));
+    expect([...ats].sort((x, y) => y - x)).toEqual(ats);
+    const subjects = items.map((i) => i['subject'] as string);
+    expect(subjects).toContain(`org:${a.org.id}`);
+    const joined = items.find((i) => (i['subject'] as string).startsWith('member:'));
+    expect(joined, JSON.stringify(items)).toBeDefined();
+    // Filtered by event name, only that event comes back.
+    const event = joined?.['event'] as string;
+    const filtered = itemsOf((await call(a.c, 'GET', `/api/v1/audit?event=${encodeURIComponent(event)}`)).body);
+    expect(filtered.length).toBeGreaterThanOrEqual(1);
+    for (const i of filtered) expect(i['event']).toBe(event);
+
+    // A plain member is refused (owners and admins only); made admin, the same person reads the same log.
+    expect((await call(member, 'GET', '/api/v1/audit')).status).toBe(403);
+    const login = (await profileOf(person.caller)).login;
+    const up = await call(a.person.caller, 'PATCH', `/api/v1/orgs/${a.org.id}/members/${encodeURIComponent(login)}`, { role: 'admin' });
+    expect(up.status, JSON.stringify(up.body)).toBe(200);
+    const asAdmin = await call(member, 'GET', '/api/v1/audit');
+    expect(asAdmin.status, JSON.stringify(asAdmin.body)).toBe(200);
+    expect(itemsOf(asAdmin.body).map((i) => i['subject'])).toContain(`org:${a.org.id}`);
+
+    // Another org's owner: 404 when naming the first org, and their own log names none of its lines.
+    const b = await owner('parc-040-b');
+    expect((await call({ ...b.person.caller, org: a.org.id }, 'GET', '/api/v1/audit')).status).toBe(404);
+    const theirs = await call(b.c, 'GET', '/api/v1/audit');
+    expect(theirs.status).toBe(200);
+    for (const marker of [a.org.id, ...subjects.filter((x) => x.startsWith('member:'))]) expect(JSON.stringify(theirs.body)).not.toContain(marker);
+    await needsCredential('GET', '/api/v1/audit');
   }, T);
 });
 

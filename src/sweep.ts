@@ -98,6 +98,33 @@ export function operations(doc: unknown): Operation[] {
 }
 
 /**
+ * The routes the contract itself marks served (`x-ostrom-status: served`): swept even when the served list and the scan
+ * of the server under test miss one, so that a route served by the contract cannot go without a case.
+ */
+export function servedInContract(doc: unknown): Served[] {
+  const out: Served[] = [];
+  const paths = ((doc as Json | undefined)?.['paths'] ?? {}) as Json;
+  for (const [path, rawItem] of Object.entries(paths)) {
+    const item = (resolve(doc, rawItem) ?? {}) as Json;
+    for (const method of METHODS) {
+      if ((item[method] as Json | undefined)?.['x-ostrom-status'] === 'served') out.push({ method: method.toUpperCase(), key: keyOf(path) });
+    }
+  }
+  return out;
+}
+
+/** Several lists of served routes as one: each route once, in the order first seen. */
+export function mergeServed(...lists: readonly (readonly Served[])[]): Served[] {
+  const seen = new Set<string>();
+  return lists.flat().filter((r) => {
+    const label = `${r.method} ${r.key}`;
+    if (seen.has(label)) return false;
+    seen.add(label);
+    return true;
+  });
+}
+
+/**
  * A small valid instance of a schema: its `const`, example, default or first enum value; the required properties of an
  * object; the first non-null branch of a `oneOf`/`anyOf`; the merge of an `allOf`. Enough for a request to pass the
  * shape checks, so that what answers is the authorization, not the validation.
@@ -262,7 +289,8 @@ export interface Answer {
   readonly text: string;
 }
 
-const VOLATILE = new Set(['requestId', 'traceId', 'timestamp', 'time', 'now', 'serverTime']);
+// A governance write answers a confirmation minted for that very call (ostrom-server#146): its id, link and expiry.
+const VOLATILE = new Set(['requestId', 'traceId', 'timestamp', 'time', 'now', 'serverTime', 'confirmationId', 'confirmUrl', 'expiresAt']);
 
 /**
  * An answer's body made comparable: the values the request sent are replaced by `<sent>` (a message may name the id

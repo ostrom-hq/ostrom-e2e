@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
-import { type Call, type Leak, type Operation, fill, judge, keyOf, leakKey, mimic, normalize, operations, paramPrefix, parseServed, plan, reconcile, resolve, sample } from '../src/sweep.ts';
+import { type Call, type Leak, type Operation, fill, judge, keyOf, leakKey, mergeServed, mimic, normalize, operations, paramPrefix, parseServed, plan, reconcile, resolve, sample, servedInContract } from '../src/sweep.ts';
 
 describe('served routes', () => {
   it('reads one route per line, without comments, URLs or doubles; a `!` route is served all the same', () => {
@@ -58,6 +58,25 @@ describe('operations', () => {
     expect(by('me')).toMatchObject({ public: false });
     expect(ops).toHaveLength(6);
     expect(operations(undefined)).toEqual([]);
+  });
+
+  it('reads the routes the contract marks served, and merges served lists without doubles', () => {
+    const doc = {
+      paths: {
+        '/api/v1/push-devices/{id}': { delete: { 'x-ostrom-status': 'served' }, get: { 'x-ostrom-status': 'planned' } },
+        '/api/v1/push-devices': { $ref: '#/x/devices' },
+        '/api/v1/ghost': { $ref: '#/nope' },
+      },
+      x: { devices: { post: { 'x-ostrom-status': 'served' } } },
+    };
+    expect(servedInContract(doc)).toEqual([{ method: 'DELETE', key: '/api/v1/push-devices/{}' }, { method: 'POST', key: '/api/v1/push-devices' }]);
+    expect(servedInContract(undefined)).toEqual([]);
+    const listed = parseServed('POST /api/v1/push-devices\nGET /health');
+    expect(mergeServed(listed, servedInContract(doc))).toEqual([
+      { method: 'POST', key: '/api/v1/push-devices' },
+      { method: 'GET', key: '/health' },
+      { method: 'DELETE', key: '/api/v1/push-devices/{}' },
+    ]);
   });
 });
 
@@ -173,6 +192,7 @@ describe('judge', () => {
   it('makes bodies comparable', () => {
     expect(normalize(JSON.stringify({ error: { message: 'Rule rule-A not found', requestId: 'x', traceId: 'y' } }), ['rule-A', 'ab'])).toBe('{"error":{"message":"Rule <sent> not found"}}');
     expect(normalize('plain rule-A', ['rule-A', 'plain'])).toBe('<sent> <sent>');
+    expect(normalize(JSON.stringify({ confirmationId: 'gcf_1', confirmUrl: 'http://x/confirm/gcf_1', expiresAt: '2026-11-03T11:23:15Z' }), [])).toBe('{}');
   });
 
   it('accepts the answer of a missing resource, and nothing of A', () => {
