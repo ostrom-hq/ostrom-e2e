@@ -960,7 +960,10 @@ describe('E2E-PARC: 4. workflows and automations', () => {
 
   it.skipIf(W022P !== '')(named('E2E-PARC-022 — 4.1 a run is played: its agent node runs a cloud session, its gate waits for the yes, the run succeeds; another is cancelled', W022P), async () => {
     const a = await owner('parc-022-p');
-    const login = (await profileOf(a.person.caller)).login;
+    // The gate's approver is another member: whoever started the run never approves its gate alone (four eyes, the
+    // server's self-approval rule refuses the starter's yes when nobody else can answer).
+    const reviewer = await invited(a, 'parc-022-pr');
+    const login = (await profileOf(reviewer.caller)).login;
     const wid = `parc-${randomUUID().slice(0, 8)}`;
     const nodes = [
       { id: 'build', kind: 'agent', label: 'Build', run: { instructions: 'Fix the build of {{inputs.branch}}', agent: 'claude' } },
@@ -994,10 +997,10 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect(waiting['currentNodeId']).toBe('review');
 
     // 2. The gate node: its approver's pending approval; the yes ends the run succeeded.
-    const pending = await call(a.person.caller, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
+    const pending = await call(reviewer.caller, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
     const mine = itemsOf(pending.body).find((x) => x['group'] === review?.['gateId']);
     expect(mine, JSON.stringify({ run: waiting, pending: pending.body })).toBeDefined();
-    const yes = await call(a.person.caller, 'POST', `/api/v1/approvals/${String(mine?.['id'])}/answer`, { answer: 'approve', shownDigest: mine?.['shownDigest'] });
+    const yes = await call(reviewer.caller, 'POST', `/api/v1/approvals/${String(mine?.['id'])}/answer`, { answer: 'approve', shownDigest: mine?.['shownDigest'] });
     expect(yes.status, JSON.stringify(yes.body)).toBe(200);
     const ended = await runUntil(a.c, id, (r) => r['status'] !== 'waiting');
     expect(ended['status'], JSON.stringify(ended)).toBe('succeeded');
