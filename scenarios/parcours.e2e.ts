@@ -82,6 +82,8 @@ const W008 = (await needs(['POST', '/api/v1/mcp/servers'], ['PUT', '/api/v1/mcp/
 const W009 = (await needs(['POST', '/api/v1/secrets'], ['GET', '/api/v1/secrets'], ['PUT', '/api/v1/secrets/{id}'], ['DELETE', '/api/v1/secrets/{id}'])) || ORG64;
 const W010 = await needs(['POST', '/api/v1/tokens'], ['GET', '/api/v1/tokens'], ['POST', '/api/v1/tokens/{id}/rotate'], ['DELETE', '/api/v1/tokens/{id}']);
 const W011 = await needs(['GET', '/api/v1/service-keys'], ['POST', '/api/v1/service-keys'], ['GET', '/api/v1/devices'], ['GET', '/api/v1/auth/sessions']);
+const W041 = await needs(['GET', '/api/v1/orgs/{id}'], ['PATCH', '/api/v1/orgs/{id}'], ['POST', '/api/v1/orgs/{id}/members/invites']);
+const W042 = (await needs(['DELETE', '/api/v1/orgs/{id}'], ['GET', '/api/v1/orgs/{id}'], ['POST', '/api/v1/orgs/{id}/members/invites'], ['POST', '/api/v1/secrets'], ['POST', '/api/v1/tokens'])) || ORG64;
 
 describe('E2E-PARC: 2. organization setup', () => {
   it.skipIf(W001 !== '')(named('E2E-PARC-001 — 2.2 a new person creates an organization and reads it back, owner', W001), async () => {
@@ -310,6 +312,102 @@ describe('E2E-PARC: 2. organization setup', () => {
     const b = await owner('parc-011-b');
     await hidden(b.c, '/api/v1/service-keys', key.body['id'] as string);
     for (const p of ['/api/v1/service-keys', '/api/v1/devices', '/api/v1/auth/sessions']) await needsCredential('GET', p);
+  }, T);
+
+  it.skipIf(W041 !== '')(named('E2E-PARC-041 — 2.11 an admin renames the organization and sets its time zone; a member cannot, another org gets 404', W041), async () => {
+    const a = await owner('parc-041');
+    const admin = email('parc-041-admin');
+    const member = email('parc-041-member');
+    expect((await invite(a.person, a.org.id, [admin], 'admin')).status).toBeLessThan(300);
+    expect((await invite(a.person, a.org.id, [member])).status).toBeLessThan(300);
+    const ad = await join(admin);
+    const me = await join(member);
+    expect(ad.accepted.status, JSON.stringify(ad.accepted.body)).toBeLessThan(300);
+    expect(me.accepted.status, JSON.stringify(me.accepted.body)).toBeLessThan(300);
+    const path = `/api/v1/orgs/${a.org.id}`;
+    // A new organization is in UTC until an owner or an admin sets its zone.
+    expect((await call(a.person.caller, 'GET', path)).body).toMatchObject({ id: a.org.id, timeZone: 'UTC' });
+
+    const name = `Parc 041 ${randomUUID().slice(0, 6)}`;
+    const changed = await call(ad.person.caller, 'PATCH', path, { name, timeZone: 'Europe/Paris' });
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    expect(changed.body).toMatchObject({ id: a.org.id, slug: a.org.slug, name, timeZone: 'Europe/Paris', role: 'admin' });
+    // Read back by the owner, by id and by short name, and in the owner's list.
+    for (const ref of [a.org.id, a.org.slug]) {
+      expect((await call(a.person.caller, 'GET', `/api/v1/orgs/${ref}`)).body).toMatchObject({ name, timeZone: 'Europe/Paris' });
+    }
+    expect(itemsOf((await call(a.person.caller, 'GET', '/api/v1/orgs')).body).find((o) => o['id'] === a.org.id)).toMatchObject({ name });
+    // A field left out stays as it is; the short name is accepted unchanged and never changes.
+    const zoneOnly = await call(a.person.caller, 'PATCH', path, { timeZone: 'America/New_York', slug: a.org.slug });
+    expect(zoneOnly.status, JSON.stringify(zoneOnly.body)).toBe(200);
+    expect(zoneOnly.body).toMatchObject({ name, slug: a.org.slug, timeZone: 'America/New_York' });
+    expect((await call(a.person.caller, 'PATCH', path, { slug: `${a.org.slug}-x` })).status).toBe(400);
+    expect((await call(a.person.caller, 'PATCH', path, { timeZone: 'Mars/Olympus' })).status).toBe(400);
+    expect((await call(a.person.caller, 'PATCH', path, { name: '' })).status).toBe(400);
+
+    // A plain member is refused, and changes nothing.
+    const refused = await call(me.person.caller, 'PATCH', path, { name: 'by a member' });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body?.['error']).toBeTruthy();
+    // Another organization's owner: 404, as for a missing organization, and the name stays.
+    const b = await owner('parc-041-b');
+    const foreign = await call(b.person.caller, 'PATCH', path, { name: 'by another org' });
+    expect(foreign.status, JSON.stringify(foreign.body)).toBe(404);
+    expect(JSON.stringify(foreign.body)).not.toContain(name);
+    expect((await call(b.person.caller, 'PATCH', `/api/v1/orgs/${randomUUID()}`, { name: 'nowhere' })).status).toBe(404);
+    expect((await call(a.person.caller, 'GET', path)).body).toMatchObject({ name, timeZone: 'America/New_York' });
+    await needsCredential('PATCH', path, { name: 'no credential' });
+  }, T);
+
+  it.skipIf(W042 !== '')(named('E2E-PARC-042 — 2.11 the owner deletes the organization from a browser: nothing of it reads any more, another org is untouched, a replay changes nothing', W042), async () => {
+    const a = await owner('parc-042');
+    const member = email('parc-042-member');
+    expect((await invite(a.person, a.org.id, [member])).status).toBeLessThan(300);
+    const m = await join(member);
+    expect(m.accepted.status, JSON.stringify(m.accepted.body)).toBeLessThan(300);
+    const path = `/api/v1/orgs/${a.org.id}`;
+    const secret = `PARC042_${randomUUID().slice(0, 8).toUpperCase()}`;
+    expect((await call(a.c, 'POST', '/api/v1/secrets', { name: secret, value: `v-${randomUUID()}` })).status).toBeLessThan(300);
+    // Another organization, with data of its own: the deletion never reaches it.
+    const b = await owner('parc-042-b');
+    const kept = `PARC042B_${randomUUID().slice(0, 8).toUpperCase()}`;
+    expect((await call(b.c, 'POST', '/api/v1/secrets', { name: kept, value: `v-${randomUUID()}` })).status).toBeLessThan(300);
+
+    // The contract: a browser session only, never a token, even the owner's with `orgs:write`.
+    const made = await call(a.c, 'POST', '/api/v1/tokens', { name: 'parc-042', scopes: ['orgs:write'], expiresInDays: 1 });
+    expect(made.status, JSON.stringify(made.body)).toBeLessThan(300);
+    const byToken = await call({ token: made.body['secret'] as string }, 'DELETE', path, { confirm: a.org.slug });
+    expect(byToken.status, JSON.stringify(byToken.body)).toBe(403);
+    // The owner only; another org's owner gets 404; the short name must be typed again.
+    expect((await call(m.person.caller, 'DELETE', path, { confirm: a.org.slug })).status).toBe(403);
+    expect((await call(b.person.caller, 'DELETE', path, { confirm: a.org.slug })).status).toBe(404);
+    expect((await call(a.person.caller, 'DELETE', `/api/v1/orgs/${b.org.id}`, { confirm: b.org.slug })).status).toBe(404);
+    const wrong = await call(a.person.caller, 'DELETE', path, { confirm: `${a.org.slug}-typo` });
+    expect(wrong.status, JSON.stringify(wrong.body)).toBe(400);
+    expect((await call(a.person.caller, 'GET', path)).status, 'still there after the refusals').toBe(200);
+    await needsCredential('DELETE', path, { confirm: a.org.slug });
+
+    // Signed in a moment ago (under the 5 minutes the deletion asks): deleted.
+    const deleted = await call(a.person.caller, 'DELETE', path, { confirm: a.org.slug });
+    expect(deleted.status, JSON.stringify(deleted.body)).toBe(204);
+
+    // Nothing of it reads any more, for its owner as for its member: the organization, its members, its data.
+    for (const who of [a.person.caller, m.person.caller]) {
+      for (const ref of [a.org.id, a.org.slug]) expect((await call(who, 'GET', `/api/v1/orgs/${ref}`)).status).toBe(404);
+      expect((await call(who, 'GET', `${path}/members`)).status).toBe(404);
+      expect(JSON.stringify((await call(who, 'GET', '/api/v1/me/organizations')).body)).not.toContain(a.org.id);
+      expect(JSON.stringify((await call(who, 'GET', '/api/v1/orgs')).body)).not.toContain(a.org.id);
+      const data = await call({ ...who, org: a.org.id }, 'GET', '/api/v1/secrets');
+      expect(data.status, `secrets of a deleted org → ${data.status}`).toBeGreaterThanOrEqual(400);
+      expect(data.status).toBeLessThan(500);
+      expect(JSON.stringify(data.body)).not.toContain(secret);
+    }
+    expect((await call(a.person.caller, 'PATCH', path, { name: 'after the deletion' })).status).toBe(404);
+
+    // Replayed: no effect, and the other organization stays whole.
+    expect((await call(a.person.caller, 'DELETE', path, { confirm: a.org.slug })).status).toBe(404);
+    expect((await call(b.person.caller, 'GET', `/api/v1/orgs/${b.org.id}`)).body).toMatchObject({ id: b.org.id, role: 'owner' });
+    expect(itemsOf((await call(b.c, 'GET', '/api/v1/secrets')).body).map((x) => x['name'])).toContain(kept);
   }, T);
 });
 

@@ -3299,7 +3299,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | 1.2 Connexion GitHub | E2E-AUTH-002 |
 | 1.3 Première connexion, création du compte | E2E-AUTH-001, E2E-AUTH-002 (le compte naît à la première connexion) |
 | 2.1 Onboarding guidé | aucune route serveur ; `ostrom init` en attente (famille HARNESS) |
-| 2.11 Révocation et déconnexion | E2E-AUTH-004 (complété par E2E-PARC-010 et 011) |
+| 2.11 Révocation et déconnexion | E2E-AUTH-004 (complété par E2E-PARC-010, 011, 041 et 042) |
 | 5.1 `ostrom login` (appareil) | E2E-LOGIN-001, E2E-AUTH-003 |
 | 5.3 Action protégée, la porte s'ouvre (boucle CLI) | E2E-GATE-001 (complété par E2E-PARC-013 et 027) |
 | 5.4 Le second membre dit oui (step-up) | E2E-YES-001, E2E-AUTH-007 |
@@ -3307,7 +3307,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | 5.8 Isolation entre deux orgs | E2E-ISO-001, E2E-ISO-002 |
 | 6.5 Facturation : plan, checkout, portail | E2E-BILL-005, E2E-BILL-006, E2E-BILL-007 |
 
-Étapes de ce chapitre : 2.2 → PARC-001 ; 2.3 → 002 ; 2.4 → 003 ; 2.5 → 004 ; 2.6 → 005 ; 2.7 → 006 ; 2.8 → 007 ; 2.9 → 008 ; 2.10 → 009 ; 2.11 → 010, 011 ; 3.1 → 012 ; 3.2 → 013 ; 3.3 → 014, 015 ; 3.4 → 016, 017 ; 3.5 → 018, 019 ; 3.6 → 020 ; 4.1 → 021, 022 ; 4.2 → 023 ; 4.3 → 024 ; 5.2 → 025, 026, 017 ; 5.3 → 027 ; 5.5 → 028 ; 5.7 → 029, 030 ; 6.1 → 031 ; 6.2 → 032 ; 6.3 → 033 ; 6.4 → 034, 019 ; 6.6 → 035 ; 6.7 → 036, 037.
+Étapes de ce chapitre : 2.2 → PARC-001 ; 2.3 → 002 ; 2.4 → 003 ; 2.5 → 004 ; 2.6 → 005 ; 2.7 → 006 ; 2.8 → 007 ; 2.9 → 008 ; 2.10 → 009 ; 2.11 → 010, 011, 041, 042 ; 3.1 → 012 ; 3.2 → 013 ; 3.3 → 014, 015 ; 3.4 → 016, 017 ; 3.5 → 018, 019 ; 3.6 → 020 ; 4.1 → 021, 022 ; 4.2 → 023 ; 4.3 → 024 ; 5.2 → 025, 026, 017 ; 5.3 → 027 ; 5.5 → 028 ; 5.7 → 029, 030 ; 6.1 → 031 ; 6.2 → 032 ; 6.3 → 033 ; 6.4 → 034, 019 ; 6.6 → 035 ; 6.7 → 036, 037.
 
 ### E2E-PARC-001 — 2.2 Créer l'organisation et la relire, propriétaire
 
@@ -3657,6 +3657,24 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#47)
 
+
+### E2E-PARC-041 — 2.11 Réglages de l'org : nom et fuseau changés par un admin ; un membre ne peut pas, une autre org reçoit 404
+
+- Étapes : Le propriétaire invite un admin et un membre. L'admin change le nom et le fuseau (`PATCH /api/v1/orgs/{org}`, `{name, timeZone}`) ; le propriétaire relit l'org par son id, son nom court et sa liste ; il change le fuseau seul en renvoyant le nom court inchangé, puis essaie un autre nom court, un fuseau inconnu, un nom vide. Le membre tente un renommage ; le propriétaire d'une autre org aussi, et sur une org qui n'existe pas.
+- Attendu : une org neuve est en `UTC` ; 200 `{id, slug, name, timeZone, role: admin}` pour l'admin, relu tel quel par le propriétaire ; un champ omis ne change pas, le nom court ne change jamais (400 s'il diffère) ; 400 pour un fuseau hors IANA et un nom vide ; 403 avec l'enveloppe d'erreur pour le membre ; 404 pour l'autre org comme pour une org absente, sans rien de l'org dans la réponse ; rien n'a changé après les refus ; 401 sans identifiant.
+- Surfaces : serveur (l'écran Réglages de la console lit cette route : `settings.spec` d'ostrom-web)
+- Source : `demo/PARCOURS.md` 2.11
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
+
+### E2E-PARC-042 — 2.11 Suppression de l'org par le propriétaire : plus rien ne se lit, une autre org intacte, la relance sans effet
+
+- Étapes : Le propriétaire invite un membre et écrit un secret dans son org ; une autre org écrit le sien. Tentatives de `DELETE /api/v1/orgs/{org}` `{confirm}` : par un jeton `orgs:write` du propriétaire, par le membre, par le propriétaire de l'autre org, par le propriétaire sur l'autre org, avec un nom court mal retapé, sans identifiant. Puis le propriétaire, connecté depuis moins de 5 minutes, supprime avec le bon nom court ; il relance la suppression.
+- Attendu : le contrat n'exige pas de confirmation de gouvernance mais une session de navigateur : 403 pour le jeton ; 403 pour le membre ; 404 pour l'autre org dans les deux sens ; 400 pour un nom court qui ne correspond pas ; 401 sans identifiant ; l'org est toujours là après ces refus. Puis 204 ; pour le propriétaire comme pour le membre, l'org (par id et nom court), ses membres, sa place dans `GET /orgs` et `GET /me/organizations`, et ses secrets (`Ostrom-Org`) ne se lisent plus (404, ou un refus 4xx sans le nom du secret) ; `PATCH` rend 404. La relance rend 404 ; l'autre org et son secret sont intacts.
+- Surfaces : serveur (l'écran Réglages de la console lit cette route : `settings.spec` d'ostrom-web)
+- Source : `demo/PARCOURS.md` 2.11
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`. Non joué ici : une connexion de plus de 5 minutes (le banc n'avance pas l'horloge du serveur ; prouvé par `OrgSettingsUseCasesTest` d'ostrom-server)
 
 ## ATT : Attestation des checks d'un reçu (décision du 30/10 13:23)
 
