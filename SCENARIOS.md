@@ -693,7 +693,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, faux GitHub, console (« Mon compte »)
 - Source : décision Q-GATES-G1, option a (03/11) ; ostrom-server feat/gates-unlinked-author
 - Priorité : P1
-- Statut : bloqué : ostrom-server
+- Statut : codé : `scenarios/gate-unlinked.e2e.ts` (ostrom-server#281)
 
 
 ## BYPASS : Contournements de la porte (audit du 30/10 et trous connus)
