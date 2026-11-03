@@ -54,6 +54,11 @@ jobs:
             OSTROM_GITHUB_API_URL=http://127.0.0.1:4610
             OSTROM_GITHUB_CLIENT_ID=Iv1.e2ebench
             OSTROM_GITHUB_CLIENT_SECRET=e2e-bench-fake-github
+            # Cloud sessions for every organization of the bench, on the registered driver (the server only plans them):
+            # no runner takes one here, so a workflow run's agent node waits on its session until the scenario ends it.
+            OSTROM_RUNNERS_DRIVER=registered
+            OSTROM_RUNNERS_SERVER_URL=http://127.0.0.1:4600
+            OSTROM_RUNNERS_ALLOWED_ORGS=*
           docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail
           required: "true"
       - name: Gate load setup (requester token, approver session)

@@ -59,6 +59,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/push-devices/{id}': 'pushDevice',
   '/api/v1/rules/{id}': 'rule',
   '/api/v1/runners/{id}': 'runner',
+  '/api/v1/runs/{id}': 'run',
   '/api/v1/secrets/{name}': 'secret',
   '/api/v1/service-keys/{id}': 'serviceKey',
   '/api/v1/sessions/{id}': 'session',
@@ -269,6 +270,8 @@ async function makeWorld(): Promise<World> {
       ['id'],
     ),
   );
+  // A run of that workflow (its gate node waits for A's yes once the engine plays it).
+  await make('run', () => post(`/api/v1/workflows/${enc(values['workflow'] ?? workflowId)}/runs`, { inputs: {} }, 'startWorkflowRun', ['id']));
   await make('package', async () => {
     const r = await call(c, 'GET', '/api/v1/packages/current');
     const digest = field(r.body, 'digest') ?? field(r.body, 'package', 'digest');
