@@ -247,7 +247,7 @@ jobs:
           # another question, and its numbers would be lost. The step fails if either run fails.
           rc=0
           k6 run --summary-export gates-summary.json load/smoke.js || rc=$?
-          k6 run --summary-export race-summary.json load/race.js || rc=$?
+          # perf/race-memory-probe-e464 only: no race on main, it is the OOM #266 fixes; the rounds measure the threads.
           exit "$rc"
       # perf/race-memory-probe only: the server's memory around bursts of N simultaneous requests (never merged).
       - name: Race memory probe
@@ -255,6 +255,8 @@ jobs:
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
           OSTROM_LOAD_APPROVER_ORIGIN: http://127.0.0.1:4600
+          # main dies on the 400 simultaneous yes (the race OOM #266 fixes): the rounds hold streams and waits only.
+          OSTROM_SAT_CALLS: "0"
         run: scripts/race-probe.sh ostrom-e2e-server | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Server logs
         if: always() && steps.server.outputs.available == 'true'

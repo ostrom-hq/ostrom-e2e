@@ -22,7 +22,7 @@ export const options = {
   scenarios: {
     streams: { executor: 'per-vu-iterations', vus: STREAMS, iterations: 1, maxDuration: '60s', exec: 'stream' },
     waits: { executor: 'per-vu-iterations', vus: WAITS, iterations: 1, maxDuration: '60s', exec: 'wait' },
-    calls: { executor: 'per-vu-iterations', vus: CALLS, iterations: 1, maxDuration: '60s', exec: 'call', startTime: '8s' },
+    ...(CALLS > 0 ? { calls: { executor: 'per-vu-iterations', vus: CALLS, iterations: 1, maxDuration: '60s', exec: 'call', startTime: '8s' } } : {}),
     health: { executor: 'constant-arrival-rate', rate: 5, timeUnit: '1s', duration: '40s', preAllocatedVUs: 5, exec: 'healthCheck' },
   },
   // Sub-metrics only exist in the summary when a threshold names them.
