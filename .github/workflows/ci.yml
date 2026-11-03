@@ -193,7 +193,7 @@ jobs:
           OSTROM_E2E_TEAMCODE_PASSWORD: teamcode-ro
           OSTROM_E2E_TEAMCODE_KEY_FILE: ${{ github.workspace }}/.ostrom/helm/compose/demo/teamcode/key.txt
           OSTROM_E2E_FAKE_TOKENS_PORT: "4620"
-          # E2E-PARC-038: the fake Expo push service the scenario starts, where the server's pushes go (step above).
+          # E2E-PARC-046: the fake Expo push service the scenario starts, where the server's pushes go (step above).
           OSTROM_E2E_FAKE_EXPO_PORT: "4621"
           # E2E-SWEEP: the routes to sweep and the operations they come from (step above).
           OSTROM_E2E_SERVED_ROUTES: ${{ runner.temp }}/served-routes.txt
