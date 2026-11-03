@@ -12,7 +12,7 @@ afterEach(async () => {
 const post = (url: string, body: string, headers: Record<string, string> = {}) =>
   fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body });
 
-const message = (to: string, approvalId = 'a-1') => ({ to, title: 'ana asks for your yes', body: 'Push to main · acme/app', sound: 'default', channelId: 'approvals', data: { kind: 'approval', approvalId } });
+const message = (to: string, approvalId = 'a-1') => ({ to, title: 'ana asks for your yes', body: 'Push to main · acme/app', sound: 'default', channelId: 'requests', data: { kind: 'approval', approvalId } });
 
 describe('FakeExpo', () => {
   it("accepts a batch of messages with a ticket each, as Expo's push service does, and records them in order", async () => {
@@ -24,7 +24,7 @@ describe('FakeExpo', () => {
     expect(body.data.map((t) => t.status)).toEqual(['ok', 'ok']);
     expect(new Set(body.data.map((t) => t.id)).size).toBe(2);
     expect(expo.messages.map((m) => [m.to, m.data['approvalId']])).toEqual([['ExponentPushToken[a]', 'a-1'], ['ExponentPushToken[b]', 'a-2']]);
-    expect(expo.messages[0]).toMatchObject({ title: 'ana asks for your yes', body: 'Push to main · acme/app', channelId: 'approvals', authorization: 'Bearer expo-token' });
+    expect(expo.messages[0]).toMatchObject({ title: 'ana asks for your yes', body: 'Push to main · acme/app', channelId: 'requests', authorization: 'Bearer expo-token' });
     expect(expo.requests).toBe(1);
   });
 

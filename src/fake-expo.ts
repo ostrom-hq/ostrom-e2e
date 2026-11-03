@@ -12,7 +12,7 @@ export interface PushMessage {
   readonly to: string | undefined;
   readonly title: string | undefined;
   readonly body: string | undefined;
-  /** The Android notification channel the message names (the app's `approvals`). */
+  /** The Android notification channel the message names (the app's `requests`). */
   readonly channelId: string | undefined;
   readonly data: Record<string, unknown>;
   /** The `Authorization` the server sent: its Expo access token (OSTROM_EXPO_ACCESS_TOKEN), when it has one. */
