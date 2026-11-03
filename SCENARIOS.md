@@ -3102,23 +3102,23 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849 — `/health` p95 1,31 ms, p99 2,14 ms ; `/api/v1/instance` p95 1,92 ms, p99 3,04 ms ; 0 % d'erreurs sur 6 002 requêtes, 9 003 checks sur 9 003 (`load/smoke.js`, job `ci` d'ostrom-e2e)
 
 
-## DOGFOOD : Le harnais ControlResell en workflows Ostrom (dogfood)
+## DOGFOOD : Le harnais d'une équipe pilote en workflows Ostrom (dogfood)
 
-### E2E-DOGFOOD-001 — Les 8 workflows du harnais CR compilent en paquets signés
+### E2E-DOGFOOD-001 — Les 8 workflows du harnais pilote compilent en paquets signés
 
-- Étapes : compiler les 8 workflows `wf-cr-*.ts` du dogfood (db-perf, deploy, fix-ticket, mcp-guards, pr-workflow, push-guard, review, station) par le compilateur de la réécriture, publier les paquets, `ostrom verify` sur chacun.
+- Étapes : compiler les 8 workflows `wf-*.ts` du dogfood (performance de la base, déploiement, correction d'un ticket, gardes MCP, flux de PR, garde du push, revue, poste) par le compilateur de la réécriture, publier les paquets, `ostrom verify` sur chacun.
 - Attendu : 4 paquets (au moins) signés et vérifiés hors ligne ; le résumé de chaque paquet liste les nœuds compilés ; aucune porte sans action ne compile.
 - Surfaces : serveur, CLI
-- Source : dogfood/examples/controlresell/README et COUVERTURE.md (`out/`, `summary.json`) ; JOURNAL du 30/10 02:05
+- Source : dogfood/examples/pilote/README et COUVERTURE.md (`out/`, `summary.json`) ; JOURNAL du 30/10 02:05
 - Priorité : P1
 - Statut : bloqué : ostrom-server (compilateur) + ostrom-core (modèle de workflow)
 
-### E2E-DOGFOOD-002 — `behave.mjs` porté : chaque hook CR rejoué par le faux agent donne la décision attendue
+### E2E-DOGFOOD-002 — `behave.mjs` porté : chaque hook du harnais pilote rejoué par le faux agent donne la décision attendue
 
 - Étapes : sur des dépôts jetables, le faux agent rejoue les actions de `behave.mjs` (push, deploy, merge, appels MCP gardés…) sous `ostrom claude` avec les paquets du dogfood.
-- Attendu : les 27 cas de `out/behave.json` donnent la même décision qu'au prototype ; puis la cible de la réécriture : 85 % des hooks CR appliqués (contre 40 % au prototype), mesurée et publiée dans RAPPORT.md.
+- Attendu : les 27 cas de `out/behave.json` donnent la même décision qu'au prototype ; puis la cible de la réécriture : 85 % des hooks du harnais pilote appliqués (contre 40 % au prototype), mesurée et publiée dans RAPPORT.md.
 - Surfaces : CLI, serveur, faux agent
-- Source : dogfood/examples/controlresell/behave.mjs, COUVERTURE.md § « Ce que le hook fait vraiment » et § 4 (5 extensions)
+- Source : dogfood/examples/pilote/behave.mjs, COUVERTURE.md § « Ce que le hook fait vraiment » et § 4 (5 extensions)
 - Priorité : P1
 - Statut : bloqué : ostrom-cli (hooks) + ostrom-server (paquets)
 
@@ -3830,7 +3830,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | DIST | Distribution et mise à jour | 4 | 0 | 2 | 2 |
 | TC | Migration depuis le prototype et compatibilité TeamCode | 2 | 0 | 0 | 2 |
 | LOAD | Charge (k6) | 11 | 0 | 2 | 9 |
-| DOGFOOD | Le harnais ControlResell en workflows Ostrom | 3 | 0 | 3 | 0 |
+| DOGFOOD | Le harnais d'une équipe pilote en workflows Ostrom | 3 | 0 | 3 | 0 |
 | OBS | Observabilité (traces, télémétrie opt-in) | 3 | 0 | 2 | 1 |
 | SRV | Socle du serveur (santé, instance, erreurs, en-têtes) | 4 | 2 | 2 | 0 |
 | BILL | Facturation (abonnement Stripe, limites du plan) | 7 | 0 | 6 | 1 |
