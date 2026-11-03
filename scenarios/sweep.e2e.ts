@@ -312,8 +312,6 @@ async function makeWorld(): Promise<World> {
   await make('rule', () => post('/api/v1/rules', { statement: `Sweep rule ${tag}`, group: 'git' }, 'createRule', ['id']));
   await make('automation', () => post('/api/v1/automations', { name: `sweep ${tag}`, trigger: { kind: 'cron', cron: '0 21 * * *', timezone: 'Europe/Paris' }, action: { prompt: `Sweep ${tag} {{run.date}}` } }, 'createAutomation', ['id']));
   await make('wait', () => post('/api/v1/waits', { question: `Sweep question ${tag}` }, 'createWait', ['id']));
-  // A sharing group with A in it (served, missed by the scan of the server: E2E-SWEEP takes the contract's routes too).
-  await make('group', () => post('/api/v1/groups', { name: `sweep ${tag}`, members: [login] }, 'createGroup', ['id']));
   await make('mcpServer', () => post('/api/v1/mcp/servers', { name: `sweep-${tag}`, url: 'https://mcp.example.test/mcp', transport: 'http', tools: ['search'] }, 'createMcpServer', ['name']));
   await make('mcpPolicy', async () => {
     if (!values['mcpServer']) throw new Error('no MCP server');

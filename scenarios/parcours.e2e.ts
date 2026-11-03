@@ -614,8 +614,23 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     if (me.body['limitMicros'] != null) expect(me.body['limitMicros'] as number).toBeLessThanOrEqual(42_000_000);
     const b = await owner('parc-018-b');
     expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toMatch(/"usdPerMonth":42\b/);
-    // Refused shapes: a daily budget, a soft budget, an unknown scope.
-    for (const bad of [{ scope: 'org', usdPerDay: 5 }, { scope: 'org', usdPerMonth: 5, hardStop: false }, { scope: 'team', usdPerMonth: 5 }]) expect((await call(a.c, 'PUT', '/api/v1/budgets', bad)).status).toBe(400);
+    // A person's budget (ostrom-server#230): by the day, that warns, named by the member's id from the members list.
+    // Until every server image under test carries #230, an older one refuses it as it did: then its refusals are checked.
+    const self = itemsOf((await call(a.c, 'GET', `/api/v1/orgs/${a.org.id}/members`)).body, 'items')[0]?.['id'];
+    expect(typeof self, 'the members list carries each member id').toBe('string');
+    const person = await call(a.c, 'PUT', '/api/v1/budgets', { scope: 'member', subject: self, usdPerDay: 20, hardStop: false });
+    if (person.status === 400) {
+      for (const bad of [{ scope: 'org', usdPerDay: 5 }, { scope: 'org', usdPerMonth: 5, hardStop: false }]) expect((await call(a.c, 'PUT', '/api/v1/budgets', bad)).status).toBe(400);
+    } else {
+      expect(person.status, JSON.stringify(person.body)).toBe(200);
+      expect(person.body).toMatchObject({ scope: 'member', subject: self, usdPerDay: 20, hardStop: false });
+      const listed = itemsOf((await call(a.c, 'GET', '/api/v1/budgets')).body).filter((i) => i['subject'] === self);
+      expect(listed).toEqual([expect.objectContaining({ usdPerDay: 20, hardStop: false })]);
+      expect(listed[0]).not.toHaveProperty('usdPerMonth');
+      expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toContain(String(self));
+    }
+    // Refused shapes: a workflow budget (not served) and an unknown scope.
+    for (const bad of [{ scope: 'workflow', subject: 'wf', usdPerMonth: 5 }, { scope: 'team', usdPerMonth: 5 }]) expect((await call(a.c, 'PUT', '/api/v1/budgets', bad)).status).toBe(400);
   }, T);
 
   it.skipIf(W019 !== '')(named('E2E-PARC-019 — 3.5 / 6.4 spending of the week and the month, by agent, repo, person and day, against the budget', W019), async () => {
@@ -692,6 +707,25 @@ const W021 = (await needs(['GET', '/api/v1/workflows'], ['POST', '/api/v1/workfl
 const W022 = await needs(['GET', '/api/v1/workflows/{id}/runs'], ['POST', '/api/v1/workflows/{id}/runs'], ['GET', '/api/v1/runs']);
 const W023 = (await needs(['POST', '/api/v1/automations'], ['POST', '/api/v1/automations/{id}/enable'], ['PUT', '/api/v1/automations/{id}'], ['POST', '/api/v1/automations/{id}/run'], ['POST', '/api/v1/automations/{id}/webhook/rotate-secret'], ['DELETE', '/api/v1/automations/{id}'])) || ORG64;
 const W024 = (await needs(['POST', '/api/v1/waits'], ['GET', '/api/v1/waits/{id}'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/waits/{id}/cancel'])) || ORG64;
+const W044 = (await needs(['POST', '/api/v1/waits/mcp'], ['POST', '/api/v1/waits'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/launches'], ['POST', '/api/v1/sessions'])) || ACTORS || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
+
+/** One JSON-RPC message to the waits MCP server of `session` (`POST /api/v1/waits/mcp?session=`). */
+async function waitsMcp(caller: Caller, session: string, method: string, params: Record<string, unknown> = {}) {
+  const r = await call(caller, 'POST', `/api/v1/waits/mcp?session=${encodeURIComponent(session)}`, { jsonrpc: '2.0', id: randomUUID(), method, params });
+  expect(r.status, JSON.stringify(r.body)).toBe(200);
+  return r.body;
+}
+
+/** A tool of the waits MCP server: its text, and whether the server answered it as a tool error. */
+async function waitsTool(caller: Caller, session: string, name: string, args: Record<string, unknown> = {}) {
+  const body = await waitsMcp(caller, session, 'tools/call', { name, arguments: args });
+  const result = (body['result'] ?? {}) as { content?: { text?: string }[]; isError?: boolean };
+  expect(body['result'], JSON.stringify(body)).toBeDefined();
+  return { text: (result.content ?? []).map((c) => c.text ?? '').join('\n'), isError: result.isError === true };
+}
+
+/** The wait id of an `ask_human` text (« Asked: wait <id> is open, for member <member>. »). */
+const askedWait = (text: string) => /wait ([0-9a-f-]{36}) is open/.exec(text)?.[1] ?? '';
 
 /** A workflow of the contract (`Workflow`): one trigger node, no edge. */
 const workflow = (id: string, name: string) => ({ id, name, domain: 'git', nodes: [{ id: 'start', kind: 'trigger', label: 'Session start' }], edges: [], start: 'start', status: 'proposed', foundAt: new Date().toISOString() });
@@ -790,6 +824,100 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect((await call(a.c, 'GET', `/api/v1/waits/${other.body['id'] as string}`)).body?.['status']).toBe('cancelled');
     const b = await owner('parc-024-b');
     await hidden(b.c, `/api/v1/waits/${id}`, 'Ship it?');
+  }, T);
+
+  it.skipIf(W044 !== '')(named('E2E-PARC-044 — 4.3 an agent token asks only its person, sees and cancels only the waits its person asked, never answers; a resumed segment asks too', W044), async () => {
+    const a = await owner('parc-044');
+    const repo = `acme/parc-${randomUUID().slice(0, 8)}`;
+    // A second person of the org, who asks the owner a question about the owner's session.
+    const otherEmail = email('parc-044-m');
+    expect((await invite(a.person, a.org.id, [otherEmail], 'member')).status).toBe(200);
+    const { person: other, accepted } = await join(otherEmail);
+    expect(accepted.status).toBe(200);
+    const m: Caller = { ...other.caller, org: a.org.id };
+
+    // The owner's launch hands an agent token; its first hook opens the session the waits server is bound to.
+    const launch = await call(a.c, 'POST', '/api/v1/launches', { agent: 'claude', repo });
+    expect(launch.status, JSON.stringify(launch.body)).toBe(201);
+    const agent: Caller = { token: launch.body['agentToken'] as string, org: a.org.id, ...(a.c.from ? { from: a.c.from } : {}) };
+    const sid = randomUUID();
+    const opened = await call(agent, 'POST', '/api/v1/sessions', { id: sid, launchId: launch.body['launchId'], repo, agent: 'claude' });
+    expect(opened.status, JSON.stringify(opened.body)).toBeLessThan(300);
+    const init = await waitsMcp(agent, sid, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } });
+    expect(JSON.stringify(init)).toContain('ostrom-waits');
+    const tools = JSON.stringify(await waitsMcp(agent, sid, 'tools/list'));
+    for (const t of ['ask_human', 'list_waits', 'get_wait', 'cancel_wait']) expect(tools).toContain(t);
+    expect(tools, 'the agent has no tool to answer').not.toMatch(/"name":"answer/);
+
+    // The agent asks its person: the wait is the owner's, in this session.
+    const asked = await waitsTool(agent, sid, 'ask_human', { title: 'Parc 044 own', actions: [{ id: 'yes', label: 'Yes' }] });
+    expect(asked.isError, asked.text).toBe(false);
+    const own = askedWait(asked.text);
+    expect(own, asked.text).not.toBe('');
+    const ownWait = await call(a.c, 'GET', `/api/v1/waits/${own}`);
+    expect(ownWait.body, JSON.stringify(ownWait.body)).toMatchObject({ status: 'open', sessionId: sid, question: { title: 'Parc 044 own' } });
+    const ownerMember = ownWait.body['assignee'] as string;
+
+    // Another person asks the owner about the same session: the agent neither lists, reads nor cancels that wait.
+    const theirs = await call(m, 'POST', '/api/v1/waits', { question: { title: 'Parc 044 theirs', actions: [{ id: 'ok', label: 'OK' }] }, sessionId: sid, assignee: ownerMember });
+    expect(theirs.status, JSON.stringify(theirs.body)).toBeLessThan(300);
+    const theirsId = theirs.body['id'] as string;
+    const listed = await waitsTool(agent, sid, 'list_waits', { status: 'all' });
+    expect(listed.text).toContain(own);
+    expect(listed.text).not.toContain(theirsId);
+    expect(listed.text).not.toContain('Parc 044 theirs');
+    for (const tool of ['get_wait', 'cancel_wait']) {
+      const r = await waitsTool(agent, sid, tool, { wait: theirsId });
+      expect(r.isError, `${tool}: ${r.text}`).toBe(true);
+      expect(r.text).not.toContain('Parc 044 theirs');
+    }
+    expect((await call(a.c, 'GET', `/api/v1/waits/${theirsId}`)).body?.['status'], 'still open').toBe('open');
+
+    // The agent asks only its person: naming the other member is a tool error, and no wait is opened.
+    // The other person's member id: the assignee of a wait they ask themselves.
+    const self = await call(m, 'POST', '/api/v1/waits', { question: { title: 'Parc 044 self', actions: [{ id: 'ok', label: 'OK' }] } });
+    expect(self.status, JSON.stringify(self.body)).toBeLessThan(300);
+    const otherMember = self.body['assignee'] as string;
+    expect(otherMember).not.toBe(ownerMember);
+    const elsewhere = await waitsTool(agent, sid, 'ask_human', { title: 'Parc 044 elsewhere', assignee: otherMember });
+    expect(elsewhere.isError, elsewhere.text).toBe(true);
+    expect((await waitsTool(agent, sid, 'list_waits', { status: 'all' })).text).not.toContain('Parc 044 elsewhere');
+
+    // It never answers, not even its own question: the waits API refuses an agent token whatever it asks.
+    const answer = await call(agent, 'POST', `/api/v1/waits/${own}/answer`, { action: 'yes' });
+    expect(answer.status, JSON.stringify(answer.body)).toBe(403);
+    expect((await call(agent, 'GET', `/api/v1/waits/${own}`)).status).toBe(403);
+    expect((await call(a.c, 'GET', `/api/v1/waits/${own}`)).body?.['status']).toBe('open');
+
+    // It reads and cancels its own.
+    const got = await waitsTool(agent, sid, 'get_wait', { wait: own });
+    expect(got.isError, got.text).toBe(false);
+    expect(got.text).toContain('Parc 044 own');
+    expect((await waitsTool(agent, sid, 'cancel_wait', { wait: own })).isError).toBe(false);
+    expect((await call(a.c, 'GET', `/api/v1/waits/${own}`)).body?.['status']).toBe('cancelled');
+
+    // Resumed by another launch (`claude --resume` keeps the id), the session is segment `<id>~r<n>`: its agent asks
+    // in that segment, and sees only what it asked there.
+    expect((await call(agent, 'POST', `/api/v1/sessions/${sid}/end`, {})).status).toBeLessThan(300);
+    const relaunch = await call(a.c, 'POST', '/api/v1/launches', { agent: 'claude', repo });
+    expect(relaunch.status, JSON.stringify(relaunch.body)).toBe(201);
+    const agent2: Caller = { ...agent, token: relaunch.body['agentToken'] as string };
+    const resumed = await call(agent2, 'POST', '/api/v1/sessions', { id: sid, launchId: relaunch.body['launchId'], repo, agent: 'claude' });
+    expect(resumed.status, JSON.stringify(resumed.body)).toBeLessThan(300);
+    const segment = String(resumed.body['id'] ?? (resumed.body['session'] as Record<string, unknown> | undefined)?.['id'] ?? '');
+    expect(segment, JSON.stringify(resumed.body)).toMatch(new RegExp(`^${sid}~r\\d+$`));
+    const again = await waitsTool(agent2, segment, 'ask_human', { title: 'Parc 044 resumed' });
+    expect(again.isError, again.text).toBe(false);
+    const resumedWait = askedWait(again.text);
+    expect((await call(a.c, 'GET', `/api/v1/waits/${resumedWait}`)).body).toMatchObject({ status: 'open', sessionId: segment });
+    const listed2 = await waitsTool(agent2, segment, 'list_waits', { status: 'all' });
+    expect(listed2.text).toContain(resumedWait);
+    expect(listed2.text).not.toContain(own);
+    expect(listed2.text).not.toContain(theirsId);
+
+    // Another org sees none of it.
+    const b = await owner('parc-044-b');
+    await hidden(b.c, `/api/v1/waits/${resumedWait}`, 'Parc 044');
   }, T);
 });
 
@@ -907,6 +1035,7 @@ describe('E2E-PARC: 5. the CLI, gates, receipts (server side)', () => {
 const W031 = (await needs(['GET', '/api/v1/sessions'], ['GET', '/api/v1/sessions/{id}'])) || ACTORS;
 const W032 = await needs(['GET', '/api/v1/cloud/sessions'], ['GET', '/api/v1/runners']);
 const W033 = await needs(['GET', '/api/v1/activity']);
+const W045 = (await needs(['GET', '/api/v1/activity'], ['POST', '/api/v1/rules'], ['POST', '/api/v1/gates'], ['POST', '/api/v1/tokens'])) || ORG64;
 const W034 = (await needs(['GET', '/api/v1/usage'], ['GET', '/api/v1/usage/summary'], ['GET', '/api/v1/usage/events'])) || ORG64;
 const W035 = (await needs(['POST', '/api/v1/import/teamcode'])) || ORG64;
 const W036 = (await needs(['POST', '/api/v1/auth/mobile/token'], ['GET', '/api/v1/approvals/queue'], ['GET', '/api/v1/approvals/{id}/view'], ['GET', '/api/v1/me/notifications'], ['PUT', '/api/v1/me/notifications'])) || ACTORS;
@@ -952,6 +1081,50 @@ describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => 
     const b = await owner('parc-033-b');
     await hidden(b.c, '/api/v1/activity', a.org.id);
     await needsCredential('GET', '/api/v1/activity');
+  }, T);
+
+  it.skipIf(W045 !== '')(named('E2E-PARC-045 — 6.3 a gate line of the activity feed carries its repository, the real one first, none outside a repository, never another org', W045), async () => {
+    const a = await owner('parc-045');
+    const login = (await profileOf(a.person.caller)).login;
+    const repo = `acme/parc-${randomUUID().slice(0, 8)}`;
+    const real = `acme/real-${randomUUID().slice(0, 8)}`;
+    // A rule whose gate covers a push to main in every repository (an action without `repos`), asked by a token.
+    const rule = await call(a.c, 'POST', '/api/v1/rules', {
+      statement: 'A push to main waits for a yes', group: 'git', scope: [],
+      gate: { actions: [{ class: 'push-main', label: 'Push to main', patterns: [], repos: [] }], approvers: [login] },
+    });
+    expect(rule.status, JSON.stringify(rule.body)).toBe(201);
+    const token = await call(a.c, 'POST', '/api/v1/tokens', { name: 'parc-045 asker', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
+    expect(token.status, JSON.stringify(token.body)).toBeLessThan(300);
+    const asker: Caller = { token: String(token.body['secret']), org: a.org.id };
+    const sha = () => randomUUID().replaceAll('-', '').padEnd(40, '0').slice(0, 40);
+    const push = async (where: Record<string, string>) => {
+      const asked = await call(asker, 'POST', '/api/v1/gates', { ...where, class: 'push-main', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha: sha() }] } });
+      expect(asked.status, JSON.stringify(asked.body)).toBeLessThan(300);
+      const gate = asked.body['gate'] as Record<string, unknown>;
+      expect(gate['status'], JSON.stringify(asked.body)).toBe('pending');
+      return gate['id'] as string;
+    };
+    const declared = await push({ repo });
+    const moved = await push({ repo, realRepo: real });
+    const outside = await push({});
+
+    const feed = itemsOf((await call(a.c, 'GET', '/api/v1/activity?limit=50')).body);
+    const line = (gate: string) => {
+      const found = feed.find((i) => i['id'] === `gate.requested:${gate}`);
+      expect(found, JSON.stringify(feed)).toBeDefined();
+      return found as Record<string, unknown>;
+    };
+    expect(line(declared)['repo']).toBe(repo);
+    expect(line(moved)['repo'], 'the repository the command really ran in').toBe(real);
+    expect('repo' in line(outside), 'no repository: the field is not sent').toBe(false);
+
+    // Another org's feed names none of them, and carries only its own repositories.
+    const b = await owner('parc-045-b');
+    const theirs = await call(b.c, 'GET', '/api/v1/activity?limit=50');
+    expect(theirs.status).toBe(200);
+    for (const marker of [repo, real, declared, moved, outside]) expect(JSON.stringify(theirs.body)).not.toContain(marker);
+    expect((await call({ ...b.person.caller, org: a.org.id }, 'GET', '/api/v1/activity')).status).toBe(404);
   }, T);
 
   it.skipIf(W034 !== '')(named('E2E-PARC-034 — 6.4 usage of a new org: the report, the summary and the events read, for the org only', W034), async () => {
