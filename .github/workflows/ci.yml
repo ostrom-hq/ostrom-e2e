@@ -108,7 +108,7 @@ jobs:
         uses: ./.github/actions/server
         with:
           # perf/race-memory-probe only: the server branch under measurement.
-          ref: fix/gateway-open-calls-cap
+          ref: fix/server-burst-memory
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           core-key: ${{ secrets.DEPLOY_KEY_CORE }}
           database-url: postgresql://localhost:5432/ostrom
@@ -151,6 +151,13 @@ jobs:
           # perf/race-memory-probe only: the chart's limit decided at 13:0x (512Mi).
           docker-args: -v ${{ runner.temp }}/ostrom-mail:/var/lib/ostrom/mail --memory 512m --memory-swap 512m
           required: "true"
+      # perf/race-memory-probe only: the server's resident memory every second, for the whole job (rest before, during
+      # and after the e2e suite).
+      - name: Rest sampler
+        run: |
+          PID=$(docker inspect -f '{{.State.Pid}}' ostrom-e2e-server)
+          nohup bash -c "while sudo test -e /proc/$PID; do echo \"\$(date +%s) \$(sudo awk '/^VmRSS/ {print \$2}' /proc/$PID/status)\" >> '$RUNNER_TEMP/rss.log'; sleep 1; done" >/dev/null 2>&1 &
+          sleep 3; echo "E2E_BEFORE $(date +%s)" >> "$RUNNER_TEMP/marks.log"
       - name: Real ostrom CLI
         id: cli
         uses: ./.github/actions/cli
@@ -200,7 +207,16 @@ jobs:
           OSTROM_E2E_OPENAPI: ${{ runner.temp }}/openapi.json
         # perf/race-memory-probe only: a red scenario must not skip the probe.
         continue-on-error: true
-        run: pnpm e2e --reporter=default --reporter=json --outputFile=e2e-results.json
+        run: |
+          echo "E2E_START $(date +%s)" >> "$RUNNER_TEMP/marks.log"
+          rc=0; pnpm e2e --reporter=default --reporter=json --outputFile=e2e-results.json || rc=$?
+          echo "E2E_END $(date +%s)" >> "$RUNNER_TEMP/marks.log"
+          exit "$rc"
+      - name: Rest 60 s after the e2e suite (perf branch only)
+        if: always()
+        run: |
+          sleep 60; echo "E2E_AFTER60 $(date +%s)" >> "$RUNNER_TEMP/marks.log"
+          node scripts/rest-summary.mjs "$RUNNER_TEMP/rss.log" "$RUNNER_TEMP/marks.log" | tee -a "$GITHUB_STEP_SUMMARY"
       # Short load test on the served public routes; the thresholds of load/smoke.js fail the job.
       - name: k6 smoke against the server image (health, instance)
         if: steps.server.outputs.available == 'true'

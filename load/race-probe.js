@@ -52,5 +52,5 @@ export function handleSummary(data) {
     .join(' ');
   const d = data.metrics['http_req_duration{name:probe}'] || data.metrics.http_req_duration;
   const p = (q) => (d && d.values[q] !== undefined ? d.values[q].toFixed(0) : '?');
-  return { stdout: `PROBE kind=${KIND} n=${N} codes=[${byStatus}] med=${p('med')}ms max=${p('max')}ms\n` };
+  return { stdout: `PROBE kind=${KIND} n=${N} codes=[${byStatus}] med=${p('med')}ms p95=${p('p(95)')}ms max=${p('max')}ms\n` };
 }
