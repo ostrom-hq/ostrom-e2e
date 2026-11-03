@@ -84,23 +84,34 @@ export async function orgsUnavailable(): Promise<string> {
  */
 export const address = () => `10.${1 + Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 256)}.${1 + Math.floor(Math.random() * 250)}`;
 
-/** The sign-in link mailed to `email`: asks for it, then reads the token from OSTROM_MAIL_DIR. */
-export async function mailedToken(email: string, from = address()): Promise<string> {
+/** The cookies a response sets, as a `Cookie` header (name=value pairs). */
+export const cookiesOf = (r: { headers: Headers }) => r.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+
+/**
+ * The sign-in link mailed to `email`: asks for it, then reads the token from OSTROM_MAIL_DIR. `browser` is the cookie
+ * the asking browser keeps (`ostrom_email_link`): since ostrom-server#176 the link signs in only where it is presented.
+ */
+export async function mailedLink(email: string, from = address()): Promise<{ token: string; browser: string }> {
   const asked = await call({ from }, 'POST', '/api/v1/auth/email', { email });
   if (asked.status >= 300) throw new Error(`POST /api/v1/auth/email → ${asked.status} ${JSON.stringify(asked.body)}`);
   const token = signInToken(MAIL_DIR, email, '/auth/email');
   if (!token) throw new Error(`no sign-in mail for ${email} in ${MAIL_DIR}`);
-  return token;
+  return { token, browser: cookiesOf(asked) };
 }
 
-/** The cookies a response sets, as a `Cookie` header (name=value pairs). */
-export const cookiesOf = (r: Response) => r.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+/** Presents a mailed link's token, from the browser holding `browser` (its `ostrom_email_link` cookie) or from none. */
+export const verifyLink = (token: string, from: string, browser = '') =>
+  fetch(url('/api/v1/auth/email/verify'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-forwarded-for': from, ...(browser ? { cookie: browser } : {}) },
+    body: JSON.stringify({ token }),
+  });
 
 /** Signs `email` in by its e-mailed link: a session cookie, its CSRF token, and the console's `Origin` to write. */
 export async function signIn(email: string): Promise<Person> {
   const from = address();
-  const token = await mailedToken(email, from);
-  const r = await fetch(url('/api/v1/auth/email/verify'), { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': from }, body: JSON.stringify({ token }) });
+  const { token, browser } = await mailedLink(email, from);
+  const r = await verifyLink(token, from, browser);
   const body = (await r.json()) as { csrfToken?: string };
   const cookie = cookiesOf(r);
   if (r.status !== 200 || !cookie || !body.csrfToken) throw new Error(`verify → ${r.status} ${JSON.stringify(body)}`);
