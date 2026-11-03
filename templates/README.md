@@ -73,6 +73,10 @@ l'organisation) construisent les vrais binaires natifs linuxX64, en cache par co
 | `smoke.js` | chaque PR serveur, ~70 s | `/health` p95 < 50 ms, p99 < 100 ms ; questions de hook `POST /api/v1/gates` sur des actions ordinaires (200/s) p95 < 50 ms, p99 < 150 ms ; push sur main puis oui `POST /api/v1/approvals/{id}/answer` (20/s) p95 < 150 ms, p99 < 400 ms ; erreurs < 1 % ; checks > 99 % |
 | `race.js` | chaque PR serveur + nuit | 100 oui simultanés sur la même demande : exactement 1 × 200, 99 × 409, aucun autre code |
 | `soak.js` | nuit (`nightly.yml`, 25 min) | 500 questions/s et 50 portes/s pendant 20 min (mêmes p95/p99, erreurs < 0,1 %), puis rampe à 2 000/s : p99 < 500 ms |
+| `inference.js` | `chart-load.yml` | surcoût du gateway (gateway moins appel direct au faux fournisseur, même ingress), premier octet et fin, JSON et flux : p95 < 15 ms (`scripts/relay-summary.ts --check`) |
+| `streams.js` | `chart-load.yml` | 50 puis 200 flux d'une minute ouverts ensemble : tous entiers, aucun redémarrage de pod serveur (OOM à 256 Mi) ; mémoire par flux dans le résumé |
+| `cut.js` | `chart-load.yml` | client qui coupe en plein flux : connexion amont fermée et usage enregistré en 2 s au plus |
+| `mcp.js` | `chart-load.yml` | relais MCP, serveurs rapide, lent, muet et éteint en même temps : outil rapide p95 < 250 ms, muet coupé à l'échéance, éteint en erreur d'outil < 1 s |
 
 Les routes sont celles du contrat `ostrom-core/api/openapi.yaml` (`/api/v1/...`, sonde `/health`) ; `OSTROM_ROUTE_*`
 les change sans toucher aux scénarios. Identifiants : `OSTROM_LOAD_TOKEN` (jeton `gates:ask` du demandeur) et la

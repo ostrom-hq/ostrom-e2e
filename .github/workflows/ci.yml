@@ -63,7 +63,7 @@ jobs:
           ./actionlint -color .github/workflows/*.yml templates/*/ci.yml
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
       - name: k6 scripts parse (k6 inspect)
-        run: for f in load/smoke.js load/race.js load/soak.js load/chart-journeys.js; do k6 inspect "$f" > /dev/null; done
+        run: for f in load/smoke.js load/race.js load/soak.js load/chart-journeys.js load/inference.js load/streams.js load/cut.js load/mcp.js; do k6 inspect "$f" > /dev/null; done
       - name: Unit tests of the bench, 100 % thresholds
         run: pnpm test:coverage
       # Full stack: the real server and the real `ostrom` built from the main branches of ostrom-server and ostrom-cli.
