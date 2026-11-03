@@ -26,6 +26,14 @@ async function unavailable(): Promise<string> {
 
 const WHY = await unavailable();
 const github = new FakeGitHub();
+// The bench's App webhook secret (OSTROM_GITHUB_WEBHOOK_SECRET of ci.yml and ostrom-server's e2e-journey.yml).
+const WEBHOOK_SECRET = process.env['OSTROM_E2E_GITHUB_WEBHOOK_SECRET'] ?? 'whsec_github_e2e';
+
+/** GitHub's signed `installation.created`: the server learns who installed it before the browser comes back. */
+async function created(installation: number, account: string, sender: string): Promise<void> {
+  const payload = { action: 'created', installation: { id: installation, account: { login: account, type: 'Organization' } }, sender: { login: sender } };
+  expect(await github.webhook(`${SERVER_URL.replace(/\/$/, '')}/webhooks/github`, WEBHOOK_SECRET, 'installation', payload)).toBeLessThan(300);
+}
 
 /** GET without following GitHub's redirects: the start sends the browser to GitHub, the callback to the console. */
 async function visit(caller: Person['caller'], path: string): Promise<{ status: number; location: string; body: string }> {
@@ -53,6 +61,9 @@ describe.skipIf(WHY !== '')(`E2E-GH-INSTALL: an organization installs only its o
     await github.start(PORT);
     github.installation(42, 'acme', 'acme-admin');
     github.installation(43, 'globex', 'globex-admin');
+    // Since ostrom-server#118 the callback links an installation only once this webhook named who installed it.
+    await created(42, 'acme', 'acme-admin');
+    await created(43, 'globex', 'globex-admin');
   });
   afterAll(() => github.stop());
 
