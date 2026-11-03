@@ -26,3 +26,6 @@ export const TEAMCODE_KEY_FILE = process.env['OSTROM_E2E_TEAMCODE_KEY_FILE'] ?? 
 // The port of the fake provider token endpoint (src/fake-tokens.ts): the server was started with
 // OSTROM_SHARING_CLAUDE_TOKEN_URL = http://127.0.0.1:<port>/v1/oauth/token (ostrom-server#96).
 export const FAKE_TOKENS_PORT = Number(process.env['OSTROM_E2E_FAKE_TOKENS_PORT'] ?? '0');
+// The port of the fake Expo push service (src/fake-expo.ts) a notification scenario starts: the server was started with
+// OSTROM_EXPO_PUSH_URL = http://127.0.0.1:<port>/--/api/v2/push/send (ostrom-server#228).
+export const FAKE_EXPO_PORT = Number(process.env['OSTROM_E2E_FAKE_EXPO_PORT'] ?? '0');
