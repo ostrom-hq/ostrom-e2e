@@ -68,7 +68,8 @@ the bench contract.
 | `scenarios/` | the runnable scenarios (Vitest); a scenario not written yet shows as `todo` in the CI report |
 | `bin/fake-claude`, `bin/fake-codex`, `src/fake-agent.ts` | the fake agent |
 | `src/fake-github.ts`, `src/git.ts` | a fake GitHub and throwaway git repositories for the scenarios |
-| `load/` | k6 scripts: smoke, soak and ramp, and the race of 100 simultaneous yes |
+| `src/fake-tokens.ts` | a fake provider token endpoint, for the shared accounts the import revives |
+| `load/` | k6 scripts: smoke, soak and ramp, the race of 100 simultaneous yes, and the gateway and MCP relay passes |
 | `templates/` | the test CI templates of the other repositories and the contract of the test bench |
 | `.github/actions/` | composite actions that build and start the real server and the real CLI |
 
@@ -91,7 +92,14 @@ template (`templates/server/ci-extra.yml`) not installed in `ostrom-server` yet.
 with the `ostrom-helm` chart in kind (built-in PostgreSQL, migrate init container, 2 replicas, ingress-nginx) and runs
 `load/smoke.js`, `load/chart-journeys.js` and, once `scripts/load-setup.ts` reports ready, the gates and the race
 through the ingress; its job summary gives p95/p99, errors and requests/s per script, and the peak CPU and memory of
-every pod.
+every pod. It also loads the inference gateway and the MCP relay against fake upstreams (`src/fake-upstreams.ts`, in a
+namespace of their own; `scripts/relay-load-setup.ts` makes the member, its token and the MCP servers): the gateway's
+overhead against the fake provider called directly, at p50, p95 and p99 of the first byte and of the end, JSON and
+stream (`load/inference.js`, under 15 ms at p95); 50 then 200 streams open at once and the memory each costs, with no
+server restart (`load/streams.js`); a client that leaves mid-stream, whose upstream connection and usage must be
+released within 2 s (`load/cut.js`); and MCP servers that answer at once, late, never or not at all, at the same time
+(`load/mcp.js`). `scripts/relay-summary.ts` writes the overhead and memory tables. Each of these phases starts on Ready
+server pods and fails on a restart of its own, with the crashed container's last lines (`scripts/server-pods.sh`).
 
 ## Documentation
 

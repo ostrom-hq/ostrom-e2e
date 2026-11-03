@@ -27,5 +27,9 @@ export default function (approval) {
   const r = approve(approval, 'approve-race');
   if (r.status === 200) ok.add(1);
   else if (r.status === 409) conflict.add(1);
-  else other.add(1);
+  else {
+    // Neither the yes nor its conflict: say which answer it was, so a broken race names its cause in the log.
+    other.add(1, { status: String(r.status) });
+    console.warn(`race: unexpected ${r.status} ${String(r.body).slice(0, 200)}`);
+  }
 }

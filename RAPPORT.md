@@ -25,9 +25,9 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 <!-- scenarios:begin -->
 | Famille | Scénarios | dont jalon | vert | codé | écrit | bloqué |
 |---|---|---|---|---|---|---|
-| LOGIN | 9 | 1 | 0 | 1 | 0 | 8 |
+| LOGIN | 9 | 1 | 0 | 2 | 0 | 7 |
 | CONN | 16 | 0 | 0 | 1 | 0 | 15 |
-| CLAUDE | 19 | 4 | 0 | 2 | 0 | 17 |
+| CLAUDE | 20 | 4 | 1 | 2 | 0 | 17 |
 | CODEX | 9 | 0 | 0 | 0 | 0 | 9 |
 | GATE | 15 | 5 | 0 | 1 | 0 | 14 |
 | BYPASS | 33 | 12 | 0 | 3 | 0 | 30 |
@@ -47,7 +47,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | MCP | 6 | 0 | 0 | 0 | 0 | 6 |
 | SECRETS | 8 | 0 | 0 | 0 | 0 | 8 |
 | GW | 9 | 0 | 0 | 0 | 0 | 9 |
-| SHARE | 5 | 0 | 0 | 0 | 0 | 5 |
+| SHARE | 6 | 0 | 0 | 1 | 0 | 5 |
 | CLOUD | 8 | 0 | 0 | 0 | 0 | 8 |
 | WF | 14 | 0 | 0 | 0 | 0 | 14 |
 | WFRUN | 8 | 0 | 0 | 0 | 0 | 8 |
@@ -58,7 +58,7 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | ANA | 5 | 0 | 0 | 0 | 0 | 5 |
 | HARNESS | 8 | 0 | 0 | 0 | 0 | 8 |
 | DIST | 4 | 0 | 0 | 0 | 0 | 4 |
-| TC | 2 | 0 | 0 | 0 | 0 | 2 |
+| TC | 4 | 0 | 2 | 0 | 0 | 2 |
 | AUTH | 7 | 7 | 6 | 1 | 0 | 0 |
 | LOAD | 11 | 0 | 1 | 3 | 0 | 7 |
 | DOGFOOD | 3 | 0 | 0 | 0 | 0 | 3 |
@@ -67,9 +67,11 @@ Généré par `pnpm report`. `vert` = vert en CI ; `codé` = test écrit, pas en
 | BILL | 7 | 0 | 7 | 0 | 0 | 0 |
 | ISO | 2 | 2 | 2 | 0 | 0 | 0 |
 | PARC | 37 | 15 | 6 | 31 | 0 | 0 |
-| ATT | 3 | 3 | 0 | 3 | 0 | 0 |
-| GHORG | 3 | 0 | 0 | 3 | 0 | 0 |
-| **Total** | 385 | 69 | 26 | 53 | 0 | 306 |
+| ATT | 3 | 3 | 2 | 0 | 0 | 1 |
+| GHORG | 3 | 0 | 3 | 0 | 0 | 0 |
+| BUDGET | 2 | 0 | 0 | 2 | 0 | 0 |
+| SWEEP | 6 | 0 | 0 | 6 | 0 | 0 |
+| **Total** | 397 | 69 | 34 | 57 | 0 | 306 |
 <!-- scenarios:end -->
 
 ### Scénarios lancés en CI, un par un

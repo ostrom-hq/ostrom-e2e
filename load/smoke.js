@@ -55,7 +55,7 @@ export function asks() {
   check(r, { 'ask 200 with a status': (x) => x.status === 200 && typeof x.json('gate.status') === 'string' });
 }
 
-// A push to main: a pending approval, then a yes from the approver, with a signed receipt.
+// A push to main: a pending approval, then a yes from the approver, with a signed receipt (ostrom-server#127).
 export function gates() {
   const i = __VU * 100000 + __ITER;
   const g = askPushToMain(i, 'gate');

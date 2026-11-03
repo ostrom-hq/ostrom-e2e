@@ -4,8 +4,10 @@
 # summary gives p95/p99, error rate and requests/s per script, and the peak CPU and memory of every pod (what the
 # chart's `resources` are set from). The server sends its metrics to an OpenTelemetry Collector and a Prometheus in the
 # cluster, where the queries of ostrom-infra's alerts and product dashboard are run (scripts/observability-check.ts).
-# By hand, `server_ref` builds another server and `helm_ref` installs another chart. Not on pull requests: the
-# organisation runs a single `ci` job per PR.
+# The inference gateway and the MCP relay are loaded against fake upstreams in a namespace of their own
+# (src/fake-upstreams.ts): the gateway's overhead against the fake called directly, the memory of open streams, a client
+# that leaves mid-stream, and MCP servers that are slow or down. By hand, `server_ref` builds another server and
+# `helm_ref` installs another chart. Not on pull requests: the organisation runs a single `ci` job per PR.
 name: Chart load
 on:
   push:
@@ -88,6 +90,27 @@ jobs:
             echo "::error title=server image::ostrom-server@$SHA did not build (see the step above)"; exit 1
           fi
           docker images ostrom-server:e2e --format 'ostrom-server:e2e {{.Size}} (ostrom-server@'"$SHA"')'
+      # The MCP relay reaches HTTPS servers only: the fake MCP servers get a certificate of a CA made for this run, and
+      # the bench runs the server image with that CA appended to its system bundle (the binary is the same).
+      # It never stops the job: on a failure the bench runs the server image as built, and the relay setup skips the MCP
+      # passes with the reason (the server does not trust the fakes' certificate).
+      - name: Bench CA, the fake MCP servers' certificate, and the server image that trusts it
+        continue-on-error: true
+        run: |
+          docker tag ostrom-server:e2e ostrom-server:e2e-load
+          d="$RUNNER_TEMP/fakes-tls"; mkdir -p "$d"; cd "$d"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=Ostrom load bench CA" -keyout ca.key -out ca.crt \
+            -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign"
+          openssl req -newkey rsa:2048 -nodes -subj "/CN=fakes.ostrom-fakes.svc" -keyout tls.key -out tls.csr
+          printf 'subjectAltName=DNS:fakes.ostrom-fakes.svc,DNS:fakes.ostrom-fakes.svc.cluster.local\nextendedKeyUsage=serverAuth\n' > ext.cnf
+          openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 1 -out tls.crt -extfile ext.cnf
+          id=$(docker create ostrom-server:e2e)
+          # Copied out read-only, as in the image: the bench's bundle is a new file.
+          docker cp "$id:/etc/ssl/certs/ca-certificates.crt" system.crt
+          docker rm "$id" >/dev/null
+          mkdir -p image && cat system.crt ca.crt > image/bundle.crt
+          printf 'FROM ostrom-server:e2e\nCOPY bundle.crt /etc/ssl/certs/ca-certificates.crt\n' > image/Dockerfile
+          docker build -q -t ostrom-server:e2e-load image
       - name: Checkout ostrom-helm (main, or the dispatch's helm_ref)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -143,7 +166,92 @@ jobs:
           kubectl -n ingress-nginx wait --for=condition=ready pod -l app.kubernetes.io/component=controller --timeout=300s
           kubectl -n kube-system rollout status deployment/metrics-server --timeout=300s
       - name: Load the server image into kind
-        run: kind load docker-image ostrom-server:e2e --name "$CLUSTER"
+        run: kind load docker-image ostrom-server:e2e-load --name "$CLUSTER"
+      # The fake provider (HTTP 8080) and the fake MCP servers (HTTPS 8443; 8444 listens to nothing, the `down` server),
+      # src/fake-upstreams.ts run by Node from a ConfigMap. Reached by the server (an extraEgress rule of the chart's
+      # NetworkPolicy, below) and by k6 through the ingress (fake.ostrom.test), the baseline of the gateway's overhead.
+      - name: Fake upstreams of the gateway and the MCP relay (namespace ostrom-fakes)
+        # Like the CA: a failure here skips the relay passes (their setup gives the reason), never the passes before.
+        continue-on-error: true
+        run: |
+          # node:24-alpine pinned by digest (2026-11-03), loaded into kind under a local tag.
+          docker pull -q node@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85
+          docker tag node@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 ostrom-fakes-node:24
+          kind load docker-image ostrom-fakes-node:24 --name "$CLUSTER"
+          kubectl create namespace ostrom-fakes
+          kubectl -n ostrom-fakes create secret tls fakes-tls --cert="$RUNNER_TEMP/fakes-tls/tls.crt" --key="$RUNNER_TEMP/fakes-tls/tls.key"
+          echo '{"type":"module"}' > "$RUNNER_TEMP/fakes-package.json"
+          kubectl -n ostrom-fakes create configmap fakes-code --from-file=fake-upstreams-src.ts=src/fake-upstreams.ts \
+            --from-file=fake-upstreams-bin.ts=bin/fake-upstreams.ts --from-file=package.json="$RUNNER_TEMP/fakes-package.json"
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata: { name: fakes, namespace: ostrom-fakes, labels: { app: fakes } }
+          spec:
+            replicas: 1
+            selector: { matchLabels: { app: fakes } }
+            template:
+              metadata: { labels: { app: fakes } }
+              spec:
+                securityContext: { runAsNonRoot: true, runAsUser: 1000, seccompProfile: { type: RuntimeDefault } }
+                containers:
+                  - name: fakes
+                    image: ostrom-fakes-node:24
+                    imagePullPolicy: IfNotPresent
+                    command: ["node", "/app/bin/fake-upstreams.ts"]
+                    env:
+                      - { name: FAKE_TLS_KEY, value: /tls/tls.key }
+                      - { name: FAKE_TLS_CERT, value: /tls/tls.crt }
+                      - { name: FAKE_MCP_SLOW_MS, value: "1000" }
+                    ports: [{ containerPort: 8080 }, { containerPort: 8443 }]
+                    readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 2 }
+                    # A small CPU request: the kind node has 2 CPUs, and since ostrom-helm#36 the chart asks 250m per
+                    # server replica and 250m for PostgreSQL; 200m here left PostgreSQL unscheduled (run 41542985718).
+                    resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 512Mi } }
+                    securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+                    volumeMounts:
+                      - { name: code, mountPath: /app }
+                      - { name: tls, mountPath: /tls, readOnly: true }
+                volumes:
+                  - name: code
+                    configMap:
+                      name: fakes-code
+                      items:
+                        - { key: fake-upstreams-src.ts, path: src/fake-upstreams.ts }
+                        - { key: fake-upstreams-bin.ts, path: bin/fake-upstreams.ts }
+                        - { key: package.json, path: package.json }
+                  - name: tls
+                    secret: { secretName: fakes-tls, defaultMode: 0444 }
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata: { name: fakes, namespace: ostrom-fakes }
+          spec:
+            selector: { app: fakes }
+            ports:
+              - { name: http, port: 8080, targetPort: 8080 }
+              - { name: https, port: 8443, targetPort: 8443 }
+              - { name: down, port: 8444, targetPort: 8444 }
+          ---
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: fakes
+            namespace: ostrom-fakes
+            # The same as the chart's API Ingress (apiAnnotations): the baseline goes through the same proxy settings.
+            annotations:
+              nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+              nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+              nginx.ingress.kubernetes.io/proxy-buffering: "off"
+          spec:
+            ingressClassName: nginx
+            rules:
+              - host: fake.ostrom.test
+                http:
+                  paths:
+                    - { path: /, pathType: Prefix, backend: { service: { name: fakes, port: { number: 8080 } } } }
+          EOF
+          kubectl -n ostrom-fakes rollout status deployment/fakes --timeout=180s
       - name: Namespace under the restricted Pod Security standard
         run: |
           kubectl create namespace "$NS"
@@ -163,12 +271,23 @@ jobs:
             imagePullPolicy: IfNotPresent
             urls: { api: "http://api.ostrom.test", app: "http://app.ostrom.test", site: "http://ostrom.test" }
           server:
-            image: { repository: ostrom-server, tag: e2e }
+            image: { repository: ostrom-server, tag: e2e-load }
             replicas: 2
             trustedProxies: 10.244.0.0/16
             config:
               OSTROM_MAIL_DIR: /var/lib/ostrom/mail
               OSTROM_ALLOW_TEST_ACCOUNTS: "true"
+              # The fake provider and the fake MCP servers (namespace ostrom-fakes), on cluster addresses.
+              OSTROM_GATEWAY_ANTHROPIC_URL: http://fakes.ostrom-fakes.svc:8080
+              OSTROM_MCP_ALLOW_PRIVATE_UPSTREAMS: "true"
+              OSTROM_MCP_CALL_TIMEOUT_MS: "5000"
+            secretEnv:
+              OSTROM_GATEWAY_ANTHROPIC_API_KEY: fake-instance-key
+          networkPolicy:
+            server:
+              extraEgress:
+                - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ostrom-fakes } } }]
+                  ports: [{ protocol: TCP, port: 8080 }, { protocol: TCP, port: 8443 }, { protocol: TCP, port: 8444 }]
           migrations: { initContainer: true }
           postgresql:
             enabled: true
@@ -192,7 +311,7 @@ jobs:
           kubectl -n "$NS" get pods -o wide
       - name: The API host answers through the ingress
         run: |
-          echo "127.0.0.1 api.ostrom.test app.ostrom.test" | sudo tee -a /etc/hosts
+          echo "127.0.0.1 api.ostrom.test app.ostrom.test fake.ostrom.test" | sudo tee -a /etc/hosts
           for i in $(seq 1 60); do
             if curl -fsS "$API_URL/health" >/dev/null 2>&1; then echo "ingress up after $i s"; exit 0; fi
             sleep 1
@@ -281,6 +400,7 @@ jobs:
             if grep -qs "^To: $probe" "$RUNNER_TEMP"/ostrom-mail/*; then mail="$RUNNER_TEMP/ostrom-mail"; fi
           fi
           [ -n "$mail" ] || echo "::warning title=mail directory::the sign-in mails of $pod are not readable from the runner"
+          echo "OSTROM_LOAD_MAIL_DIR=$mail" >> "$GITHUB_ENV"
           OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="$mail" node scripts/load-setup.ts
       - name: k6 gates (push to main + yes) and race (100 simultaneous yes → 1 × 200, 99 × 409)
         if: steps.loadsetup.outputs.ready == 'true'
@@ -288,9 +408,78 @@ jobs:
           OSTROM_URL: ${{ env.API_URL }}
           OSTROM_LOAD_SCENARIOS: gates
           OSTROM_LOAD_APPROVER_ORIGIN: http://app.ostrom.test
+          # ostrom-server#127: the answer to a yes carries the signed receipt; the check is on.
+          OSTROM_E2E_ANSWER_RECEIPT: "1"
         run: |
-          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js
-          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js
+          # The race runs even when a check of the gates fails: its own thresholds (1 × 200, 99 × 409) are
+          # another question, and its numbers would be lost. The step fails if either run fails.
+          rc=0
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js || rc=$?
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js || rc=$?
+          exit "$rc"
+      # The member, its token and the MCP servers of the gateway and relay load tests (scripts/relay-load-setup.ts),
+      # through the same pod and mail directory as the gate setup.
+      - name: Gateway and relay load setup (member token, MCP servers on the fakes)
+        id: relaysetup
+        if: always() && steps.loadsetup.outcome != 'skipped'
+        env:
+          OSTROM_E2E_CONSOLE_ORIGIN: http://app.ostrom.test
+          OSTROM_LOAD_FAKE_MCP_URL: https://fakes.ostrom-fakes.svc:8443
+          OSTROM_LOAD_FAKE_MCP_DOWN_URL: https://fakes.ostrom-fakes.svc:8444/mcp/fast
+        run: OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="${OSTROM_LOAD_MAIL_DIR:-}" node scripts/relay-load-setup.ts
+      # Each relay phase starts on Ready server pods and fails on its own restart, with the crashed container's last
+      # lines (scripts/server-pods.sh): a crash in one phase never passes for the next phase's result (run 41539188060:
+      # the 200 streams crashed both pods, then the cut and the MCP phases only met nginx's 503). The heaviest phase,
+      # the open streams, runs last.
+      - name: k6 gateway overhead (direct and through the gateway, JSON and stream)
+        if: always() && steps.relaysetup.outputs.inference == 'true'
+        env:
+          OSTROM_URL: ${{ env.API_URL }}
+          OSTROM_LOAD_FAKE_URL: http://fake.ostrom.test
+        run: |
+          scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts); rc=0
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export inference-summary.json load/inference.js || rc=$?
+          scripts/server-pods.sh crashed "$before" || rc=1
+          exit "$rc"
+      - name: k6 client cut mid-stream (upstream released, usage recorded)
+        if: always() && steps.relaysetup.outputs.inference == 'true'
+        env:
+          OSTROM_URL: ${{ env.API_URL }}
+          OSTROM_LOAD_FAKE_URL: http://fake.ostrom.test
+        run: |
+          scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts); rc=0
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export cut-summary.json load/cut.js || rc=$?
+          scripts/server-pods.sh crashed "$before" || rc=1
+          exit "$rc"
+      - name: k6 MCP relay (fast, slow, hanging and down servers at once)
+        if: always() && steps.relaysetup.outputs.mcp == 'true'
+        env:
+          OSTROM_URL: ${{ env.API_URL }}
+          OSTROM_LOAD_MCP_DEADLINE_MS: "5000"
+        run: |
+          scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts); rc=0
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export mcp-summary.json load/mcp.js || rc=$?
+          scripts/server-pods.sh crashed "$before" || rc=1
+          exit "$rc"
+      # Each phase's start and end go to phases.txt: scripts/relay-summary.ts reads the pods' memory in each window. A
+      # restart of a server pod (an OOM kill at the chart's 256 Mi, or a crash) fails the phase, and the 200 streams
+      # then start on Ready pods again.
+      - name: k6 open streams (50, then 200, a minute each) and the pods' memory
+        if: always() && steps.relaysetup.outputs.inference == 'true'
+        env:
+          OSTROM_URL: ${{ env.API_URL }}
+        run: |
+          rc=0
+          for n in 50 200; do
+            scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts)
+            start=$(date +%s)
+            k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export "streams-$n-summary.json" \
+              -e OSTROM_LOAD_STREAMS="$n" load/streams.js || rc=$?
+            echo "streams-$n $n $start $(date +%s)" >> phases.txt
+            sleep 30
+            scripts/server-pods.sh crashed "$before" || rc=1
+          done
+          exit "$rc"
       # The server exports its metrics every minute: two exports after the last gate, then the queries of the alerts and
       # of the product dashboard (ostrom-infra), against what the real server sent.
       - name: Alert and dashboard queries against the server's metrics
@@ -315,6 +504,9 @@ jobs:
         env:
           SERVER_SHA: ${{ steps.server.outputs.sha }}
           GATES: ${{ steps.loadsetup.outputs.ready == 'true' && 'run' || steps.loadsetup.outputs.reason }}
+          RELAY: >-
+            inference ${{ steps.relaysetup.outputs.inference == 'true' && 'run' || 'not run' }},
+            mcp ${{ steps.relaysetup.outputs.mcp == 'true' && 'run' || 'not run' }}${{ steps.relaysetup.outputs.reason && format(' ({0})', steps.relaysetup.outputs.reason) || '' }}
         run: |
           {
             echo "### Chart load pass (kind, ingress-nginx, 2 server replicas)"
@@ -322,7 +514,13 @@ jobs:
             echo "ostrom-server@${SERVER_SHA:-?} · gates and race: ${GATES:-not run}"
             echo
             node scripts/k6-summary.ts "smoke (health, instance)=smoke-summary.json" "chart journeys=journeys-summary.json" \
-              "gates=gates-summary.json" "race=race-summary.json" || echo "(no k6 summary)"
+              "gates=gates-summary.json" "race=race-summary.json" "inference=inference-summary.json" \
+              "50 streams=streams-50-summary.json" "200 streams=streams-200-summary.json" "cut streams=cut-summary.json" \
+              "mcp relay=mcp-summary.json" || echo "(no k6 summary)"
+            echo
+            echo "gateway and relay: ${RELAY:-not run}"
+            echo
+            node scripts/relay-summary.ts inference-summary.json top-samples.txt phases.txt 2 || echo "(no relay summary)"
             echo
             echo "| pod | peak CPU | peak memory | samples |"
             echo "|---|---|---|---|"
@@ -334,12 +532,17 @@ jobs:
               echo "| (no sample) | | | |"
             fi
             echo
-            echo "| pod | restarts | last termination |"
-            echo "|---|---|---|"
+            echo "| pod | restarts | terminated now | last termination |"
+            echo "|---|---|---|---|"
+            # A container killed seconds ago (OOMKilled during the race, run 41520333753) is still counted 0 restarts:
+            # its current termination shows it.
             kubectl -n "$NS" get pods --no-headers \
-              -o custom-columns='P:.metadata.name,R:.status.containerStatuses[*].restartCount,L:.status.containerStatuses[*].lastState.terminated.reason' \
-              2>/dev/null | awk '{ printf "| %s | %s | %s |\n", $1, $2, ($3 == "<none>" ? "" : $3) }' || true
+              -o custom-columns='P:.metadata.name,R:.status.containerStatuses[*].restartCount,T:.status.containerStatuses[*].state.terminated.reason,L:.status.containerStatuses[*].lastState.terminated.reason' \
+              2>/dev/null | awk '{ printf "| %s | %s | %s | %s |\n", $1, $2, ($3 == "<none>" ? "" : $3), ($4 == "<none>" ? "" : $4) }' || true
           } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Gateway overhead under 15 ms at p95 (first byte and end, JSON and stream)
+        if: always() && steps.relaysetup.outputs.inference == 'true'
+        run: node scripts/relay-summary.ts --check inference-summary.json top-samples.txt phases.txt 2 > /dev/null
       - name: Cluster state on failure
         if: failure()
         run: |
@@ -347,7 +550,11 @@ jobs:
           kubectl get events -n "$NS" --sort-by=.lastTimestamp | tail -80 || true
           for p in $(kubectl get pods -n "$NS" -o name); do
             echo "== $p"; kubectl logs -n "$NS" "$p" --all-containers --prefix --tail=200 || true
-            kubectl logs -n "$NS" "$p" --all-containers --prefix --previous --tail=100 2>/dev/null || true
+            # One container at a time: `--all-containers --previous` prints nothing when one of them has no previous
+            # instance (the migrate init container never has one).
+            for c in $(kubectl get -n "$NS" "$p" -o jsonpath='{.spec.containers[*].name}'); do
+              kubectl logs -n "$NS" "$p" -c "$c" --prefix --previous --tail=100 2>/dev/null || true
+            done
           done
           kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller --tail=100 || true
           kubectl -n kube-system get pods -o wide || true
@@ -357,6 +564,6 @@ jobs:
         if: always()
         with:
           name: chart-load-k6
-          path: "*-summary.json\ntop-samples.txt"
+          path: "*-summary.json\ntop-samples.txt\nphases.txt"
           retention-days: 7
           if-no-files-found: ignore

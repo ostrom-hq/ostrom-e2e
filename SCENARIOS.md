@@ -124,7 +124,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI réelle, serveur (image), identité, portes
 - Source : run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41456816659 (`ostrom inbox` → 77, « This credential does not allow gates:answer ») ; `CLI_SCOPES` (`Policies.kt`) n'a pas `gates:read`, que demande `GateScopes.readingApprovals` ; JOURNAL 02/11 → AUTH-REPRISE, GATES
 - Priorité : P1
-- Statut : rouge connu : `scenarios/jalon.e2e.ts` en `it.fails` (le banc reste vert tant que le trou existe, et passe au rouge le jour où il est corrigé : retirer alors `.fails`)
+- Statut : codé : `scenarios/jalon.e2e.ts`, `.fails` retiré après ostrom-server#122 (29a9ab54, `gates:read` dans `CLI_SCOPES`)
 
 ## CONN : Connexion GitHub et Slack (onboarding)
 
@@ -454,6 +454,15 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Source : proto/COORD/VERIF-LANCEUR.md §2 (Identité, Variables d'environnement assignées)
 - Priorité : P2
 - Statut : bloqué : ostrom-cli + ostrom-server
+
+### E2E-CLAUDE-020 — Sans `--repo`, le dépôt est lu sur `origin`
+
+- Étapes : `ostrom claude` sans `--repo`, dans un clone de `https://github.com/acme/<nom>.git` rangé dans un dossier `api`.
+- Attendu : la session est enregistrée pour `acme/<nom>` (propriétaire/nom lus sur `origin`, comme le dit l'aide de `--repo`), et le paquet servi est celui de ce dépôt : une porte posée sur `acme/<nom>` s'y applique.
+- Surfaces : CLI réelle, serveur (image), faux agent
+- Source : run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393 (session enregistrée pour `api`, paquet à 0 workflow) ; `AgentLaunchUseCase.kt` prend `folderName(top)` ; JOURNAL 02/11 → CLI-AGENTS
+- Priorité : P1
+- Statut : vert : `scenarios/jalon.e2e.ts`, depuis ostrom-cli#65 (b82f327), run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41494850752
 
 
 ## CODEX : `ostrom codex` et les autres agents
@@ -2181,6 +2190,15 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P2
 - Statut : bloqué : ostrom-server
 
+### E2E-SHARE-006 — Le fournisseur nomme un autre compte : `wrong_account`, le compte ne sert plus
+
+- Étapes : le propriétaire partage un compte Claude sous l'id `acct-declared-006`, jeton d'accès sur le point d'expirer ; le faux fournisseur (`src/fake-tokens.ts`, point de jetons et API derrière la passerelle) répond au rafraîchissement en nommant un autre compte ; deux appels `POST /api/v1/inference/v1/messages`.
+- Attendu : un seul rafraîchissement, avec le jeton du compte ; le compte passe `wrong_account` ; aucun appel n'est servi par lui (rien n'arrive à l'API du fournisseur, pas de second rafraîchissement). Le faux fournisseur nomme le compte comme les deux fournisseurs (`account.uuid` de Claude, `chatgpt_account_id` dans l'`id_token` de Codex), ou rien.
+- Surfaces : serveur (image), partage, passerelle
+- Source : JOURNAL 02/11 20:48 (ostrom-server#134, `AccountTokens`)
+- Priorité : P1
+- Statut : codé : `scenarios/sharing.e2e.ts`
+
 
 ## CLOUD : Agents cloud et attentes (waits)
 
@@ -2898,6 +2916,24 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P2
 - Statut : bloqué : ostrom-server + ostrom-cli
 
+### E2E-TC-003 — Import d'une équipe TeamCode : plan, import, comptes en attente de la bascule
+
+- Étapes : La vraie CLI lit l'équipe TeamCode factice d'ostrom-helm (`compose/demo/teamcode`, helm#25) dans MySQL, avec un jeton de console de l'owner : `ostrom import teamcode` (le plan), puis `--yes`. Les copies Ostrom des comptes partagés perdent leurs jetons (comme un rafraîchissement refusé), puis `--yes` encore.
+- Attendu : Le plan n'écrit rien (aucun compte partagé) et dit le compte jamais terminé laissé de côté. L'import partage les deux comptes Claude, le compte désactivé dans TeamCode reste éteint. Tant que TeamCode tourne, un import ne teste aucun jeton : les comptes à reconnecter sont `revive_at_cutover`, et la CLI dit combien attendent le passage final. Code 0 à chaque étape.
+- Surfaces : CLI, serveur
+- Source : ostrom-server#28, #80 et #86 (RELAY) ; ostrom-cli#24, #55, #62 et #63 ; JOURNAL 30/10 15:10 RELAY
+- Priorité : P1
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41484214036 (image ostrom-server@d084bb2c, ostrom-cli@479e5c1, ostrom-helm@4f03cd37), `scenarios/import.e2e.ts`
+
+### E2E-TC-004 — Bascule (cutover) de l'owner : comptes ranimés, refus, audit à son nom
+
+- Étapes : Le faux point de jetons du fournisseur (`src/fake-tokens.ts`, `OSTROM_SHARING_CLAUDE_TOKEN_URL` du serveur, ostrom-server#96) refuse un des deux jetons de rafraîchissement de TeamCode. `ostrom import teamcode --cutover` sans terminal, `--cutover --yes`, `--cutover --confirm yes`, puis `--cutover --confirm cutover` ; le fournisseur reprend le jeton refusé, et la même commande encore, deux fois.
+- Attendu : Sans terminal ni `--confirm`, et avec `--yes`, 64 avant tout appel. Un autre mot : le plan s'affiche, rien n'est testé ni écrit, code 2. La bascule ranime le compte accepté avec les jetons de TeamCode renouvelés (client de Claude Code), laisse l'autre en attente avec sa raison, code 2. La même commande ranime le second, éteint comme dans TeamCode, code 0 ; ensuite « rien à faire », code 0. Un événement d'audit `import.teamcode.cutover` par bascule lancée, au nom de l'owner, aucun pour les plans ni le refus.
+- Surfaces : CLI, serveur
+- Source : ostrom-server#86 et #96 (RELAY) ; ostrom-cli#55, #62 et #63 ; JOURNAL 30/10 13:24 orchestrateur, 02/11 15:20 RELAY
+- Priorité : P1
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41484214036 (image ostrom-server@d084bb2c, ostrom-cli@479e5c1, ostrom-helm@4f03cd37), `scenarios/import.e2e.ts`
+
 
 ## AUTH : Identité côté serveur (lien e-mail, GitHub, appareil, jetons, déconnexion)
 
@@ -3381,14 +3417,29 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`/rules`, `/rules/{id}`, `/rules/bulk`, `/analysis/*` planned) ; forme du contrat `openapi.yaml`)
 
-### E2E-PARC-013 — 3.2 Catalogue des portes de l'org et sa forme signée
+### E2E-PARC-013 — 3.2 Une règle pose une porte : catalogue signé, un push sur main attend un oui
 
-- Étapes : Le propriétaire lit `GET /api/v1/gates/catalog` puis `GET /api/v1/gates/catalog/signed`.
-- Attendu : 200 avec un objet ; la forme signée porte sa signature (`sig`, `signature` ou `kid`) ; 401 sans identifiant. Création d'un harnais (`ostrom harness add`, en attente) : famille HARNESS.
-- Surfaces : serveur (le hook lit le catalogue signé)
+- Étapes :
+  1. Le propriétaire invite un relecteur admin.
+  2. Il lit le catalogue de `acme/parc-…`, sans porte de règle.
+  3. Il écrit dans `/rules` une règle avec porte : `push-main` sur ce dépôt, relecteur en approbateur.
+  4. Il relit `GET /api/v1/gates/catalog` et sa forme signée.
+  5. Un jeton `gates:ask` demande la porte d'un push sur main.
+  6. Le relecteur, qui vient de se connecter, trouve la demande dans `GET /approvals?mine=true` et dit oui.
+  7. La règle est refusée, puis un second push est demandé.
+  8. Une autre org lit le catalogue du même dépôt.
+- Attendu :
+  - La règle est rendue `accepted`, `output: gate`.
+  - Le catalogue et sa forme signée (`sig`, `signature` ou `kid`) contiennent `rule:<id>`.
+  - Le push rend `status: pending`, sa porte est `rule:<id>` (`enforce: true`), avec le relecteur dans ses approbateurs.
+  - Le oui rend 200 et le reçu signé du commit.
+  - Une fois la règle refusée, sa porte quitte le catalogue et le push suivant n'attend plus.
+  - L'autre org ne voit pas la porte.
+  - 401 sans identifiant.
+- Surfaces : serveur (le hook lit le catalogue signé, la console écrit la règle dans `/rules`)
 - Source : `demo/PARCOURS.md` 3.2
 - Priorité : jalon
-- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#43)
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : catalogue, règles, portes, approbations, jetons ; porte d'une règle : ostrom-server#79)
 
 ### E2E-PARC-014 — 3.3 Qui approuve quoi : le graphe des approbateurs
 
@@ -3401,8 +3452,8 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-PARC-015 — 3.3 Politique d'auto-approbation : lue et réglée par un admin, refusée à un membre
 
-- Étapes : Le propriétaire lit `GET /api/v1/gates/policy`, met l'autre valeur (`PUT`), relit ; un membre invité tente le `PUT` ; une valeur inconnue.
-- Attendu : `{selfApproval}` rendu puis relu à l'identique ; 403 pour le membre ; 400 pour la valeur inconnue. Hypothèse : les valeurs `never` et `allowed` (le contrat ne donne pas d'énumération).
+- Étapes : Le propriétaire lit `GET /api/v1/gates/policy`, met `sole-approver` (`PUT`), relit ; un membre invité tente le `PUT` ; une valeur inconnue, et `allowed`.
+- Attendu : `never` pour une organisation qui n'a jamais choisi ; `{selfApproval: 'sole-approver'}` rendu puis relu à l'identique ; 403 pour le membre ; 400 pour la valeur inconnue et pour `allowed`. Les valeurs sont `sole-approver` et `never` depuis ostrom-server#159 (contrat core#66).
 - Surfaces : serveur
 - Source : `demo/PARCOURS.md` 3.3
 - Priorité : jalon
@@ -3616,7 +3667,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), lanceur, reçus
 - Source : JOURNAL 30/10 13:23 (décision sur QUESTIONS « 13:35 CLI-AGENTS ») ; contrat core#40 (`CheckAttestation`, `ReceiptNode.attestation`) ; ostrom-server#78 (checks, reçu de workflow)
 - Priorité : jalon
-- Statut : codé : `scenarios/attestation.e2e.ts`, allumé par les sondes quand `/api/v1/launches`, `/api/v1/checks` et `/api/v1/sessions/{id}/workflow-receipt` sont servies (SRV-LANCEUR, ostrom-server#78)
+- Statut : vert : `scenarios/attestation.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41491873101 (avec ostrom-server#78 8f3d1986)
 
 ### E2E-ATT-002 — Le poste ne peut pas se déclarer `ci` ni `isolated_runner`
 
@@ -3625,16 +3676,16 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), lanceur, reçus
 - Source : JOURNAL 30/10 13:23 ; contrat core#40 (`CheckAttestation`)
 - Priorité : jalon
-- Statut : codé : `scenarios/attestation.e2e.ts`, mêmes sondes qu'ATT-001
+- Statut : vert : `scenarios/attestation.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41491873101
 
 ### E2E-ATT-003 — Une porte qui exige un check attesté n'est pas satisfaite par une déclaration
 
 - Étapes : une règle `git` avec une porte push-main sur un dépôt marqué, `checks: [{check: tests, attested: true}]` (`POST /api/v1/rules`) ; l'agent rapporte `tests` passé depuis le poste ; il demande la porte d'un push sur main (`POST /api/v1/gates`).
-- Attendu : la règle garde `attested: true` ; la porte ne laisse pas passer le push sur une déclaration (ni `allow` ni `approved`), et la réponse dit que le check n'est que déclaré. Par défaut (sans `attested`), la déclaration est acceptée et affichée comme telle.
+- Attendu : la règle garde `attested: true` ; la porte refuse le push sur une déclaration avant toute demande de oui : 409 `check_not_attested`, message « tests was only declared by the workstation (workstation_declared) » (la porte est demandée par la session qui a rapporté le check, classe `push-main`). Par défaut (sans `attested`), la déclaration est acceptée et affichée comme telle.
 - Surfaces : serveur (image), règles, portes
 - Source : JOURNAL 30/10 13:23 (l'ajout : une règle ou une porte peut exiger `attestation != workstation_declared`) ; contrat core#40 (`RuleGateCheck.attested`) ; SRV-REGLES-2
 - Priorité : jalon
-- Statut : codé : `scenarios/attestation.e2e.ts`, allumé quand `/api/v1/rules`, `/api/v1/gates`, `/api/v1/launches` et `/api/v1/checks` sont servies
+- Statut : scindé (JOURNAL 02/11 22:27). **ATT-003a**, l'aller-retour de la règle avec `gate.checks` : codé, à vert depuis ostrom-server#145 (b462063). **ATT-003b**, la porte qui refuse un check seulement déclaré : codé, `it.fails` retiré depuis ostrom-server#162 (20d74fd), qui le fait respecter
 
 ## GHORG : Installation GitHub d'une organisation, `?org` (décision du 30/10 12:55)
 
@@ -3645,16 +3696,16 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), intégration GitHub
 - Source : JOURNAL 30/10 13:35 (décision 12:55 codée dans ostrom-server#44 : `FindOrgUseCase`, owner ou admin)
 - Priorité : P1
-- Statut : codé : `scenarios/github-org.e2e.ts`, allumé quand `install/start` est servie (ostrom-server#44) ; passé si le banc n'a pas d'App GitHub (503, ses réglages viennent avec e2e#23)
+- Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
 
-### E2E-GHORG-002 — Un membre, un étranger et un slug inconnu reçoivent le même 403 ; sans session, 401
+### E2E-GHORG-002 — Un membre reçoit 403 ; un étranger et un slug inconnu reçoivent le même 404 ; sans session, 401
 
 - Étapes : le propriétaire invite un membre (rôle `member`) qui accepte ; un étranger se connecte ; chacun lance `install/start?org=<id>`, l'étranger aussi avec un slug qui n'existe pas ; un appel sans session.
-- Attendu : 403 sans redirection pour les trois, avec le même `error.type` et le même message (rien ne distingue un membre d'un étranger, ni une organisation existante d'une absente) ; 401 sans session.
+- Attendu : sans redirection, 403 pour le membre (pas propriétaire ni admin) ; 404 pour l'étranger et pour le slug inconnu, avec le même `error.type` et le même message (rien ne distingue une organisation où l'on n'est pas d'une organisation absente) ; 401 sans session.
 - Surfaces : serveur (image), intégration GitHub, organisations
-- Source : JOURNAL 30/10 13:35 (« membre, étranger et slug inconnu reçoivent le même ») ; le cas étranger est aussi dans E2E-GH-INSTALL-001 d'e2e#23
+- Source : JOURNAL 30/10 13:35 ; JOURNAL 02/11 20:48 (ostrom-server#143 : une org dont on n'est pas membre répond 404) ; le cas étranger est aussi dans E2E-GH-INSTALL-001 d'e2e#23
 - Priorité : P1
-- Statut : codé : `scenarios/github-org.e2e.ts`, mêmes sondes que GHORG-001
+- Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
 
 ### E2E-GHORG-003 — Un admin lance l'installation ; rétrogradé membre, il est refusé
 
@@ -3663,7 +3714,82 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), intégration GitHub, organisations
 - Source : JOURNAL 30/10 13:35 ; contrat `updateOrgMember`
 - Priorité : P1
-- Statut : codé : `scenarios/github-org.e2e.ts`, mêmes sondes que GHORG-001
+- Statut : vert : `scenarios/github-org.e2e.ts`, run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41474679433 (main, avec ostrom-server#84 56f31894) et run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393
+
+## BUDGET : Budgets appliqués par le gateway
+
+### E2E-BUDGET-001 — Un appel qui peut coûter plus que le reste du budget est refusé, un plus petit ne l'est pas
+
+- Étapes : le propriétaire met un budget d'organisation de 1 $ par mois, arrêt dur (`PUT /api/v1/budgets {scope: org, usdPerMonth: 1, hardStop: true}`), lance un agent (`POST /api/v1/launches`) ; avec le jeton d'agent en `x-api-key`, `POST /api/v1/inference/v1/messages` sur `claude-opus-5` avec `max_tokens` 100 000, puis le même avec `max_tokens` 1.
+- Attendu : 429, `error.type` `rate_limit_error`, message qui commence par « Budget left too low for this call: », sans `Retry-After` ; le second appel n'est plus un 429 (le gateway vérifie le budget avant de chercher un compte ou une clé).
+- Surfaces : serveur (image), gateway, budgets
+- Source : `demo/PARCOURS.md` 3.5 ; JOURNAL 02/11 23:43 (SPEND-GUARD, recette du parcours réel) ; ostrom-server#133 (96ae0554) ; contrat core#55 (`InferenceRefused`)
+- Priorité : P1
+- Statut : codé : `scenarios/budget.e2e.ts`
+
+### E2E-BUDGET-002 — Une dépense facturée qui atteint le budget refuse l'appel suivant, avec `Retry-After`
+
+- Étapes : même organisation à 1 $ ; un compte Claude partagé ; le faux fournisseur (`src/fake-tokens.ts`, `OSTROM_GATEWAY_ANTHROPIC_URL`) facture 300 000 jetons d'entrée (1,50 $) ; un appel `max_tokens` 1, la dépense du mois (`GET /api/v1/spending?period=month`), puis un second appel.
+- Attendu : le premier appel est servi (200, un appel au fournisseur) ; la dépense du mois atteint au moins 1 $ ; le second est refusé en 429, `rate_limit_error`, « Monthly budget reached: », `Retry-After` > 0, sans atteindre le fournisseur.
+- Surfaces : serveur (image), gateway, budgets, partage
+- Source : `demo/PARCOURS.md` 3.5 ; JOURNAL 02/11 23:43 (SPEND-GUARD, recette du parcours réel) ; ostrom-server#133 (96ae0554) ; contrat core#55 (`InferenceRefused`)
+- Priorité : P1
+- Statut : codé : `scenarios/budget.e2e.ts`
+## SWEEP : Balayage d'isolation entre organisations, généré depuis le contrat
+
+### E2E-SWEEP-001 — Chaque route servie a un cas
+
+- Étapes : les routes servies : `served-routes.txt` d'ostrom-core plus celles que `scripts/served-routes.py` lit dans le serveur testé ; pour chacune, l'opération OpenAPI (`security: []` public, en-tête `Ostrom-Org`, paramètres de chemin, corps échantillonné depuis le schéma) et le type de ressource de chaque paramètre (`PARAM_KINDS`, par préfixe).
+- Attendu : aucune route servie sans cas : une route absente du contrat, un paramètre de type inconnu, ou une écriture sur le compte de l'appelant sans raison écrite (`SKIPPED`) fait échouer le scénario et nomme ce qu'il faut ajouter.
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+
+### E2E-SWEEP-002 — Une session navigateur de B n'obtient rien de A, sur chaque route servie
+
+- Étapes : B se connecte par lien e-mailé. A (propriétaire) crée ce qu'il peut : invitation, jeton, clé de service, appareil, workflow, paquet, session, porte, approbation, reçu, règle, automation, attente, serveur MCP et sa politique, secret, runner, session cloud, artefact, compte partagé (ce qu'il n'a pas pu créer est listé au run). Pour chaque cas, B appelle la route avec les identifiants réels de A et `Ostrom-Org: A`, puis, si la route agit dans une organisation, avec `Ostrom-Org: B` ; chaque appel est refait avec une ressource absente de même forme (`mimic`). Les GET d'abord, les suppressions en dernier.
+- Attendu : jamais de 2xx sur une ressource de A ; la même réponse qu'une ressource absente (statut, et corps une fois retirés les identifiants envoyés et `requestId`) : 404, ou 403 si la route le prévoit pour les deux ; jamais de 5xx ; aucun corps qui contienne l'id, le slug, le nom, l'e-mail, le login de A, l'invité ou une de ses ressources. Une fuite absente de `KNOWN` fait échouer le scénario, et une fuite connue qui ne se produit plus aussi (comme un `it.fails`).
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+
+### E2E-SWEEP-003 — Un jeton personnel de B n'obtient rien de A, sur chaque route servie
+
+- Étapes : B crée un jeton avec toutes les portées que `GET /api/v1/tokens/scopes` propose (hors `gates:answer`, `agent:session`, `*`). A (propriétaire) crée ce qu'il peut : invitation, jeton, clé de service, appareil, workflow, paquet, session, porte, approbation, reçu, règle, automation, attente, serveur MCP et sa politique, secret, runner, session cloud, artefact, compte partagé (ce qu'il n'a pas pu créer est listé au run). Pour chaque cas, B appelle la route avec les identifiants réels de A et `Ostrom-Org: A`, puis, si la route agit dans une organisation, avec `Ostrom-Org: B` ; chaque appel est refait avec une ressource absente de même forme (`mimic`). Les GET d'abord, les suppressions en dernier.
+- Attendu : jamais de 2xx sur une ressource de A ; la même réponse qu'une ressource absente (statut, et corps une fois retirés les identifiants envoyés et `requestId`) : 404, ou 403 si la route le prévoit pour les deux ; jamais de 5xx ; aucun corps qui contienne l'id, le slug, le nom, l'e-mail, le login de A, l'invité ou une de ses ressources. Une fuite absente de `KNOWN` fait échouer le scénario, et une fuite connue qui ne se produit plus aussi (comme un `it.fails`).
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+
+### E2E-SWEEP-004 — Un jeton CLI de B n'obtient rien de A, sur chaque route servie
+
+- Étapes : connexion d'appareil de B approuvée dans son navigateur. A (propriétaire) crée ce qu'il peut : invitation, jeton, clé de service, appareil, workflow, paquet, session, porte, approbation, reçu, règle, automation, attente, serveur MCP et sa politique, secret, runner, session cloud, artefact, compte partagé (ce qu'il n'a pas pu créer est listé au run). Pour chaque cas, B appelle la route avec les identifiants réels de A et `Ostrom-Org: A`, puis, si la route agit dans une organisation, avec `Ostrom-Org: B` ; chaque appel est refait avec une ressource absente de même forme (`mimic`). Les GET d'abord, les suppressions en dernier.
+- Attendu : jamais de 2xx sur une ressource de A ; la même réponse qu'une ressource absente (statut, et corps une fois retirés les identifiants envoyés et `requestId`) : 404, ou 403 si la route le prévoit pour les deux ; jamais de 5xx ; aucun corps qui contienne l'id, le slug, le nom, l'e-mail, le login de A, l'invité ou une de ses ressources. Une fuite absente de `KNOWN` fait échouer le scénario, et une fuite connue qui ne se produit plus aussi (comme un `it.fails`).
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+
+### E2E-SWEEP-005 — Le jeton élevé `osg_` de B n'obtient rien de A, sur chaque route servie
+
+- Étapes : connexion d'appareil avec les trois portées de gouvernance (`ostrom login --admin`), approuvée par B propriétaire ; sauté tant que le serveur ne rend pas de jeton `osg_` (attend ostrom-server#137). A (propriétaire) crée ce qu'il peut : invitation, jeton, clé de service, appareil, workflow, paquet, session, porte, approbation, reçu, règle, automation, attente, serveur MCP et sa politique, secret, runner, session cloud, artefact, compte partagé (ce qu'il n'a pas pu créer est listé au run). Pour chaque cas, B appelle la route avec les identifiants réels de A et `Ostrom-Org: A`, puis, si la route agit dans une organisation, avec `Ostrom-Org: B` ; chaque appel est refait avec une ressource absente de même forme (`mimic`). Les GET d'abord, les suppressions en dernier.
+- Attendu : jamais de 2xx sur une ressource de A ; la même réponse qu'une ressource absente (statut, et corps une fois retirés les identifiants envoyés et `requestId`) : 404, ou 403 si la route le prévoit pour les deux ; jamais de 5xx ; aucun corps qui contienne l'id, le slug, le nom, l'e-mail, le login de A, l'invité ou une de ses ressources. Une fuite absente de `KNOWN` fait échouer le scénario, et une fuite connue qui ne se produit plus aussi (comme un `it.fails`).
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, réactivé depuis ostrom-server#137 (5949f7c1) : un login admin qui ne donne pas un `osg_` fait échouer le scénario (sauté sur le run 41541422573, avant #137)
+
+### E2E-SWEEP-006 — Une clé de service de B n'obtient rien de A, sur chaque route servie
+
+- Étapes : B crée une clé de service de son organisation avec toutes les portées proposées. A (propriétaire) crée ce qu'il peut : invitation, jeton, clé de service, appareil, workflow, paquet, session, porte, approbation, reçu, règle, automation, attente, serveur MCP et sa politique, secret, runner, session cloud, artefact, compte partagé (ce qu'il n'a pas pu créer est listé au run). Pour chaque cas, B appelle la route avec les identifiants réels de A et `Ostrom-Org: A`, puis, si la route agit dans une organisation, avec `Ostrom-Org: B` ; chaque appel est refait avec une ressource absente de même forme (`mimic`). Les GET d'abord, les suppressions en dernier.
+- Attendu : jamais de 2xx sur une ressource de A ; la même réponse qu'une ressource absente (statut, et corps une fois retirés les identifiants envoyés et `requestId`) : 404, ou 403 si la route le prévoit pour les deux ; jamais de 5xx ; aucun corps qui contienne l'id, le slug, le nom, l'e-mail, le login de A, l'invité ou une de ses ressources. Une fuite absente de `KNOWN` fait échouer le scénario, et une fuite connue qui ne se produit plus aussi (comme un `it.fails`).
+- Surfaces : serveur (image), identité, organisations, chaque module
+- Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
+- Priorité : P1
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
 
 ## Récapitulatif
 
@@ -3671,7 +3797,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 |---|---|---|---|---|---|
 | LOGIN | Login et premier lancement | 9 | 1 | 7 | 1 |
 | CONN | Connexion GitHub et Slack (onboarding) | 15 | 0 | 7 | 8 |
-| CLAUDE | `ostrom claude` : lancement, hooks, budget du hook | 19 | 4 | 9 | 6 |
+| CLAUDE | `ostrom claude` : lancement, hooks, budget du hook | 20 | 4 | 10 | 6 |
 | CODEX | `ostrom codex` et les autres agents | 9 | 0 | 4 | 5 |
 | GATE | Porte qui bloque un push | 15 | 5 | 9 | 1 |
 | BYPASS | Contournements de la porte (audit du 30/10 et trous connus) | 33 | 12 | 18 | 3 |
@@ -3691,7 +3817,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | MCP | Relais MCP et MCP du harnais | 6 | 0 | 4 | 2 |
 | SECRETS | Secrets | 8 | 0 | 4 | 4 |
 | GW | Passerelle d'inférence, politique et budgets | 9 | 0 | 7 | 2 |
-| SHARE | Partage d'abonnement (comptes mis en commun) | 5 | 0 | 2 | 3 |
+| SHARE | Partage d'abonnement (comptes mis en commun) | 6 | 0 | 3 | 3 |
 | CLOUD | Agents cloud et attentes (waits) | 8 | 0 | 4 | 4 |
 | WF | Compilation des workflows en harnais (nœuds) | 14 | 0 | 8 | 6 |
 | WFRUN | Exécution de workflows : nœuds étape, check, porte, notification, agent, attente | 8 | 0 | 3 | 5 |
@@ -3711,6 +3837,8 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | ISO | Isolation entre organisations | 1 | 1 | 0 | 0 |
 | ATT | Attestation des checks d'un reçu | 3 | 3 | 0 | 0 |
 | GHORG | Installation GitHub d'une organisation, `?org` | 3 | 0 | 3 | 0 |
-| **Total** | | **339** | **46** | **173** | **120** |
+| BUDGET | Budgets appliqués par le gateway | 2 | 0 | 2 | 0 |
+| SWEEP | Balayage d'isolation entre organisations, généré depuis le contrat | 6 | 0 | 6 | 0 |
+| **Total** | | **349** | **46** | **183** | **120** |
 
 Scénarios `jalon` : E2E-BYPASS-001, E2E-BYPASS-005, E2E-BYPASS-006, E2E-BYPASS-007, E2E-BYPASS-008, E2E-BYPASS-015, E2E-BYPASS-020, E2E-BYPASS-021, E2E-BYPASS-023, E2E-BYPASS-024, E2E-BYPASS-026, E2E-BYPASS-028, E2E-CLAUDE-001, E2E-CLAUDE-002, E2E-CLAUDE-003, E2E-CLAUDE-010, E2E-COMPAT-001, E2E-COMPAT-002, E2E-COMPAT-003, E2E-COMPAT-004, E2E-COMPAT-005, E2E-COMPAT-007, E2E-FOREIGN-001, E2E-GATE-001, E2E-GATE-002, E2E-GATE-007, E2E-GATE-010, E2E-GATE-012, E2E-LOGIN-001, E2E-RECEIPT-001, E2E-RECEIPT-002, E2E-RECEIPT-003, E2E-RECEIPT-004, E2E-WEB-001, E2E-YES-001, E2E-YES-002, E2E-YES-003, E2E-YES-006, E2E-YES-012, E2E-YESCLI-002.

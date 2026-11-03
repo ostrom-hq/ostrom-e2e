@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: Apache-2.0
+// A fake OAuth token endpoint of a provider (Claude, Codex), for the shared accounts' refresh: the server's
+// OSTROM_SHARING_CLAUDE_TOKEN_URL and OSTROM_SHARING_CODEX_TOKEN_URL point here (ostrom-server#96). It answers a
+// refresh the way the providers do (RFC 6749 § 5.1 and § 5.2): 200 with a new pair, or 400 `invalid_grant` for a
+// refresh token it was told to refuse. A 200 names the account the tokens are of when it was told which, as both
+// providers do: Claude's `account.uuid`, and Codex's `chatgpt_account_id` in the claims of an `id_token`; told nothing, it
+// names no account. The server keeps a revived account's tokens only when they are that account's (ostrom-server#117),
+// and takes out of service an account whose refresh names another one (`wrong_account`, ostrom-server#134). It also
+// stands for Anthropic's Messages API behind the gateway (OSTROM_GATEWAY_ANTHROPIC_URL): `POST /v1/messages` answers a
+// message that bills the tokens of `usage`, so a call served by a shared account costs what the bench chooses (the
+// budgets, ostrom-server#133). Every request it is sent is recorded, never a token of a real provider.
+import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
+/** A model call the fake Messages API was sent. */
+export interface ModelCall {
+  readonly model: string | undefined;
+  readonly maxTokens: number | undefined;
+  /** The `Authorization` the gateway sent: the shared account's access token. */
+  readonly authorization: string | undefined;
+}
+
+/** The tokens a model call bills (Anthropic's `usage`). */
+export interface Usage {
+  readonly input_tokens: number;
+  readonly output_tokens: number;
+}
+
+/** What the endpoint was sent: one entry per request, in order. */
+export interface Refresh {
+  readonly grantType: string | undefined;
+  readonly refreshToken: string | undefined;
+  readonly clientId: string | undefined;
+}
+
+export class FakeTokens {
+  /** The refresh tokens answered with 400 `invalid_grant` (the provider forgot them). */
+  readonly refused = new Set<string>();
+  /** The provider account each refresh token is of, named in the answer as Claude and Codex do. */
+  readonly accounts = new Map<string, string>();
+  readonly refreshes: Refresh[] = [];
+  /** The model calls of `POST /v1/messages`, in order; never counted as refreshes. */
+  readonly calls: ModelCall[] = [];
+  /** What each model call bills. */
+  usage: Usage = { input_tokens: 10, output_tokens: 1 };
+  private server: Server | undefined;
+  private port = 0;
+
+  /** `http://127.0.0.1:<port>/v1/oauth/token`, once started. */
+  get url(): string {
+    return `http://127.0.0.1:${this.port}/v1/oauth/token`;
+  }
+
+  /** Listens on [port] (0 for any free one); once only, until it is stopped. */
+  async start(port = 0): Promise<this> {
+    if (this.server) throw new Error(`already listening on ${this.url}`);
+    const server = createServer((req, res) => {
+      // a request cut off mid-body (the server's container stopped) is answered by nobody, never an unhandled rejection
+      this.answer(req, res).catch(() => res.destroy());
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, '127.0.0.1', () => {
+        server.off('error', reject);
+        resolve();
+      });
+    });
+    this.server = server;
+    this.port = (server.address() as AddressInfo).port;
+    return this;
+  }
+
+  async stop(): Promise<void> {
+    const server = this.server;
+    this.server = undefined;
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+
+  private async answer(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of req as AsyncIterable<Buffer>) {
+      size += chunk.length;
+      if (size > MAX_BODY) return send(res, 413, { error: 'invalid_request' });
+      chunks.push(chunk);
+    }
+    // decoded once whole: a character split across two chunks stays one
+    const raw = Buffer.concat(chunks).toString('utf8');
+    if (req.method !== 'POST') return send(res, 405, { error: 'invalid_request' });
+    let body: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      body = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      body = Object.fromEntries(new URLSearchParams(raw));
+    }
+    const text = (key: string) => (typeof body[key] === 'string' ? (body[key] as string) : undefined);
+    if (req.url === '/v1/messages') {
+      const model = text('model');
+      const max = body['max_tokens'];
+      this.calls.push({ model, maxTokens: typeof max === 'number' ? max : undefined, authorization: req.headers.authorization });
+      const message = { id: `msg_fake_${this.calls.length}`, type: 'message', role: 'assistant', model, content: [{ type: 'text', text: 'ok' }] };
+      return send(res, 200, { ...message, stop_reason: 'end_turn', stop_sequence: null, usage: this.usage });
+    }
+    const refresh: Refresh = { grantType: text('grant_type'), refreshToken: text('refresh_token'), clientId: text('client_id') };
+    this.refreshes.push(refresh);
+    if (refresh.grantType !== 'refresh_token' || refresh.refreshToken === undefined) return send(res, 400, { error: 'invalid_request' });
+    if (this.refused.has(refresh.refreshToken)) return send(res, 400, { error: 'invalid_grant' });
+    const n = this.refreshes.length;
+    const uuid = this.accounts.get(refresh.refreshToken);
+    const pair = { access_token: `fake-access-${n}`, refresh_token: `fake-refresh-${n}`, expires_in: 28_800, token_type: 'Bearer' };
+    return send(res, 200, uuid === undefined ? pair : { ...pair, account: { uuid }, id_token: idToken(uuid) });
+  }
+}
+
+/** The claim of an OpenAI id_token that holds the ChatGPT account (the server's OPENAI_AUTH_CLAIM). */
+export const OPENAI_AUTH_CLAIM = 'https://api.openai.com/auth';
+
+/** An unsigned JWT naming [account] as Codex's id_token does (`chatgpt_account_id`); the server reads it, never checks it. */
+export function idToken(account: string): string {
+  const part = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  return `${part({ alg: 'none', typ: 'JWT' })}.${part({ [OPENAI_AUTH_CLAIM]: { chatgpt_account_id: account } })}.`;
+}
+
+/** A refresh request is a few hundred bytes: anything past 64 KiB is not one. */
+const MAX_BODY = 64 * 1024;
+
+function send(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+}

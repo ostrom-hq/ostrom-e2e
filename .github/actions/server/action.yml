@@ -13,6 +13,13 @@ inputs:
     description: Read-only deploy key of ostrom-server (org secret DEPLOY_KEY_SERVER). Empty when called from ostrom-server itself.
     required: false
     default: ""
+  published-image:
+    description: >
+      A published image of ostrom-server to run instead of building one (`ghcr.io/ostrom-hq/ostrom-server:sha-<7>`):
+      the proof a PARCOURS cell asks for (JOURNAL 03/11 00:06). The sources are checked out at the commit of its
+      `org.opencontainers.image.revision` label, for their database roles. The job needs `packages: read`.
+    required: false
+    default: ""
   ref:
     description: Ref of ostrom-server to build (ignored when `path` is given).
     required: false
@@ -85,16 +92,31 @@ outputs:
     value: ${{ steps.src.outputs.bin }}
   mode:
     description: "`image` (the server's Docker image, container `ostrom-e2e-server`) or `binary`."
-    value: ${{ inputs.image == 'true' && 'image' || 'binary' }}
+    value: ${{ (inputs.image == 'true' || inputs.published-image != '') && 'image' || 'binary' }}
 runs:
   using: composite
   steps:
+    - name: Pull the published image
+      id: published
+      if: inputs.published-image != ''
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.published-image }}
+        GHCR_TOKEN: ${{ github.token }}
+      run: |
+        printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        docker pull --quiet "$IMAGE" || { echo "::error title=ostrom-server image::$IMAGE cannot be pulled from this repository (published? package Actions access?)"; exit 1; }
+        revision=$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")
+        [ -n "$revision" ] || { echo "::error title=ostrom-server image::$IMAGE carries no org.opencontainers.image.revision label"; exit 1; }
+        docker tag "$IMAGE" ostrom-server:e2e
+        echo "::notice title=ostrom-server image::$IMAGE, ostrom-server@$revision"
+        echo "revision=$revision" >> "$GITHUB_OUTPUT"
     - name: Checkout ostrom-server
       if: inputs.path == ''
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: ostrom-hq/ostrom-server
-        ref: ${{ inputs.ref }}
+        ref: ${{ steps.published.outputs.revision || inputs.ref }}
         ssh-key: ${{ inputs.deploy-key }}
         path: .ostrom/server
     - name: Locate sources
@@ -114,7 +136,7 @@ runs:
           echo "available=true" >> "$GITHUB_OUTPUT"
         fi
     - name: Cache the server binary by commit
-      if: steps.src.outputs.available == 'true'
+      if: steps.src.outputs.available == 'true' && inputs.published-image == ''
       id: cache
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
@@ -122,7 +144,7 @@ runs:
         key: ostrom-server-linuxX64-${{ steps.src.outputs.sha }}
     - name: ostrom-core version (gradle/ostrom-core.ref)
       id: core
-      if: inputs.core-key != '' && steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      if: inputs.core-key != '' && inputs.published-image == '' && steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
         DIR: ${{ steps.src.outputs.dir }}
@@ -150,16 +172,16 @@ runs:
         mkdir -p ~/.gradle
         grep -qx 'ostrom.core.local=true' ~/.gradle/gradle.properties 2>/dev/null || echo "ostrom.core.local=true" >> ~/.gradle/gradle.properties
     - name: Set up Java (build only)
-      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true' && inputs.published-image == ''
       uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
       with: { distribution: temurin, java-version: 21 }
     - name: Set up Gradle (build only)
-      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true' && inputs.published-image == ''
       uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       with:
         build-root-directory: ${{ steps.src.outputs.dir }}
     - name: Cache ~/.konan (build only)
-      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true' && inputs.published-image == ''
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.konan
@@ -167,7 +189,7 @@ runs:
         restore-keys: konan-${{ runner.os }}-
     - name: Build the native server
       id: build
-      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true'
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true' && inputs.published-image == ''
       shell: bash
       working-directory: ${{ steps.src.outputs.dir }}
       env:
@@ -197,7 +219,7 @@ runs:
         [ "$REQUIRED" = "true" ] && exit 1 || exit 0
     - name: Build the server image (its own Dockerfile, around the same binary)
       id: image
-      if: inputs.image == 'true' && steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false'
+      if: inputs.image == 'true' && inputs.published-image == '' && steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false'
       shell: bash
       working-directory: ${{ steps.src.outputs.dir }}
       env:
@@ -220,7 +242,7 @@ runs:
         DIR: ${{ steps.src.outputs.dir }}
         ADMIN_URL: ${{ inputs.database-admin-url }}
         DATABASE_URL: ${{ inputs.database-url }}
-        IMAGE: ${{ inputs.image }}
+        IMAGE: ${{ inputs.image == 'true' || inputs.published-image != '' }}
         BIN: ${{ steps.src.outputs.bin }}
       run: |
         if [ ! -f "$DIR/ci/database-roles.sql" ]; then echo "no ci/database-roles.sql: the server serves as the given user"; exit 0; fi
@@ -245,7 +267,7 @@ runs:
         OSTROM_PORT: ${{ inputs.port }}
         KEY_FILE: ${{ runner.temp }}/ostrom-instance-key-${{ inputs.port }}.pem
         EXTRA_ENV: ${{ inputs.extra-env }}
-        IMAGE: ${{ inputs.image }}
+        IMAGE: ${{ inputs.image == 'true' || inputs.published-image != '' }}
         DOCKER_ARGS: ${{ inputs.docker-args }}
         LEVEL: ${{ inputs.required == 'true' && 'error' || 'warning' }}
         REQUIRED: ${{ inputs.required }}
