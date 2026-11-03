@@ -55,6 +55,7 @@ saturate() { # $1 = round
   local sampler=$!
   local out; out=$(k6 run -q load/saturate.js 2>&1 | grep -o 'SAT.*' | sort -u | sed "s/^SAT/SAT r$1/" || true)
   local tend; tend=$(field Threads); local mend; mend=$(field VmRSS)
+  echo "SATANON r$1 end: RssAnon=$(mib "$(field RssAnon)") RssFile=$(mib "$(field RssFile)") VmData=$(mib "$(field VmData)")"
   echo "SATEND r$1 threads=$tend rss=$(mib "$mend") names: $(names) [$(poolmax)] raw: $(raw)"
   echo "SATWCHAN r$1 end: $(wchan)"
   kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null
@@ -62,6 +63,7 @@ saturate() { # $1 = round
   local hwm; hwm=$(field VmHWM)
   sleep 60; local a60 t60; a60=$(field VmRSS); t60=$(field Threads)
   echo "$out"
+  echo "SATANON r$1 +60 s: RssAnon=$(mib "$(field RssAnon)") RssFile=$(mib "$(field RssFile)") VmData=$(mib "$(field VmData)")"
   echo "SATMEM r$1 before=$(mib "$before") peak_hwm=$(mib "$hwm") peak_50ms=$(mib "$smax") after60=$(mib "$a60") threads=$threads0/$tmax/$t60"
   echo "SATWCHAN r$1 +60 s: $(wchan)"
   echo "SATTHREADS r$1 peak: $(cat /tmp/probe-names) | +60 s: $(names) [$(poolmax)] raw: $(raw)"
