@@ -30,9 +30,6 @@ stage() { # $1 = kind, $2 = N
   echo "| $1 × $2 | ${codes:-$out} | $med | $(mib "$before") | $(mib "$hwm") | $(mib "$smax") | $(mib "$a0") | $(mib "$a10") | $(mib "$a30") | $threads0 / $tmax |"
   docker inspect -f '{{.State.Running}}' "$CONTAINER" | grep -q true || { echo "server died: $(docker inspect -f '{{.State.ExitCode}} oom={{.State.OOMKilled}}' "$CONTAINER")"; exit 1; }
 }
-stage race 100
-stage race 200
-stage race 500
 stage unauth 100
 stage unauth 200
 stage unauth 500
