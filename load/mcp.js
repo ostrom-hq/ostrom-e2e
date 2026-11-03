@@ -6,14 +6,17 @@
 // - hang: `echo` on a server that never answers: the relay gives up at its deadline (OSTROM_MCP_CALL_TIMEOUT_MS of
 //   the load pass) with a tool error, never a hung request.
 // - down: `echo` on a server nothing listens on: a tool error at once.
+// At the end, what the fakes' HTTPS port saw (`mcp_tls_*` in the summary): TCP connections, TLS handshakes (and resumed
+// ones) and requests. As many handshakes as requests means the relay opens a connection per request.
 // Usage: k6 run load/mcp.js  (OSTROM_URL, OSTROM_LOAD_RELAY_TOKEN; OSTROM_LOAD_MCP_DEADLINE_MS, the relay's deadline)
 import { check, sleep } from 'k6';
-import { Counter } from 'k6/metrics';
-import { callTool, requireRelayToken, rpcResult } from './relay-lib.js';
+import { Counter, Gauge } from 'k6/metrics';
+import { callTool, fakeStats, requireRelayToken, resetFake, rpcResult } from './relay-lib.js';
 
 const DURATION = __ENV.OSTROM_LOAD_MCP_DURATION || '60s';
 const DEADLINE_MS = Number(__ENV.OSTROM_LOAD_MCP_DEADLINE_MS || 5000);
 const unexpected = new Counter('mcp_unexpected');
+const tls = Object.fromEntries(['connections', 'handshakes', 'resumed', 'requests'].map((k) => [k, new Gauge(`mcp_tls_${k}`)]));
 // The first unexpected answers of each VU are printed; past them, only counted (run 41539188060 printed 61 000).
 const WARNINGS = 5;
 let warned = 0;
@@ -37,6 +40,15 @@ export const options = {
 
 export function setup() {
   requireRelayToken('the MCP relay');
+  resetFake();
+}
+
+export function teardown() {
+  const seen = fakeStats();
+  if (!seen || !seen.tls) return console.warn('mcp: no TLS counts from the fakes');
+  for (const [k, gauge] of Object.entries(tls)) gauge.add(seen.tls[k] || 0);
+  const per = seen.tls.requests > 0 ? (seen.tls.handshakes / seen.tls.requests).toFixed(2) : 'n/a';
+  console.log(`mcp tls: ${JSON.stringify(seen.tls)}, ${per} handshakes per request`);
 }
 
 /** Calls `echo` on `server` and checks the answer is a success (`ok`) or a tool error (not ok), never anything else. */

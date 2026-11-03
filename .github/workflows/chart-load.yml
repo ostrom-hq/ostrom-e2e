@@ -444,6 +444,8 @@ jobs:
         env:
           OSTROM_URL: ${{ env.API_URL }}
           OSTROM_LOAD_MCP_DEADLINE_MS: "5000"
+          # The fakes' counts: what their HTTPS port saw of the relay's connections (load/mcp.js teardown).
+          OSTROM_LOAD_FAKE_URL: http://fake.ostrom.test
         run: |
           scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts); rc=0
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export mcp-summary.json load/mcp.js || rc=$?
@@ -532,6 +534,18 @@ jobs:
               -o custom-columns='P:.metadata.name,R:.status.containerStatuses[*].restartCount,T:.status.containerStatuses[*].state.terminated.reason,L:.status.containerStatuses[*].lastState.terminated.reason' \
               2>/dev/null | awk '{ printf "| %s | %s | %s | %s |\n", $1, $2, ($3 == "<none>" ? "" : $3), ($4 == "<none>" ? "" : $4) }' || true
           } | tee -a "$GITHUB_STEP_SUMMARY"
+      # A relay leg whose setup failed measured nothing: it must not end green (run 41618451768 did, its sign-in refused
+      # by ostrom-server#176).
+      - name: The relay leg measured the gateway and the MCP relay
+        if: always() && matrix.pass == 'relay'
+        env:
+          INFERENCE: ${{ steps.relaysetup.outputs.inference }}
+          MCP: ${{ steps.relaysetup.outputs.mcp }}
+          REASON: ${{ steps.relaysetup.outputs.reason }}
+        run: |
+          if [ "$INFERENCE" != true ] || [ "$MCP" != true ]; then
+            echo "::error title=relay setup::inference ${INFERENCE:-?}, mcp ${MCP:-?}: ${REASON:-no reason given}"; exit 1
+          fi
       - name: Gateway overhead under 15 ms at p95 (first byte and end, JSON and stream)
         if: always() && steps.relaysetup.outputs.inference == 'true'
         run: node scripts/relay-summary.ts --check inference-summary.json top-samples.txt phases.txt 2 > /dev/null
