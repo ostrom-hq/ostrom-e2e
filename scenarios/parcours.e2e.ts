@@ -467,7 +467,7 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     expect(gate['status'], JSON.stringify(asked.body)).toBe('pending');
     expect(gate['gate'], JSON.stringify(asked.body)).toMatchObject({ workflowId, enforce: true });
     expect((gate['gate'] as Record<string, unknown>)['approvers']).toContain(login);
-    const pending = await call(reviewer.caller, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
+    const pending = await call({ ...reviewer.caller, org: a.org.id }, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
     const mine = itemsOf(pending.body).find((x) => x['group'] === gate['id']);
     expect(mine, JSON.stringify({ gate: asked.body, pending: pending.body })).toBeDefined();
     // The reviewer has just signed in: the yes passes the step-up and answers with the signed receipt of the commit.
