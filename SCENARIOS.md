@@ -3102,23 +3102,23 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849 — `/health` p95 1,31 ms, p99 2,14 ms ; `/api/v1/instance` p95 1,92 ms, p99 3,04 ms ; 0 % d'erreurs sur 6 002 requêtes, 9 003 checks sur 9 003 (`load/smoke.js`, job `ci` d'ostrom-e2e)
 
 
-## DOGFOOD : Le harnais ControlResell en workflows Ostrom (dogfood)
+## DOGFOOD : Le harnais d'une équipe pilote en workflows Ostrom (dogfood)
 
-### E2E-DOGFOOD-001 — Les 8 workflows du harnais CR compilent en paquets signés
+### E2E-DOGFOOD-001 — Les 8 workflows du harnais pilote compilent en paquets signés
 
-- Étapes : compiler les 8 workflows `wf-cr-*.ts` du dogfood (db-perf, deploy, fix-ticket, mcp-guards, pr-workflow, push-guard, review, station) par le compilateur de la réécriture, publier les paquets, `ostrom verify` sur chacun.
+- Étapes : compiler les 8 workflows `wf-*.ts` du dogfood (performance de la base, déploiement, correction d'un ticket, gardes MCP, flux de PR, garde du push, revue, poste) par le compilateur de la réécriture, publier les paquets, `ostrom verify` sur chacun.
 - Attendu : 4 paquets (au moins) signés et vérifiés hors ligne ; le résumé de chaque paquet liste les nœuds compilés ; aucune porte sans action ne compile.
 - Surfaces : serveur, CLI
-- Source : dogfood/examples/controlresell/README et COUVERTURE.md (`out/`, `summary.json`) ; JOURNAL du 30/10 02:05
+- Source : dogfood/examples/pilote/README et COUVERTURE.md (`out/`, `summary.json`) ; JOURNAL du 30/10 02:05
 - Priorité : P1
 - Statut : bloqué : ostrom-server (compilateur) + ostrom-core (modèle de workflow)
 
-### E2E-DOGFOOD-002 — `behave.mjs` porté : chaque hook CR rejoué par le faux agent donne la décision attendue
+### E2E-DOGFOOD-002 — `behave.mjs` porté : chaque hook du harnais pilote rejoué par le faux agent donne la décision attendue
 
 - Étapes : sur des dépôts jetables, le faux agent rejoue les actions de `behave.mjs` (push, deploy, merge, appels MCP gardés…) sous `ostrom claude` avec les paquets du dogfood.
-- Attendu : les 27 cas de `out/behave.json` donnent la même décision qu'au prototype ; puis la cible de la réécriture : 85 % des hooks CR appliqués (contre 40 % au prototype), mesurée et publiée dans RAPPORT.md.
+- Attendu : les 27 cas de `out/behave.json` donnent la même décision qu'au prototype ; puis la cible de la réécriture : 85 % des hooks du harnais pilote appliqués (contre 40 % au prototype), mesurée et publiée dans RAPPORT.md.
 - Surfaces : CLI, serveur, faux agent
-- Source : dogfood/examples/controlresell/behave.mjs, COUVERTURE.md § « Ce que le hook fait vraiment » et § 4 (5 extensions)
+- Source : dogfood/examples/pilote/behave.mjs, COUVERTURE.md § « Ce que le hook fait vraiment » et § 4 (5 extensions)
 - Priorité : P1
 - Statut : bloqué : ostrom-cli (hooks) + ostrom-server (paquets)
 
@@ -3380,6 +3380,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Source : `demo/PARCOURS.md` 2.9
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-039 — 2.8 Groupes : un groupe de membres par login, une pause, un retrait ; une autre org ne voit rien
+
+- Étapes : Le propriétaire invite un membre et crée un groupe qui le nomme par login (`POST /api/v1/groups`) ; le membre lit la liste et le groupe, puis essaie d'en créer un et d'ajouter quelqu'un ; le propriétaire essaie le même nom en majuscules, un compte que l'org ne partage pas et un login hors de l'org ; il met le membre en pause jusqu'en 2099, renomme le groupe (`PATCH`), retire le membre (deux fois), le remet (`PUT`) ; une autre org lit, renomme et supprime le groupe ; le propriétaire le supprime.
+- Attendu : 201 `{name, members: [login], accounts: [], paused: []}` ; le membre lit (200), écrit 403 ; 409 pour le nom, 400 pour le compte et le login ; la pause se lit `paused: [{login, until}]` ; le second retrait 404 ; l'autre org 404 partout et ne voit pas l'id dans sa liste ; supprimé, 404 ; 401 sans identifiant.
+- Surfaces : serveur (l'écran console des groupes n'existe pas encore : sa spec est au JOURNAL de coordination)
+- Source : `demo/PARCOURS.md` 2.8 (groupes)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes quand les routes `/api/v1/groups` sont servies)
 
 ### E2E-PARC-009 — 2.10 Secret : écrit, tourné, supprimé ; la valeur n'est jamais relue
 
@@ -3748,12 +3757,12 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-SWEEP-001 — Chaque route servie a un cas
 
-- Étapes : les routes servies : `served-routes.txt` d'ostrom-core plus celles que `scripts/served-routes.py` lit dans le serveur testé ; pour chacune, l'opération OpenAPI (`security: []` public, en-tête `Ostrom-Org`, paramètres de chemin, corps échantillonné depuis le schéma) et le type de ressource de chaque paramètre (`PARAM_KINDS`, par préfixe).
+- Étapes : les routes servies : `served-routes.txt` d'ostrom-core, celles que `scripts/served-routes.py` lit dans le serveur testé, et chaque opération que le contrat marque `x-ostrom-status: served` (une route que la lecture du serveur manquerait) ; pour chacune, l'opération OpenAPI (`security: []` public, en-tête `Ostrom-Org`, paramètres de chemin, corps échantillonné depuis le schéma) et le type de ressource de chaque paramètre (`PARAM_KINDS`, par préfixe).
 - Attendu : aucune route servie sans cas : une route absente du contrat, un paramètre de type inconnu, ou une écriture sur le compte de l'appelant sans raison écrite (`SKIPPED`) fait échouer le scénario et nomme ce qu'il faut ajouter.
 - Surfaces : serveur (image), identité, organisations, chaque module
 - Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
 - Priorité : P1
-- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite) ; les routes que le contrat marque servies s'y ajoutent depuis le 03/11 (après `DELETE /push-devices/{id}`, vu seulement après la fusion de server#196). Joué aussi sur chaque PR d'ostrom-server contre l'image qu'elle construit (job `ci-e2e`).
 
 ### E2E-SWEEP-002 — Une session navigateur de B n'obtient rien de A, sur chaque route servie
 
@@ -3839,7 +3848,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | DIST | Distribution et mise à jour | 4 | 0 | 2 | 2 |
 | TC | Migration depuis le prototype et compatibilité TeamCode | 2 | 0 | 0 | 2 |
 | LOAD | Charge (k6) | 11 | 0 | 2 | 9 |
-| DOGFOOD | Le harnais ControlResell en workflows Ostrom | 3 | 0 | 3 | 0 |
+| DOGFOOD | Le harnais d'une équipe pilote en workflows Ostrom | 3 | 0 | 3 | 0 |
 | OBS | Observabilité (traces, télémétrie opt-in) | 3 | 0 | 2 | 1 |
 | SRV | Socle du serveur (santé, instance, erreurs, en-têtes) | 4 | 2 | 2 | 0 |
 | BILL | Facturation (abonnement Stripe, limites du plan) | 7 | 0 | 6 | 1 |

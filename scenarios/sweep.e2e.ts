@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // E2E-SWEEP : isolation between organizations, generated from the contract (second security audit, consigne du 02/11).
-// Every route the server serves (ostrom-core's served-routes.txt, plus what scripts/served-routes.py reads in the
-// server under test) gets a case from its OpenAPI operation (src/sweep.ts). A member of organization B calls each one
-// on A's resources, A's real ids and `Ostrom-Org: A`, and again with B's own organization named; each answer is set
-// beside the one a missing resource gets. Five kinds of caller: browser session, personal token, CLI token, the
-// elevated `osg_` token of `ostrom login --admin`, service key. A served route without a case fails E2E-SWEEP-001, so a
-// new route cannot be forgotten. A leak not in KNOWN fails its caller's scenario; a known leak that stops happening too.
+// Every route the server serves (ostrom-core's served-routes.txt, what scripts/served-routes.py reads in the server
+// under test, and every operation the contract marks `served`) gets a case from its OpenAPI operation (src/sweep.ts). A
+// member of organization B calls each one on A's resources, A's real ids and `Ostrom-Org: A`, and again with B's own
+// organization named; each answer is set beside the one a missing resource gets. Five kinds of caller: browser session,
+// personal token, CLI token, the elevated `osg_` token of `ostrom login --admin`, service key. A served route without a
+// case fails E2E-SWEEP-001, so a new route cannot be forgotten. A leak not in KNOWN fails its caller's scenario; a
+// known leak that stops happening too.
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
 import { type Caller, headersOf } from '../src/isolation.ts';
-import { type Answer, type Case, type CaseClass, type Leak, fill, judge, leakKey, mimic, operations, parseServed, plan, reconcile, sample } from '../src/sweep.ts';
+import { type Answer, type Case, type CaseClass, type Leak, fill, judge, leakKey, mergeServed, mimic, operations, parseServed, plan, reconcile, sample, servedInContract } from '../src/sweep.ts';
 import { SERVER_URL } from './env.ts';
 import { receiptIdIn } from './lib.ts';
 import { type Org, type Person, address, call, email, invite, orgOf, orgsUnavailable, profileOf, signIn, url } from './org.ts';
@@ -42,6 +43,8 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/confirmations/{id}': 'confirmation',
   '/api/v1/devices/{id}': 'device',
   '/api/v1/gates/{id}': 'gate',
+  '/api/v1/groups/{id}': 'group',
+  '/api/v1/groups/{}/members/{login}': 'login',
   '/api/v1/launches/{launchId}': 'launch',
   '/api/v1/mcp/servers/{name}': 'mcpServer',
   '/api/v1/mcp/servers/{}/assignments/{member}': 'member',
@@ -114,6 +117,7 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   deleteOrg: { make: (v) => ({ body: { confirm: v['slug'] } }) },
   inviteOrgMembers: { make: () => ({ body: { invites: [{ email: email('sweep-intruder'), role: 'admin' }] } }) },
   answerApproval: { make: () => ({ body: { answer: 'approve', shownDigest: 'sha256:00' } }) },
+  pauseGroupMember: { make: () => ({ body: { until: '2099-01-01T00:00:00Z' } }) },
 };
 
 const enc = (v: string | undefined) => encodeURIComponent(v ?? '');
@@ -132,7 +136,8 @@ const CONTRACT_MISSING = SERVED_FILE === '' || OPENAPI_FILE === '' ? 'no OSTROM_
 
 function contract(): Contract {
   const doc: unknown = JSON.parse(readFileSync(OPENAPI_FILE, 'utf8'));
-  const served = parseServed(readFileSync(SERVED_FILE, 'utf8'));
+  // The served list and the scan of the server, then every operation the contract marks served (a route the scan missed).
+  const served = mergeServed(parseServed(readFileSync(SERVED_FILE, 'utf8')), servedInContract(doc));
   return { doc, ...plan(served, operations(doc), PARAM_KINDS, SKIPPED) };
 }
 
@@ -303,9 +308,12 @@ async function makeWorld(): Promise<World> {
     if (!id) throw new Error(`no receipt: ${text(signed)}`);
     return id;
   });
+  await make('group', () => post('/api/v1/groups', { name: `Sweep ${tag}`, members: [login] }, 'createGroup', ['id']));
   await make('rule', () => post('/api/v1/rules', { statement: `Sweep rule ${tag}`, group: 'git' }, 'createRule', ['id']));
   await make('automation', () => post('/api/v1/automations', { name: `sweep ${tag}`, trigger: { kind: 'cron', cron: '0 21 * * *', timezone: 'Europe/Paris' }, action: { prompt: `Sweep ${tag} {{run.date}}` } }, 'createAutomation', ['id']));
   await make('wait', () => post('/api/v1/waits', { question: `Sweep question ${tag}` }, 'createWait', ['id']));
+  // A sharing group with A in it (served, missed by the scan of the server: E2E-SWEEP takes the contract's routes too).
+  await make('group', () => post('/api/v1/groups', { name: `sweep ${tag}`, members: [login] }, 'createGroup', ['id']));
   await make('mcpServer', () => post('/api/v1/mcp/servers', { name: `sweep-${tag}`, url: 'https://mcp.example.test/mcp', transport: 'http', tools: ['search'] }, 'createMcpServer', ['name']));
   await make('mcpPolicy', async () => {
     if (!values['mcpServer']) throw new Error('no MCP server');
