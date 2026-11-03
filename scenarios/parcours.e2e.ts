@@ -1013,7 +1013,9 @@ describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => 
       const first = await ask('0');
       const pushed = await expo.waitFor((m) => m.to === live, 30_000);
       expect(pushed.data).toEqual({ kind: 'approval', approvalId: first });
-      expect(pushed.title).toContain('asks for your yes');
+      // The lock screen shows the push to whoever holds the phone: the app's `approvals` channel, and no word of the request.
+      expect(pushed.channelId).toBe('approvals');
+      expect(`${pushed.title} ${pushed.body}`).not.toMatch(/acme|Push to main|ana/i);
       const mailed = await mailWith(reviewerEmail, `/yes/${first}`, 30_000);
       expect(mailed, 'the e-mail names no push token').not.toMatch(/ExponentPushToken/);
       // The outbox sends a request's notices together: a moment more, and still no other phone of ours was told.

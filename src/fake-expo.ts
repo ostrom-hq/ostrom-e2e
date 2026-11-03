@@ -12,6 +12,8 @@ export interface PushMessage {
   readonly to: string | undefined;
   readonly title: string | undefined;
   readonly body: string | undefined;
+  /** The Android notification channel the message names (the app's `approvals`). */
+  readonly channelId: string | undefined;
   readonly data: Record<string, unknown>;
   /** The `Authorization` the server sent: its Expo access token (OSTROM_EXPO_ACCESS_TOKEN), when it has one. */
   readonly authorization: string | undefined;
@@ -102,7 +104,7 @@ export class FakeExpo {
     const text = (item: Record<string, unknown>, key: string) => (typeof item[key] === 'string' ? (item[key] as string) : undefined);
     const tickets = items.map((item) => {
       const data = typeof item['data'] === 'object' && item['data'] !== null ? (item['data'] as Record<string, unknown>) : {};
-      const m: PushMessage = { to: text(item, 'to'), title: text(item, 'title'), body: text(item, 'body'), data, authorization: req.headers.authorization };
+      const m: PushMessage = { to: text(item, 'to'), title: text(item, 'title'), body: text(item, 'body'), channelId: text(item, 'channelId'), data, authorization: req.headers.authorization };
       this.messages.push(m);
       for (const w of this.waiters.filter((x) => x.matches(m))) {
         this.waiters.splice(this.waiters.indexOf(w), 1);
