@@ -10,6 +10,9 @@ field() { sudo awk -v k="$1:" '$1==k {print $2}' "/proc/$PID/status" 2>/dev/null
 mib() { awk -v kb="${1:-0}" 'BEGIN { printf "%.1f", kb / 1024 }'; }
 # Thread names, trailing digits folded: "name×count" sorted by count.
 names() { sudo sh -c "cat /proc/$PID/task/*/comm" 2>/dev/null | sed 's/[-_ #]*[0-9]*$//' | sort | uniq -c | sort -rn | awk '{c=$1; $1=""; sub(/^ /,""); printf "%s×%s, ", $0, c}' | sed 's/, $//'; }
+# Raw thread names (no folding), most frequent first, and the kernel wait channel of each thread.
+raw() { sudo sh -c "cat /proc/$PID/task/*/comm" 2>/dev/null | sort | uniq -c | sort -rn | head -12 | awk '{c=$1; $1=""; sub(/^ /,""); printf "%s×%s, ", $0, c}' | sed 's/, $//'; }
+wchan() { sudo sh -c 'for t in /proc/'"$PID"'/task/*; do printf "%s|%s\n" "$(cat $t/comm)" "$(cat $t/wchan 2>/dev/null)"; done' 2>/dev/null | sed 's/^\([a-z]*\)[-0-9]*|/\1|/' | sort | uniq -c | sort -rn | head -8 | awk '{printf "%s×%s, ", $2, $1}' | sed 's/, $//'; }
 # Per pool (name before its trailing number), the highest number seen: "io max 63".
 poolmax() { sudo sh -c "cat /proc/$PID/task/*/comm" 2>/dev/null | awk 'match($0, /[-_ #]?[0-9]+$/) { p = substr($0, 1, RSTART - 1); n = substr($0, RSTART); gsub(/[^0-9]/, "", n); if (n + 0 > m[p] + 0) m[p] = n } END { for (p in m) printf "%s max %s, ", p, m[p] }' | sed 's/, $//'; }
 NAMES=$(mktemp)
@@ -43,21 +46,28 @@ stage() { # $1 = kind, $2 = N
   fi
 }
 # server#266 (JOURNAL 03/11 16:52): the three ceilings filled at once, 100 calls past each, /health polled all along.
-saturate() {
+saturate() { # $1 = round
   sleep 2
   local before threads0; before=$(field VmRSS); threads0=$(field Threads)
-  echo "SATTHREADS before: $(names) [$(poolmax)]"
+  echo "SATTHREADS r$1 before: $(names) [$(poolmax)]"
   echo 5 | sudo tee "/proc/$PID/clear_refs" >/dev/null 2>&1 || echo "clear_refs refused" >&2
   ( m=0; t=0; while :; do r=$(field VmRSS); th=$(field Threads); [ "${r:-0}" -gt "$m" ] && m=$r; if [ "${th:-0}" -gt "$t" ]; then t=$th; { names; echo " ["; poolmax; echo "]"; } | tr -d "\n" > /tmp/probe-names; fi; echo "$m $t" > /tmp/probe-max; sleep 0.05; done ) &
   local sampler=$!
-  local out; out=$(k6 run -q load/saturate.js 2>&1 | grep -o 'SAT.*' | sort -u || true)
+  local out; out=$(k6 run -q load/saturate.js 2>&1 | grep -o 'SAT.*' | sort -u | sed "s/^SAT/SAT r$1/" || true)
+  local tend; tend=$(field Threads); local mend; mend=$(field VmRSS)
+  echo "SATEND r$1 threads=$tend rss=$(mib "$mend") names: $(names) [$(poolmax)] raw: $(raw)"
+  echo "SATWCHAN r$1 end: $(wchan)"
   kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null
   local smax tmax; read -r smax tmax < /tmp/probe-max || true
   local hwm; hwm=$(field VmHWM)
   sleep 60; local a60 t60; a60=$(field VmRSS); t60=$(field Threads)
   echo "$out"
-  echo "SATMEM before=$(mib "$before") peak_hwm=$(mib "$hwm") peak_50ms=$(mib "$smax") after60=$(mib "$a60") threads=$threads0/$tmax/$t60"
-  echo "SATTHREADS peak: $(cat /tmp/probe-names) | +60 s: $(names) [$(poolmax)]"
-  docker inspect -f 'SATSTATE running={{.State.Running}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}' "$CONTAINER"
+  echo "SATMEM r$1 before=$(mib "$before") peak_hwm=$(mib "$hwm") peak_50ms=$(mib "$smax") after60=$(mib "$a60") threads=$threads0/$tmax/$t60"
+  echo "SATWCHAN r$1 +60 s: $(wchan)"
+  echo "SATTHREADS r$1 peak: $(cat /tmp/probe-names) | +60 s: $(names) [$(poolmax)] raw: $(raw)"
+  echo "SATSTATE r$1 $(docker inspect -f 'running={{.State.Running}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$CONTAINER")"
+  docker inspect -f '{{.State.Running}}' "$CONTAINER" | grep -q true || exit 1
 }
-saturate
+saturate 1
+saturate 2
+saturate 3
