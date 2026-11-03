@@ -59,6 +59,10 @@ describe.skipIf(WHY !== '')(`E2E-GH-INSTALL: an organization installs only its o
   it('E2E-GH-INSTALL-001 B cannot take acme’s installation nor A’s state; acme’s owner installs it', async () => {
     const a = await signIn(email('gh-a'));
     const b = await signIn(email('gh-b'));
+    // The install is for the caller's organization (or the `?org=` it names): a person without one gets 404 at the
+    // start, so each has their own first.
+    await orgOf(a);
+    await orgOf(b);
 
     expect(await back(b.caller, 42, 'globex-admin', await stateOf(b))).toBe('?error=installation_not_yours');
     expect((await call(b.caller, 'GET', '/api/v1/github/app')).body).toMatchObject({ installed: false });
