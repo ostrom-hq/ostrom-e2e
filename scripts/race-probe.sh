@@ -73,3 +73,8 @@ saturate() { # $1 = round
 saturate 1
 saturate 2
 saturate 3
+# Bisection images of server#266 only (JOURNAL 21:01): their diagnostic route, once, 60 s after the last round (the round
+# already waited 60 s). Each line prefixed so the log greps it whole.
+echo "DIAG begin"
+curl -s -m 30 "${OSTROM_URL:-http://127.0.0.1:4600}/diag/threads" | sed 's/^/DIAG /'
+echo "DIAG end status=$?"
