@@ -3381,6 +3381,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
 
+### E2E-PARC-039 — 2.8 Groupes : un groupe de membres par login, une pause, un retrait ; une autre org ne voit rien
+
+- Étapes : Le propriétaire invite un membre et crée un groupe qui le nomme par login (`POST /api/v1/groups`) ; le membre lit la liste et le groupe, puis essaie d'en créer un et d'ajouter quelqu'un ; le propriétaire essaie le même nom en majuscules, un compte que l'org ne partage pas et un login hors de l'org ; il met le membre en pause jusqu'en 2099, renomme le groupe (`PATCH`), retire le membre (deux fois), le remet (`PUT`) ; une autre org lit, renomme et supprime le groupe ; le propriétaire le supprime.
+- Attendu : 201 `{name, members: [login], accounts: [], paused: []}` ; le membre lit (200), écrit 403 ; 409 pour le nom, 400 pour le compte et le login ; la pause se lit `paused: [{login, until}]` ; le second retrait 404 ; l'autre org 404 partout et ne voit pas l'id dans sa liste ; supprimé, 404 ; 401 sans identifiant.
+- Surfaces : serveur (l'écran console des groupes n'existe pas encore : sa spec est au JOURNAL de coordination)
+- Source : `demo/PARCOURS.md` 2.8 (groupes)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes quand les routes `/api/v1/groups` sont servies)
+
 ### E2E-PARC-009 — 2.10 Secret : écrit, tourné, supprimé ; la valeur n'est jamais relue
 
 - Étapes : Le propriétaire écrit un secret (`POST /api/v1/secrets`), le tourne (`PUT /secrets/{name}`), liste, le supprime ; une autre org liste.
