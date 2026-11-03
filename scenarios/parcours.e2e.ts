@@ -374,6 +374,7 @@ const W017 = await needs(['GET', '/api/v1/policy/agents']);
 const W018 = (await needs(['GET', '/api/v1/budgets'], ['PUT', '/api/v1/budgets'], ['GET', '/api/v1/budgets/me'])) || ORG64;
 const W019 = await needs(['GET', '/api/v1/spending']);
 const W020 = await needs(['GET', '/api/v1/decisions']);
+const W040 = (await needs(['GET', '/api/v1/audit'], ['PATCH', '/api/v1/orgs/{id}/members/{id}'])) || ORG64;
 
 describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
   it.skipIf(W012 !== '')(named('E2E-PARC-012 — 3.1 rules: a new org has no rule, the analysis state reads, a rule is edited and bulk-accepted', W012), async () => {
@@ -561,6 +562,52 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     expect(r.status).toBe(200);
     expect(itemsOf(r.body)).toEqual([]);
     await needsCredential('GET', '/api/v1/decisions');
+  }, T);
+
+  it.skipIf(W040 !== '')(named('E2E-PARC-040 — 3.6 the audit log is read by an owner and an admin, refused to a member, and shows nothing of another org', W040), async () => {
+    const a = await owner('parc-040');
+    const invited = email('parc-040-m');
+    expect((await invite(a.person, a.org.id, [invited])).status).toBeLessThan(300);
+    const { person, accepted } = await join(invited);
+    expect(accepted.status).toBeLessThan(300);
+    const member: Caller = { ...person.caller, org: a.org.id };
+
+    // The owner reads the signed lines of the org (`AuditEvent`), newest first: its creation and the member who joined.
+    const read = await call(a.c, 'GET', '/api/v1/audit');
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    const items = itemsOf(read.body);
+    for (const i of items) {
+      for (const k of ['id', 'at', 'event', 'actor', 'subject']) expect(typeof i[k], k).toBe('string');
+      expect(typeof i['meta']).toBe('object');
+    }
+    const ats = items.map((i) => Date.parse(i['at'] as string));
+    expect([...ats].sort((x, y) => y - x)).toEqual(ats);
+    const subjects = items.map((i) => i['subject'] as string);
+    expect(subjects).toContain(`org:${a.org.id}`);
+    const joined = items.find((i) => (i['subject'] as string).startsWith('member:'));
+    expect(joined, JSON.stringify(items)).toBeDefined();
+    // Filtered by event name, only that event comes back.
+    const event = joined?.['event'] as string;
+    const filtered = itemsOf((await call(a.c, 'GET', `/api/v1/audit?event=${encodeURIComponent(event)}`)).body);
+    expect(filtered.length).toBeGreaterThanOrEqual(1);
+    for (const i of filtered) expect(i['event']).toBe(event);
+
+    // A plain member is refused (owners and admins only); made admin, the same person reads the same log.
+    expect((await call(member, 'GET', '/api/v1/audit')).status).toBe(403);
+    const login = (await profileOf(person.caller)).login;
+    const up = await call(a.person.caller, 'PATCH', `/api/v1/orgs/${a.org.id}/members/${encodeURIComponent(login)}`, { role: 'admin' });
+    expect(up.status, JSON.stringify(up.body)).toBe(200);
+    const asAdmin = await call(member, 'GET', '/api/v1/audit');
+    expect(asAdmin.status, JSON.stringify(asAdmin.body)).toBe(200);
+    expect(itemsOf(asAdmin.body).map((i) => i['subject'])).toContain(`org:${a.org.id}`);
+
+    // Another org's owner: 404 when naming the first org, and their own log names none of its lines.
+    const b = await owner('parc-040-b');
+    expect((await call({ ...b.person.caller, org: a.org.id }, 'GET', '/api/v1/audit')).status).toBe(404);
+    const theirs = await call(b.c, 'GET', '/api/v1/audit');
+    expect(theirs.status).toBe(200);
+    for (const marker of [a.org.id, ...subjects.filter((x) => x.startsWith('member:'))]) expect(JSON.stringify(theirs.body)).not.toContain(marker);
+    await needsCredential('GET', '/api/v1/audit');
   }, T);
 });
 

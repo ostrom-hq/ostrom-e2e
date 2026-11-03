@@ -3513,6 +3513,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`GET /decisions` planned) ; forme du contrat `openapi.yaml`)
 
+### E2E-PARC-040 — 3.6 Journal d'audit de l'org : propriétaire et admin, refus au membre, rien d'une autre org
+
+- Étapes : Le propriétaire d'une org neuve invite une personne, qui rejoint ; il lit `GET /api/v1/audit`, puis le filtre `?event=` de la ligne du membre ; le membre lit la même route ; le propriétaire le fait admin (`PATCH /orgs/{org}/members/{login}`) et il relit ; le propriétaire d'une autre org lit en nommant la première (`Ostrom-Org`), puis son propre journal.
+- Attendu : 200, lignes `{id, at, event, actor, subject, meta}` de la plus récente à la plus ancienne, dont `org:<id>` (création) et une ligne `member:…` (l'arrivée du membre) ; le filtre ne rend que cet événement ; 403 au membre simple ; 200 une fois admin ; 404 pour l'autre org, et son propre journal ne nomme ni la première org ni ses membres ; 401 sans identifiant.
+- Surfaces : serveur (l'écran `/audit` lit cette route)
+- Source : `demo/PARCOURS.md` 3.6 ; ostrom-server#131 (`GET /audit`)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
+
 ### E2E-PARC-021 — 4.1 Workflow : créé, édité avec sa version, listé, supprimé ; le paquet courant
 
 - Étapes : Le propriétaire crée un workflow (`POST /api/v1/workflows` `{workflow}`), l'édite avec `expectedVersion`, rejoue la même version, liste, lit `GET /packages/current`, supprime ; une autre org liste.

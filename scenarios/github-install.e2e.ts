@@ -26,6 +26,14 @@ async function unavailable(): Promise<string> {
 
 const WHY = await unavailable();
 const github = new FakeGitHub();
+// The bench's App webhook secret (OSTROM_GITHUB_WEBHOOK_SECRET of ci.yml and ostrom-server's e2e-journey.yml).
+const WEBHOOK_SECRET = process.env['OSTROM_E2E_GITHUB_WEBHOOK_SECRET'] ?? 'whsec_github_e2e';
+
+/** GitHub's signed `installation.created`: the server learns who installed it before the browser comes back. */
+async function created(installation: number, account: string, sender: string): Promise<void> {
+  const payload = { action: 'created', installation: { id: installation, account: { login: account, type: 'Organization' } }, sender: { login: sender } };
+  expect(await github.webhook(`${SERVER_URL.replace(/\/$/, '')}/webhooks/github`, WEBHOOK_SECRET, 'installation', payload)).toBeLessThan(300);
+}
 
 /** GET without following GitHub's redirects: the start sends the browser to GitHub, the callback to the console. */
 async function visit(caller: Person['caller'], path: string): Promise<{ status: number; location: string; body: string }> {
@@ -53,12 +61,19 @@ describe.skipIf(WHY !== '')(`E2E-GH-INSTALL: an organization installs only its o
     await github.start(PORT);
     github.installation(42, 'acme', 'acme-admin');
     github.installation(43, 'globex', 'globex-admin');
+    // Since ostrom-server#118 the callback links an installation only once this webhook named who installed it.
+    await created(42, 'acme', 'acme-admin');
+    await created(43, 'globex', 'globex-admin');
   });
   afterAll(() => github.stop());
 
   it('E2E-GH-INSTALL-001 B cannot take acme’s installation nor A’s state; acme’s owner installs it', async () => {
     const a = await signIn(email('gh-a'));
     const b = await signIn(email('gh-b'));
+    // The install is for the caller's organization (or the `?org=` it names): a person without one gets 404 at the
+    // start, so each has their own first.
+    await orgOf(a);
+    await orgOf(b);
 
     expect(await back(b.caller, 42, 'globex-admin', await stateOf(b))).toBe('?error=installation_not_yours');
     expect((await call(b.caller, 'GET', '/api/v1/github/app')).body).toMatchObject({ installed: false });
@@ -75,7 +90,9 @@ describe.skipIf(WHY !== '')(`E2E-GH-INSTALL: an organization installs only its o
     expect(await back(a.caller, 42, 'acme-admin', stateA)).toBe('?error=forbidden');
     // B names A's organization: 404, an organization B is not in is not found (ostrom-server#143).
     expect((await visit(b.caller, `${START}?org=${(await orgOf(a)).id}`)).status).toBe(404);
-    // The person's token is used to list their installations, never sent anywhere else.
-    expect(github.requests.filter((r) => r.authorization.includes('ghu_')).every((r) => r.path === '/user/installations')).toBe(true);
+    // The person's token lists their installations and names them (`GET /user`, compared with who installed it since
+    // ostrom-server#118); it is never sent anywhere else.
+    const withToken = github.requests.filter((r) => r.authorization.includes('ghu_')).map((r) => r.path);
+    expect(withToken.filter((p) => p !== '/user/installations' && p !== '/user')).toEqual([]);
   });
 });

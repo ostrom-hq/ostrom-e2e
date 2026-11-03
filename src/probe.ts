@@ -4,9 +4,13 @@
 // is there. Lets a scenario switch itself on the day its route lands on main, without editing the bench.
 const GENERIC_404 = 'Not found.';
 
-/** True when `path` reaches a route (whatever it answers), false on the router's generic 404. */
+/**
+ * True when `path` reaches a route (whatever it answers), false on the router's generic 404. A redirect is a route that
+ * answers: it is not followed, or the page it points at (GitHub's install callback sends the browser to the console,
+ * which a bench without a console answers with the generic 404) would hide the route.
+ */
 export async function isServed(base: string, path: string, method = 'GET'): Promise<boolean> {
-  const r = await fetch(base.replace(/\/$/, '') + path, { method });
+  const r = await fetch(base.replace(/\/$/, '') + path, { method, redirect: 'manual' });
   if (r.status !== 404) return true;
   const text = await r.text();
   try {
