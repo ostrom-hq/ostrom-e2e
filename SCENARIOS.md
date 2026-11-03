@@ -3739,12 +3739,12 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-SWEEP-001 — Chaque route servie a un cas
 
-- Étapes : les routes servies : `served-routes.txt` d'ostrom-core plus celles que `scripts/served-routes.py` lit dans le serveur testé ; pour chacune, l'opération OpenAPI (`security: []` public, en-tête `Ostrom-Org`, paramètres de chemin, corps échantillonné depuis le schéma) et le type de ressource de chaque paramètre (`PARAM_KINDS`, par préfixe).
+- Étapes : les routes servies : `served-routes.txt` d'ostrom-core, celles que `scripts/served-routes.py` lit dans le serveur testé, et chaque opération que le contrat marque `x-ostrom-status: served` (une route que la lecture du serveur manquerait) ; pour chacune, l'opération OpenAPI (`security: []` public, en-tête `Ostrom-Org`, paramètres de chemin, corps échantillonné depuis le schéma) et le type de ressource de chaque paramètre (`PARAM_KINDS`, par préfixe).
 - Attendu : aucune route servie sans cas : une route absente du contrat, un paramètre de type inconnu, ou une écriture sur le compte de l'appelant sans raison écrite (`SKIPPED`) fait échouer le scénario et nomme ce qu'il faut ajouter.
 - Surfaces : serveur (image), identité, organisations, chaque module
 - Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
 - Priorité : P1
-- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite) ; les routes que le contrat marque servies s'y ajoutent depuis le 03/11 (après `DELETE /push-devices/{id}`, vu seulement après la fusion de server#196). Joué aussi sur chaque PR d'ostrom-server contre l'image qu'elle construit (job `ci-e2e`).
 
 ### E2E-SWEEP-002 — Une session navigateur de B n'obtient rien de A, sur chaque route servie
 
