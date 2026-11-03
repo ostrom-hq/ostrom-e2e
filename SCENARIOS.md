@@ -3703,7 +3703,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : vert : `scenarios/parcours.e2e.ts`, run https://github.com/ostrom-hq/ostrom-server/actions/runs/41618704932 (image `sha-e3244cc`, ostrom-server#196)
 
-### E2E-PARC-038 — 6.7 Une demande de oui part sur les téléphones vivants de l'approbateur et par e-mail, jamais ailleurs
+### E2E-PARC-046 — 6.7 Une demande de oui part sur les téléphones vivants de l'approbateur et par e-mail, jamais ailleurs
 
 - Étapes : un propriétaire invite un relecteur (admin) ; le relecteur enregistre un téléphone dans l'org (`POST /api/v1/push-devices`), un deuxième depuis une autre session qu'il ferme (`POST /api/v1/auth/logout`), un troisième dans une autre org dont il est membre ; le propriétaire enregistre le sien. Une règle pose une porte sur un push vers main avec le relecteur pour approbateur ; un jeton `gates:ask` demande la porte. Puis le faux Expo refuse la requête suivante et une deuxième porte est demandée.
 - Attendu : le faux Expo (`src/fake-expo.ts`, port `OSTROM_E2E_FAKE_EXPO_PORT`, serveur lancé avec `OSTROM_EXPO_PUSH_URL`) reçoit un push pour le seul téléphone vivant du relecteur dans l'org de la porte, avec `data = {kind: "approval", approvalId}` de sa demande ; aucun pour le téléphone de la session fermée, celui de l'autre org, ni celui du propriétaire ; un e-mail au relecteur dans `OSTROM_MAIL_DIR` porte le lien `/yes/{approvalId}`. Expo en panne : la porte est en attente tout de suite, l'e-mail part, le push arrive à la relance (5 s) et le refus n'est compté qu'une fois.
