@@ -3326,7 +3326,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | 5.8 Isolation entre deux orgs | E2E-ISO-001, E2E-ISO-002 |
 | 6.5 Facturation : plan, checkout, portail | E2E-BILL-005, E2E-BILL-006, E2E-BILL-007 |
 
-Étapes de ce chapitre : 2.2 → PARC-001 ; 2.3 → 002 ; 2.4 → 003 ; 2.5 → 004 ; 2.6 → 005 ; 2.7 → 006 ; 2.8 → 007 ; 2.9 → 008 ; 2.10 → 009 ; 2.11 → 010, 011, 041, 042 ; 3.1 → 012 ; 3.2 → 013 ; 3.3 → 014, 015 ; 3.4 → 016, 017 ; 3.5 → 018, 019 ; 3.6 → 020 ; 4.1 → 021, 022 ; 4.2 → 023 ; 4.3 → 024 ; 5.2 → 025, 026, 017 ; 5.3 → 027 ; 5.5 → 028 ; 5.7 → 029, 030 ; 6.1 → 031 ; 6.2 → 032 ; 6.3 → 033 ; 6.4 → 034, 019 ; 6.6 → 035 ; 6.7 → 036, 037.
+Étapes de ce chapitre : 2.2 → PARC-001 ; 2.3 → 002 ; 2.4 → 003 ; 2.5 → 004 ; 2.6 → 005 ; 2.7 → 006 ; 2.8 → 007 ; 2.9 → 008 ; 2.10 → 009 ; 2.11 → 010, 011, 041, 042 ; 3.1 → 012 ; 3.2 → 013 ; 3.3 → 014, 015 ; 3.4 → 016, 017 ; 3.5 → 018, 019, 047 ; 3.6 → 020 ; 4.1 → 021, 022 ; 4.2 → 023 ; 4.3 → 024 ; 5.2 → 025, 026, 017 ; 5.3 → 027 ; 5.5 → 028 ; 5.7 → 029, 030 ; 6.1 → 031 ; 6.2 → 032 ; 6.3 → 033 ; 6.4 → 034, 019 ; 6.6 → 035 ; 6.7 → 036, 037.
 
 ### E2E-PARC-001 — 2.2 Créer l'organisation et la relire, propriétaire
 
@@ -3748,6 +3748,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Source : `demo/PARCOURS.md` 2.11
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts`. Non joué ici : une connexion de plus de 5 minutes (le banc n'avance pas l'horloge du serveur ; prouvé par `OrgSettingsUseCasesTest` d'ostrom-server)
+
+### E2E-PARC-047 — 3.5 Budget d'une personne par jour : « bloquer » ne refuse qu'elle, « prévenir » laisse passer, se lit dans `/spending` et s'écrit à l'audit
+
+- Étapes : le propriétaire lit son `id` dans `GET /api/v1/orgs/{org}/members` et se met un budget de personne de 1 $ par jour qui bloque (`PUT /api/v1/budgets {scope: member, subject: <id>, usdPerDay: 1, hardStop: true}`) ; un compte Claude partagé ; il lance un agent. Le faux fournisseur (`src/fake-tokens.ts`) facture 300 000 jetons d'entrée (1,50 $) : un appel `max_tokens` 1, la dépense lue jusqu'à 1 $, puis un second appel. Il invite un membre, qui accepte, lance un agent et fait un appel. Le propriétaire repasse son budget en « prévenir » (`hardStop: false`, même 1 $ par jour) et refait un appel ; il lit `GET /api/v1/spending?period=month` et `GET /api/v1/audit?event=budget.exceeded`. Une autre org lit ses budgets, sa dépense et son audit.
+- Attendu : le premier appel est servi (200) ; le second est refusé en 429, `rate_limit_error`, « Daily budget reached: your limit of $1.00 a day is spent; it resets on <date>. », `Retry-After` > 0 et au plus un jour, sans atteindre le fournisseur ; l'appel de l'autre membre n'est pas refusé par ce budget (pas de 429). En « prévenir », la réponse au `PUT` porte `{scope: member, subject: <id>, usdPerDay: 1, hardStop: false}` et l'appel est servi (200) bien que la journée soit au-delà ; `exceeded` de `/spending` porte `{scope: member, subject: <id>, period: day, usd: 1, hardStop: false}` ; la ligne d'audit `budget.exceeded` existe sous cette personne, `meta` `{scope: member, period: day, action: warn, limit_usd: "1"}`. L'autre org ne voit ni le budget, ni le dépassement, ni la ligne.
+- Surfaces : serveur (image), gateway, budgets, rapports, audit, partage
+- Source : `demo/PARCOURS.md` 3.5 ; ostrom-server#230 (629ae71, budget d'une personne, jour, `warn`) ; ostrom-server#300 (4f50dd5) ; contrat core#86
+- Priorité : P1
+- Statut : codé : `scenarios/budget.e2e.ts` (s'allume avec le faux fournisseur et `OSTROM_E2E_MAIL_DIR`)
 
 ## ATT : Attestation des checks d'un reçu (décision du 30/10 13:23)
 
