@@ -371,6 +371,37 @@ jobs:
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js || rc=$?
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js || rc=$?
           exit "$rc"
+      # Registered runners (`ostrom-runner machine`): 500 registered in 5 organizations of their own (100 at most each),
+      # through the same pod and mail directory as the gate setup, then 100 and then 500 of them beating every 5 s with an
+      # empty report, a phase each (runner-phases.txt, apart from the streams' phases.txt that relay-summary.ts reads):
+      # the route's p95 is k6's, the server pods' CPU and memory the sampler's.
+      # The queries per heartbeat and their plans are ostrom-server's bench (RunnersHeartbeatBenchTest).
+      - name: Registered runners load setup (500 runners in 5 organizations)
+        id: runnerssetup
+        if: always() && steps.loadsetup.outcome != 'skipped'
+        env:
+          OSTROM_E2E_CONSOLE_ORIGIN: http://app.ostrom.test
+          OSTROM_LOAD_RUNNERS: "500"
+          OSTROM_LOAD_RUNNERS_FILE: ${{ runner.temp }}/runners.json
+        run: OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="${OSTROM_LOAD_MAIL_DIR:-}" node scripts/runners-load-setup.ts
+      - name: k6 registered runners' heartbeats (100, then 500, every 5 s, 2 minutes each)
+        if: always() && steps.runnerssetup.outputs.ready == 'true'
+        env:
+          OSTROM_URL: ${{ env.API_URL }}
+          OSTROM_LOAD_RUNNERS_FILE: ${{ runner.temp }}/runners.json
+          OSTROM_LOAD_RUNNER_INTERVAL: "5"
+        run: |
+          rc=0
+          for n in 100 500; do
+            scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts)
+            start=$(date +%s)
+            k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export "runners-$n-summary.json" \
+              -e OSTROM_LOAD_RUNNERS="$n" load/runners.js || rc=$?
+            echo "runners-$n $n $start $(date +%s)" >> runner-phases.txt
+            sleep 15
+            scripts/server-pods.sh crashed "$before" || rc=1
+          done
+          exit "$rc"
       # The member, its token and the MCP servers of the gateway and relay load tests (scripts/relay-load-setup.ts),
       # through the same pod and mail directory as the gate setup.
       - name: Gateway and relay load setup (member token, MCP servers on the fakes)
@@ -445,6 +476,7 @@ jobs:
         env:
           SERVER_SHA: ${{ steps.server.outputs.sha }}
           GATES: ${{ steps.loadsetup.outputs.ready == 'true' && 'run' || steps.loadsetup.outputs.reason }}
+          RUNNERS: ${{ steps.runnerssetup.outputs.ready == 'true' && 'run' || steps.runnerssetup.outputs.reason }}
           RELAY: >-
             inference ${{ steps.relaysetup.outputs.inference == 'true' && 'run' || 'not run' }},
             mcp ${{ steps.relaysetup.outputs.mcp == 'true' && 'run' || 'not run' }}${{ steps.relaysetup.outputs.reason && format(' ({0})', steps.relaysetup.outputs.reason) || '' }}
@@ -452,12 +484,26 @@ jobs:
           {
             echo "### Chart load pass (kind, ingress-nginx, 2 server replicas)"
             echo
-            echo "ostrom-server@${SERVER_SHA:-?} · gates and race: ${GATES:-not run}"
+            echo "ostrom-server@${SERVER_SHA:-?} · gates and race: ${GATES:-not run} · registered runners: ${RUNNERS:-not run}"
             echo
             node scripts/k6-summary.ts "smoke (health, instance)=smoke-summary.json" "chart journeys=journeys-summary.json" \
               "gates=gates-summary.json" "race=race-summary.json" "inference=inference-summary.json" \
               "50 streams=streams-50-summary.json" "200 streams=streams-200-summary.json" "cut streams=cut-summary.json" \
-              "mcp relay=mcp-summary.json" || echo "(no k6 summary)"
+              "mcp relay=mcp-summary.json" "runners 100=runners-100-summary.json" \
+              "runners 500=runners-500-summary.json" || echo "(no k6 summary)"
+            echo
+            echo "| runners phase | server pod | peak CPU | peak memory | samples |"
+            echo "|---|---|---|---|---|"
+            if [ -s runner-phases.txt ] && [ -s top-samples.txt ]; then
+              while read -r phase _ start end; do
+                awk -v p="$phase" -v s="$start" -v e="$end" -v ns="$NS" \
+                  '$1 >= s && $1 <= e && $2 == ns && $3 ~ /server/ { c = $4; m = $5; sub(/m$/, "", c); sub(/Mi$/, "", m); n[$3]++
+                     if (c + 0 > cpu[$3]) cpu[$3] = c + 0; if (m + 0 > mem[$3]) mem[$3] = m + 0 }
+                   END { for (k in n) printf "| %s | %s | %d m | %d Mi | %d |\n", p, k, cpu[k], mem[k], n[k] }' top-samples.txt | sort
+              done < runner-phases.txt
+            else
+              echo "| (not run) | | | | |"
+            fi
             echo
             echo "gateway and relay: ${RELAY:-not run}"
             echo
@@ -505,6 +551,6 @@ jobs:
         if: always()
         with:
           name: chart-load-k6
-          path: "*-summary.json\ntop-samples.txt\nphases.txt"
+          path: "*-summary.json\ntop-samples.txt\nphases.txt\nrunner-phases.txt"
           retention-days: 7
           if-no-files-found: ignore
