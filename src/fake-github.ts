@@ -20,6 +20,11 @@ export interface FakePull {
   readonly headSha: string;
   readonly baseRef: string;
   readonly headRef: string;
+  /** The GitHub login that opened it (GitHub's `user.login`); `octocat` when the scenario does not care. */
+  readonly author?: string;
+  /** GitHub's `state`: `open` unless the scenario closes it. */
+  readonly state?: 'open' | 'closed';
+  readonly merged?: boolean;
 }
 
 export interface Recorded {
@@ -220,7 +225,10 @@ export class FakeGitHub {
     const pull = /^pulls\/(\d+)$/.exec(rest);
     if (method === 'GET' && pull) {
       const p = this.pulls.get(`${repo}#${pull[1]}`);
-      return p ? [200, { number: p.number, head: { sha: p.headSha, ref: p.headRef }, base: { ref: p.baseRef } }] : [404, { message: 'Not Found' }];
+      // As GitHub's: the server reads `state`, `merged` and `user.login` besides the head and the base.
+      return p
+        ? [200, { number: p.number, state: p.state ?? 'open', merged: p.merged ?? false, head: { sha: p.headSha, ref: p.headRef }, base: { ref: p.baseRef }, user: { login: p.author ?? 'octocat' } }]
+        : [404, { message: 'Not Found' }];
     }
     const cmp = /^compare\/(.+)$/.exec(rest);
     if (method === 'GET' && cmp) {

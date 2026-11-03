@@ -95,7 +95,7 @@ async function linkGitHub(person: Person, login: string): Promise<void> {
 /** `GitHub opens pull request `number` of `repo` by the GitHub account (`login`, `id`) to main. */
 async function opened(installation: number, repo: string, number: number, author: { login: string; id: number }): Promise<string> {
   const headSha = randomUUID().replaceAll('-', '').padEnd(40, '0').slice(0, 40);
-  app.pull(repo, { number, headSha, baseRef: 'main', headRef: `feature-${number}` });
+  app.pull(repo, { number, headSha, baseRef: 'main', headRef: `feature-${number}`, author: author.login });
   await hook('pull_request', {
     action: 'opened',
     installation: { id: installation },
