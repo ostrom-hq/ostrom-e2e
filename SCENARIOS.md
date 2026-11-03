@@ -3390,6 +3390,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes quand les routes `/api/v1/groups` sont servies)
 
+### E2E-PARC-043 — 2.8 Prêt d'un compte à un groupe : ses membres hors pause l'utilisent, personne d'autre, pas même son propriétaire
+
+- Étapes : Le propriétaire invite deux membres, crée un groupe qui nomme le premier, écrit un secret et prête un abonnement Claude au groupe seul (`POST /api/v1/accounts` avec `credentialSecret` et `sharedWith: ["group:<id>"]`) ; chacun (membre du groupe, membre hors du groupe, propriétaire) appelle la passerelle (`POST /api/v1/inference/v1/messages`) avec un jeton personnel `inference:use`, le faux fournisseur de `src/fake-tokens.ts` tenant l'API d'Anthropic ; le propriétaire met le membre en pause jusqu'en 2099, puis jusqu'à un instant passé (la reprise) ; une autre org crée son groupe, que le propriétaire essaie de nommer dans `sharedWith` (`PATCH` et enrôlement), avec aussi un id mal formé.
+- Attendu : 201, `sharedWith: ["group:<id>"]`, et le compte dans `accounts` du groupe ; le membre du groupe est servi (200, l'appel arrive au fournisseur avec le jeton du secret) ; le membre hors du groupe et le propriétaire ne le sont pas (rien n'arrive au fournisseur) ; en pause, plus servi, servi de nouveau à la reprise ; le groupe de l'autre org et l'id mal formé : 400, le compte garde son groupe et le groupe de l'autre org reste sans compte ; l'autre org modifie le compte : 404.
+- Surfaces : serveur (passerelle, pool des comptes partagés)
+- Source : `demo/PARCOURS.md` 2.8 (prêt aux groupes, ostrom-server#245)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes ; demande `OSTROM_E2E_MAIL_DIR` et le faux fournisseur, `OSTROM_E2E_FAKE_TOKENS_PORT`)
+
 ### E2E-PARC-009 — 2.10 Secret : écrit, tourné, supprimé ; la valeur n'est jamais relue
 
 - Étapes : Le propriétaire écrit un secret (`POST /api/v1/secrets`), le tourne (`PUT /secrets/{name}`), liste, le supprime ; une autre org liste.
