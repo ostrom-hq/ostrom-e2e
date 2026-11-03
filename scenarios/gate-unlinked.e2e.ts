@@ -105,14 +105,14 @@ async function opened(installation: number, repo: string, number: number, author
   return headSha;
 }
 
-type Pending = { approval: { id: string; shownDigest?: string }; pr?: { number?: number }; you: { canApprove: boolean; reason?: string } };
+type Pending = { approval: { id: string; shownDigest?: string }; pr?: { number?: string }; you: { canApprove: boolean; reason?: string } };
 
 /** The pending approval of pull request `number` in `who`'s queue. */
 async function pendingOf(who: Caller, number: number): Promise<Pending> {
   for (let i = 0; i < 20; i++) {
     const q = await call(who, 'GET', '/api/v1/approvals/queue');
     expect(q.status, JSON.stringify(q.body)).toBe(200);
-    const found = ((q.body['pending'] ?? []) as Pending[]).find((p) => p.pr?.number === number);
+    const found = ((q.body['pending'] ?? []) as Pending[]).find((p) => p.pr?.number === String(number)); // the contract serves the number as a string
     if (found) return found;
     await new Promise((r) => setTimeout(r, 250));
   }
