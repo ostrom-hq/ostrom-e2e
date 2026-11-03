@@ -746,20 +746,15 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     const b = await owner('parc-018-b');
     expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toMatch(/"usdPerMonth":42\b/);
     // A person's budget (ostrom-server#230): by the day, that warns, named by the member's id from the members list.
-    // Until every server image under test carries #230, an older one refuses it as it did: then its refusals are checked.
     const self = itemsOf((await call(a.c, 'GET', `/api/v1/orgs/${a.org.id}/members`)).body, 'items')[0]?.['id'];
     expect(typeof self, 'the members list carries each member id').toBe('string');
     const person = await call(a.c, 'PUT', '/api/v1/budgets', { scope: 'member', subject: self, usdPerDay: 20, hardStop: false });
-    if (person.status === 400) {
-      for (const bad of [{ scope: 'org', usdPerDay: 5 }, { scope: 'org', usdPerMonth: 5, hardStop: false }]) expect((await call(a.c, 'PUT', '/api/v1/budgets', bad)).status).toBe(400);
-    } else {
-      expect(person.status, JSON.stringify(person.body)).toBe(200);
-      expect(person.body).toMatchObject({ scope: 'member', subject: self, usdPerDay: 20, hardStop: false });
-      const listed = itemsOf((await call(a.c, 'GET', '/api/v1/budgets')).body).filter((i) => i['subject'] === self);
-      expect(listed).toEqual([expect.objectContaining({ usdPerDay: 20, hardStop: false })]);
-      expect(listed[0]).not.toHaveProperty('usdPerMonth');
-      expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toContain(String(self));
-    }
+    expect(person.status, JSON.stringify(person.body)).toBe(200);
+    expect(person.body).toMatchObject({ scope: 'member', subject: self, usdPerDay: 20, hardStop: false });
+    const listed = itemsOf((await call(a.c, 'GET', '/api/v1/budgets')).body).filter((i) => i['subject'] === self);
+    expect(listed).toEqual([expect.objectContaining({ usdPerDay: 20, hardStop: false })]);
+    expect(listed[0]).not.toHaveProperty('usdPerMonth');
+    expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toContain(String(self));
     // Refused shapes: a workflow budget (not served) and an unknown scope.
     for (const bad of [{ scope: 'workflow', subject: 'wf', usdPerMonth: 5 }, { scope: 'team', usdPerMonth: 5 }]) expect((await call(a.c, 'PUT', '/api/v1/budgets', bad)).status).toBe(400);
   }, T);
