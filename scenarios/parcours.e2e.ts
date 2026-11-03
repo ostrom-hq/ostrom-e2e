@@ -5,12 +5,15 @@
 // (AUTH, LOGIN, YES, ISO, BILL, GATE) are not repeated here: the mapping is at the top of the PARC section of
 // SCENARIOS.md. Screens (web, app) are out of the bench's scope: each scenario proves the server route the screen reads.
 import { randomUUID } from 'node:crypto';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join as joinPath } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Caller } from '../src/isolation.ts';
+import { FakeExpo } from '../src/fake-expo.ts';
 import { invitationToken } from '../src/mail.ts';
 import { FakeTokens } from '../src/fake-tokens.ts';
 import { isServed } from '../src/probe.ts';
-import { FAKE_TOKENS_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
+import { FAKE_EXPO_PORT, FAKE_TOKENS_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
 import { type Org, type Person, call, email, invite, join, orgOf, orgsUnavailable, profileOf, signIn } from './org.ts';
 
 const ORGS = await orgsUnavailable();
@@ -25,6 +28,21 @@ async function needs(...routes: [string, string][]): Promise<string> {
   return missing.length ? `not served yet: ${missing.join(', ')}` : '';
 }
 const named = (title: string, why: string) => (why ? `${title} (skipped: ${why})` : title);
+
+/** The text of a mail the server wrote to OSTROM_MAIL_DIR for `to` that contains `marker`, waited for up to `ms`. */
+async function mailWith(to: string, marker: string, ms: number): Promise<string> {
+  const until = Date.now() + ms;
+  for (;;) {
+    for (const name of readdirSync(MAIL_DIR)) {
+      const path = joinPath(MAIL_DIR, name);
+      if (!statSync(path).isFile()) continue;
+      const text = readFileSync(path, 'utf8');
+      if (text.toLowerCase().startsWith(`to: ${to.toLowerCase()}\n`) && text.includes(marker)) return text;
+    }
+    if (Date.now() > until) throw new Error(`no mail to ${to} with ${marker} in ${MAIL_DIR} after ${ms} ms`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
 
 interface Owner {
   readonly person: Person;
@@ -728,20 +746,15 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     const b = await owner('parc-018-b');
     expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toMatch(/"usdPerMonth":42\b/);
     // A person's budget (ostrom-server#230): by the day, that warns, named by the member's id from the members list.
-    // Until every server image under test carries #230, an older one refuses it as it did: then its refusals are checked.
     const self = itemsOf((await call(a.c, 'GET', `/api/v1/orgs/${a.org.id}/members`)).body, 'items')[0]?.['id'];
     expect(typeof self, 'the members list carries each member id').toBe('string');
     const person = await call(a.c, 'PUT', '/api/v1/budgets', { scope: 'member', subject: self, usdPerDay: 20, hardStop: false });
-    if (person.status === 400) {
-      for (const bad of [{ scope: 'org', usdPerDay: 5 }, { scope: 'org', usdPerMonth: 5, hardStop: false }]) expect((await call(a.c, 'PUT', '/api/v1/budgets', bad)).status).toBe(400);
-    } else {
-      expect(person.status, JSON.stringify(person.body)).toBe(200);
-      expect(person.body).toMatchObject({ scope: 'member', subject: self, usdPerDay: 20, hardStop: false });
-      const listed = itemsOf((await call(a.c, 'GET', '/api/v1/budgets')).body).filter((i) => i['subject'] === self);
-      expect(listed).toEqual([expect.objectContaining({ usdPerDay: 20, hardStop: false })]);
-      expect(listed[0]).not.toHaveProperty('usdPerMonth');
-      expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toContain(String(self));
-    }
+    expect(person.status, JSON.stringify(person.body)).toBe(200);
+    expect(person.body).toMatchObject({ scope: 'member', subject: self, usdPerDay: 20, hardStop: false });
+    const listed = itemsOf((await call(a.c, 'GET', '/api/v1/budgets')).body).filter((i) => i['subject'] === self);
+    expect(listed).toEqual([expect.objectContaining({ usdPerDay: 20, hardStop: false })]);
+    expect(listed[0]).not.toHaveProperty('usdPerMonth');
+    expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toContain(String(self));
     // Refused shapes: a workflow budget (not served) and an unknown scope.
     for (const bad of [{ scope: 'workflow', subject: 'wf', usdPerMonth: 5 }, { scope: 'team', usdPerMonth: 5 }]) expect((await call(a.c, 'PUT', '/api/v1/budgets', bad)).status).toBe(400);
   }, T);
@@ -1153,6 +1166,8 @@ const W034 = (await needs(['GET', '/api/v1/usage'], ['GET', '/api/v1/usage/summa
 const W035 = (await needs(['POST', '/api/v1/import/teamcode'])) || ORG64;
 const W036 = (await needs(['POST', '/api/v1/auth/mobile/token'], ['GET', '/api/v1/approvals/queue'], ['GET', '/api/v1/approvals/{id}/view'], ['GET', '/api/v1/me/notifications'], ['PUT', '/api/v1/me/notifications'])) || ACTORS;
 const W037 = await needs(['POST', '/api/v1/push-devices'], ['DELETE', '/api/v1/push-devices/{id}']);
+// The sending itself has no route to probe: the bench says where the fake Expo listens once the server points at it.
+const W046 = (FAKE_EXPO_PORT === 0 ? 'no OSTROM_E2E_FAKE_EXPO_PORT (fake Expo, ostrom-server#228)' : '') || W013 || W037 || (await needs(['POST', '/api/v1/auth/logout']));
 
 describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => {
   it.skipIf(W031 !== '')(named('E2E-PARC-031 — 6.1 the sessions of a new org: an empty list, an unknown session 404, nothing for another org', W031), async () => {
@@ -1294,4 +1309,86 @@ describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => 
     expect((await call(a.c, 'DELETE', `/api/v1/push-devices/${made.body['id'] as string}`)).status).toBeLessThan(300);
     await needsCredential('POST', '/api/v1/push-devices', { pushToken, provider: 'expo', platform: 'ios' });
   }, T);
+
+  it.skipIf(W046 !== '')(named("E2E-PARC-046 — 6.7 a request for a yes reaches the approver's live phones of the org and their mailbox, no other phone, even when Expo fails", W046), async () => {
+    const expo = await new FakeExpo().start(FAKE_EXPO_PORT);
+    try {
+      const a = await owner('parc-038');
+      const reviewerEmail = email('parc-038-rev');
+      expect((await invite(a.person, a.org.id, [reviewerEmail], 'admin')).status).toBe(200);
+      const { person: reviewer, accepted } = await join(reviewerEmail);
+      expect(accepted.status).toBe(200);
+      const login = (await profileOf(reviewer.caller)).login;
+      const phone = (name: string) => `ExponentPushToken[parc-038-${name}-${randomUUID()}]`;
+      const register = async (c: Caller, pushToken: string) => {
+        const made = await call(c, 'POST', '/api/v1/push-devices', { pushToken, provider: 'expo', platform: 'ios' });
+        expect(made.status, JSON.stringify(made.body)).toBe(201);
+      };
+      // The reviewer's live phone in the gate's organization: the only one told.
+      const live = phone('live');
+      await register({ ...reviewer.caller, org: a.org.id }, live);
+      // A phone registered from another session of the reviewer, then signed out of: forgotten with the session.
+      const signedOut = phone('signed-out');
+      const other = await signIn(reviewerEmail);
+      await register({ ...other.caller, org: a.org.id }, signedOut);
+      expect((await call(other.caller, 'POST', '/api/v1/auth/logout')).status).toBeLessThan(300);
+      // The reviewer's phone in another organization they belong to: never read for this one's gates.
+      const b = await owner('parc-038-b');
+      expect((await invite(b.person, b.org.id, [reviewerEmail])).status).toBe(200);
+      const { person: inB, accepted: joinedB } = await join(reviewerEmail);
+      expect(joinedB.status).toBe(200);
+      const otherOrg = phone('other-org');
+      await register({ ...inB.caller, org: b.org.id }, otherOrg);
+      // The asker's own phone: the owner is no approver of the rule.
+      const owners = phone('owner');
+      await register(a.c, owners);
+      const ours = new Set([live, signedOut, otherOrg, owners]);
+
+      const repo = `acme/parc-${randomUUID().slice(0, 8)}`;
+      const made = await call(a.c, 'POST', '/api/v1/rules', {
+        statement: 'A push to main waits for a review', group: 'git', scope: [repo],
+        gate: { actions: [{ class: 'push-main', label: 'Push to main', patterns: [], repos: [repo] }], approvers: [login] },
+      });
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      const token = await call(a.c, 'POST', '/api/v1/tokens', { name: 'parc-038 asker', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
+      expect(token.status, JSON.stringify(token.body)).toBeLessThan(300);
+      const asker: Caller = { token: String(token.body['secret']), org: a.org.id };
+      /** Asks a push to main, answered at once (pending), and the reviewer's request for it. */
+      const ask = async (fill: string) => {
+        const sha = randomUUID().replaceAll('-', '').padEnd(40, fill).slice(0, 40);
+        const asked = await call(asker, 'POST', '/api/v1/gates', { repo, class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
+        expect(asked.status, JSON.stringify(asked.body)).toBeLessThan(300);
+        const gate = asked.body['gate'] as Record<string, unknown>;
+        expect(gate['status'], JSON.stringify(asked.body)).toBe('pending');
+        const pending = await call({ ...reviewer.caller, org: a.org.id }, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
+        const request = itemsOf(pending.body).find((x) => x['group'] === gate['id']);
+        expect(request, JSON.stringify({ gate: asked.body, pending: pending.body })).toBeDefined();
+        return String(request?.['id']);
+      };
+
+      const first = await ask('0');
+      const pushed = await expo.waitFor((m) => m.to === live, 30_000);
+      expect(pushed.data).toEqual({ kind: 'approval', approvalId: first });
+      // The lock screen shows the push to whoever holds the phone: the app's `requests` channel, and no word of the request.
+      expect(pushed.channelId).toBe('requests');
+      expect(`${pushed.title} ${pushed.body}`).not.toMatch(/acme|Push to main|ana/i);
+      const mailed = await mailWith(reviewerEmail, `/yes/${first}`, 30_000);
+      expect(mailed, 'the e-mail names no push token').not.toMatch(/ExponentPushToken/);
+      // The outbox sends a request's notices together: a moment more, and still no other phone of ours was told.
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      expect(expo.messages.filter((m) => m.to !== undefined && ours.has(m.to)).map((m) => m.to)).toEqual([live]);
+
+      // Expo down: the request is still pending at once, the e-mail still goes, and the push arrives on a later try.
+      expo.refuseNext = 1;
+      const second = await ask('1');
+      await mailWith(reviewerEmail, `/yes/${second}`, 30_000);
+      const retried = await expo.waitFor((m) => m.to === live && m.data['approvalId'] === second, 60_000);
+      expect(retried.data).toEqual({ kind: 'approval', approvalId: second });
+      expect(expo.refused).toBe(1);
+      expect(expo.messages.filter((m) => m.to !== undefined && ours.has(m.to) && m.to !== live)).toEqual([]);
+    } finally {
+      await expo.stop();
+    }
+    // Longer than T: two notices and one retry of the server's outbox (5 s) are awaited.
+  }, 3 * T);
 });

@@ -3517,7 +3517,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 ### E2E-PARC-018 — 3.5 Budget de l'org : réglé, listé avec sa période, lu comme budget du membre
 
 - Étapes : Le propriétaire règle `PUT /api/v1/budgets` `{scope: org, usdPerMonth: 42, hardStop: true}`, lit `GET /budgets` et `GET /budgets/me` ; une autre org lit ses budgets ; il règle le budget d'une personne, la sienne, nommée par l'`id` de `GET /orgs/{org}/members`, par jour et qui prévient seulement (`{scope: member, subject: <id>, usdPerDay: 20, hardStop: false}`) ; deux formes refusées.
-- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; le budget de la personne : 200, listé sous son id avec `usdPerDay: 20`, `hardStop: false` et sans `usdPerMonth`, invisible de l'autre org (un serveur sans ostrom-server#230 le refuse en 400, et refuse alors aussi le budget par jour et le budget sans arrêt de l'org) ; budget de workflow et portée inconnue : 400.
+- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; le budget de la personne : 200, listé sous son id avec `usdPerDay: 20`, `hardStop: false` et sans `usdPerMonth`, invisible de l'autre org (ostrom-server#230, 629ae71) ; budget de workflow et portée inconnue : 400.
 - Surfaces : serveur (l'écran `/spend` lit ces routes)
 - Source : `demo/PARCOURS.md` 3.5
 - Priorité : P1
@@ -3719,7 +3719,16 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur
 - Source : `demo/PARCOURS.md` 6.7
 - Priorité : P1
-- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#47)
+- Statut : vert : `scenarios/parcours.e2e.ts`, run https://github.com/ostrom-hq/ostrom-server/actions/runs/41618704932 (image `sha-e3244cc`, ostrom-server#196)
+
+### E2E-PARC-046 — 6.7 Une demande de oui part sur les téléphones vivants de l'approbateur et par e-mail, jamais ailleurs
+
+- Étapes : un propriétaire invite un relecteur (admin) ; le relecteur enregistre un téléphone dans l'org (`POST /api/v1/push-devices`), un deuxième depuis une autre session qu'il ferme (`POST /api/v1/auth/logout`), un troisième dans une autre org dont il est membre ; le propriétaire enregistre le sien. Une règle pose une porte sur un push vers main avec le relecteur pour approbateur ; un jeton `gates:ask` demande la porte. Puis le faux Expo refuse la requête suivante et une deuxième porte est demandée.
+- Attendu : le faux Expo (`src/fake-expo.ts`, port `OSTROM_E2E_FAKE_EXPO_PORT`, serveur lancé avec `OSTROM_EXPO_PUSH_URL`) reçoit un push pour le seul téléphone vivant du relecteur dans l'org de la porte, avec `data = {kind: "approval", approvalId}` de sa demande ; aucun pour le téléphone de la session fermée, celui de l'autre org, ni celui du propriétaire ; un e-mail au relecteur dans `OSTROM_MAIL_DIR` porte le lien `/yes/{approvalId}`. Expo en panne : la porte est en attente tout de suite, l'e-mail part, le push arrive à la relance (5 s) et le refus n'est compté qu'une fois.
+- Surfaces : serveur (image), module `notifications`
+- Source : `demo/PARCOURS.md` 6.7 ; ostrom-server#228 (remplace #47)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume avec `OSTROM_E2E_FAKE_EXPO_PORT` : `e2e-journey.yml` du serveur et `ci.yml`)
 
 
 ### E2E-PARC-041 — 2.11 Réglages de l'org : nom et fuseau changés par un admin ; un membre ou un approbateur ne peut pas, une autre org reçoit 404
