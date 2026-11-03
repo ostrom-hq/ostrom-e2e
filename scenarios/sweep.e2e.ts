@@ -42,6 +42,8 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/confirmations/{id}': 'confirmation',
   '/api/v1/devices/{id}': 'device',
   '/api/v1/gates/{id}': 'gate',
+  '/api/v1/groups/{id}': 'group',
+  '/api/v1/groups/{}/members/{login}': 'login',
   '/api/v1/launches/{launchId}': 'launch',
   '/api/v1/mcp/servers/{name}': 'mcpServer',
   '/api/v1/mcp/servers/{}/assignments/{member}': 'member',
@@ -114,6 +116,7 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   deleteOrg: { make: (v) => ({ body: { confirm: v['slug'] } }) },
   inviteOrgMembers: { make: () => ({ body: { invites: [{ email: email('sweep-intruder'), role: 'admin' }] } }) },
   answerApproval: { make: () => ({ body: { answer: 'approve', shownDigest: 'sha256:00' } }) },
+  pauseGroupMember: { make: () => ({ body: { until: '2099-01-01T00:00:00Z' } }) },
 };
 
 const enc = (v: string | undefined) => encodeURIComponent(v ?? '');
@@ -303,6 +306,7 @@ async function makeWorld(): Promise<World> {
     if (!id) throw new Error(`no receipt: ${text(signed)}`);
     return id;
   });
+  await make('group', () => post('/api/v1/groups', { name: `Sweep ${tag}`, members: [login] }, 'createGroup', ['id']));
   await make('rule', () => post('/api/v1/rules', { statement: `Sweep rule ${tag}`, group: 'git' }, 'createRule', ['id']));
   await make('automation', () => post('/api/v1/automations', { name: `sweep ${tag}`, trigger: { kind: 'cron', cron: '0 21 * * *', timezone: 'Europe/Paris' }, action: { prompt: `Sweep ${tag} {{run.date}}` } }, 'createAutomation', ['id']));
   await make('wait', () => post('/api/v1/waits', { question: `Sweep question ${tag}` }, 'createWait', ['id']));
