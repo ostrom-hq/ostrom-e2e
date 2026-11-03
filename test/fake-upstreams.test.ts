@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
+import { connect } from 'node:net';
 import { get as httpsGet } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -94,6 +95,38 @@ describe('FakeUpstreams provider', () => {
     expect((await stats()).provider['total']).toBe(0);
   });
 
+  it('keeps serving when a client leaves in the middle of its request body', async () => {
+    const target = new URL(url);
+    await new Promise<void>((resolve) => {
+      const socket = connect(Number(target.port), target.hostname, () => {
+        socket.write('POST /v1/messages HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ncontent-length: 1000\r\n\r\n{"mo');
+        setTimeout(() => socket.destroy(), 20);
+      });
+      socket.on('close', () => resolve());
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(await (await fetch(`${url}/health`)).json()).toEqual({ ok: true });
+  });
+
+  it('streams a long answer with no gap without growing the stack', async () => {
+    const long = await post('/v1/messages', { model: 'm', stream: true, ostrom_fake: { chunks: 10_000, gapMs: 0 } });
+    expect(long.text.split('content_block_delta').length - 1).toBe(10_000);
+    expect(long.text).toContain('message_stop');
+  });
+
+  it('counts a call that ends after a reset in its own counts, never below zero in the new ones', async () => {
+    await fetch(`${url}/stats/reset`, { method: 'POST' });
+    const target = new URL(`${url}/mcp/hang`);
+    const req = httpRequest({ host: target.hostname, port: target.port, path: target.pathname, method: 'POST', headers: { 'content-type': 'application/json' } });
+    req.on('error', () => undefined);
+    req.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
+    await until(async () => (await stats()).mcp['open'] === 1);
+    await fetch(`${url}/stats/reset`, { method: 'POST' });
+    req.destroy();
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await stats()).mcp).toEqual({ open: 0, total: 0, completed: 0, aborted: 0 });
+  });
+
   it('answers health, 400 to malformed JSON and 404 elsewhere', async () => {
     expect(await (await fetch(`${url}/health`)).json()).toEqual({ ok: true });
     expect((await post('/v1/messages', '{')).status).toBe(400);
@@ -122,7 +155,10 @@ describe('FakeUpstreams MCP', () => {
   it('accepts notifications and session deletes, refuses what is not a JSON-RPC POST', async () => {
     expect((await rpc('fast', 'notifications/initialized', undefined, null)).status).toBe(202);
     expect((await fetch(`${url}/mcp/fast`, { method: 'DELETE' })).status).toBe(204);
-    expect((await fetch(`${url}/mcp/fast`)).status).toBe(400);
+    // 405: the server offers no SSE stream on GET (Streamable HTTP), which a client must not take for a broken server.
+    const get = await fetch(`${url}/mcp/fast`);
+    expect(get.status).toBe(405);
+    expect(get.headers.get('allow')).toBe('POST, DELETE');
     expect((await post('/mcp/fast', { id: 1, method: 'ping' })).status).toBe(400);
     expect((await post('/mcp/fast', 'null')).status).toBe(400);
   });
