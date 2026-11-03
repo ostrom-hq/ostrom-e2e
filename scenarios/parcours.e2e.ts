@@ -830,11 +830,15 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
 // --------------------------------------------------------------------------------------- 4. Workflows and automations
 
 const W021 = (await needs(['GET', '/api/v1/workflows'], ['POST', '/api/v1/workflows'], ['PUT', '/api/v1/workflows/{id}'], ['DELETE', '/api/v1/workflows/{id}'], ['GET', '/api/v1/packages/current'])) || ACTORS;
-const W022 = await needs(['GET', '/api/v1/workflows/{id}/runs'], ['POST', '/api/v1/workflows/{id}/runs'], ['GET', '/api/v1/runs']);
+// The runs of a workflow need the workflow engine: until the server serves their routes (`planned` in the contract),
+// PARC-022 is skipped by name with PARCOURS 4.1, never silently.
+const W022 = await needs(['GET', '/api/v1/workflows/{id}/runs'], ['POST', '/api/v1/workflows/{id}/runs'], ['GET', '/api/v1/runs']).then((why) =>
+  why ? `no workflow engine on the server yet, PARCOURS 4.1: ${why}` : '',
+);
 // The engine that plays a run comes with the run's own routes (ostrom-server, feat/workflow-run-engine): before them a
 // run stays queued; with them a lone trigger ends succeeded, and an agent then a gate are played to the end.
 const PLAYED = (await needs(['GET', '/api/v1/runs/{id}'], ['POST', '/api/v1/runs/{id}/cancel'])) === '';
-const W022P = W022 || (PLAYED ? '' : 'not served yet: GET /api/v1/runs/{id}, POST /api/v1/runs/{id}/cancel') || ACTORS;
+const W022P = W022 || (PLAYED ? '' : 'no workflow engine on the server yet, PARCOURS 4.1: not served yet: GET /api/v1/runs/{id}, POST /api/v1/runs/{id}/cancel') || ACTORS;
 const W023 = (await needs(['POST', '/api/v1/automations'], ['POST', '/api/v1/automations/{id}/enable'], ['PUT', '/api/v1/automations/{id}'], ['POST', '/api/v1/automations/{id}/run'], ['POST', '/api/v1/automations/{id}/webhook/rotate-secret'], ['DELETE', '/api/v1/automations/{id}'])) || ORG64;
 const W024 = (await needs(['POST', '/api/v1/waits'], ['GET', '/api/v1/waits/{id}'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/waits/{id}/cancel'])) || ORG64;
 const W044 = (await needs(['POST', '/api/v1/waits/mcp'], ['POST', '/api/v1/waits'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/launches'], ['POST', '/api/v1/sessions'])) || ACTORS || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');

@@ -309,7 +309,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, faux agent
 - Source : proto/COORD/HOOK-DISPATCH.md §3 (lignes `ls`) et §4 ; proto/launcher/dev/dispatch-bench/bench.py
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks))
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé dès que serveur et CLI servent le jalon (sondes `loginUnavailable` et `journeyUnavailable`) (bloqué : ostrom-cli (hooks))
 
 ### E2E-CLAUDE-004 — Action gardée dont les checks sont déjà passés : coût constant
 
@@ -701,11 +701,11 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 ### E2E-BYPASS-001 — Contournement : options avant le verbe `push` (piste 1a)
 
 - Étapes : Catalogue du dépôt ; commandes `git -C /work/core push origin main`, `git -C "/my work/core" push origin HEAD:main`, `git -c core.sshCommand=ssh push origin main`, `git --no-pager push origin main`, `git --git-dir /work/core/.git push origin main`.
-- Attendu : Toutes sont classées `push-main` (porte demandée).
-- Surfaces : serveur (catalogue), faux agent
-- Source : audit/server/src/bridge/audit-gate.test.ts P1 (première boucle) ; commit 4a74f6a0
+- Attendu : Aucune n'atteint l'origine. Les formes simples (`git -C <dépôt>`, `git --no-pager`, le chemin avec espace depuis une session ouverte dans ce dépôt) demandent la porte de main. Celles qui changent où git lit ou envoie sont refusées d'emblée, sans demande : `--git-dir` par le hook (audit A6, `GateTexts.redirected`), `-c core.sshCommand=…` par le serveur. Le même push depuis une session ouverte dans un autre dépôt est refusé aussi (« do not cover »). Assoupli le 03/11 (QA, e2e#65) : « porte demandée pour toutes » est devenu « refusée, par une demande ou d'emblée », pour suivre la décision A6 ; PARCOURS 5.3.
+- Surfaces : serveur (catalogue), CLI (hook), faux agent
+- Source : audit/server/src/bridge/audit-gate.test.ts P1 (première boucle) ; commit 4a74f6a0 ; ostrom-cli `GitInvocation.kt` (audit A6)
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-002 — Contournement : options avant le verbe de déploiement (piste 1b)
 
@@ -741,7 +741,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, faux agent
 - Source : audit/server/src/bridge/audit-gate.test.ts P2
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-006 — Contournement : git redirigé vers un autre dépôt (piste 3)
 
@@ -914,7 +914,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, faux agent
 - Source : audit/COORD/AUDIT-PORTE.md A9 ; audit/bridge/test/audit-push.test.mjs (4 cas) ; audit/launcher/tests/audit_push_refs.rs
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-025 — Contournement A10 : écrire dans une session sans en être le propriétaire
 
