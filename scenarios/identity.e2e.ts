@@ -9,7 +9,7 @@ import { FakeGitHub } from '../src/fake-github.ts';
 import { isServed } from '../src/probe.ts';
 import { DATABASE_ADMIN_URL, FAKE_GITHUB_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
 import { adminSql } from './lib.ts';
-import { address, call, cookiesOf, email, invite, join, mailedToken, orgOf, profileOf, signIn, url } from './org.ts';
+import { address, call, cookiesOf, email, invite, join, mailedLink, orgOf, profileOf, signIn, url, verifyLink } from './org.ts';
 
 const served = async (method: string, path: string) => SERVER_URL !== '' && (await isServed(SERVER_URL, path, method));
 const EMAIL_SIGN_IN = MAIL_DIR !== '' && (await served('POST', '/api/v1/auth/email')) && (await served('POST', '/api/v1/auth/email/verify'));
@@ -27,8 +27,15 @@ describe.skipIf(!EMAIL_SIGN_IN || !ME)('E2E-AUTH: sign-in by e-mailed link', () 
   it('E2E-AUTH-001 the mailed link signs in once: an HttpOnly session cookie, a CSRF token, the profile; a reused or forged link is refused', async () => {
     const who = email('auth-link');
     const from = address();
-    const token = await mailedToken(who, from);
-    const verify = (t: string) => fetch(url('/api/v1/auth/email/verify'), { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': from }, body: JSON.stringify({ token: t }) });
+    const { token, browser } = await mailedLink(who, from);
+    expect(browser, 'the asking browser keeps a nonce (ostrom-server#176)').toMatch(/ostrom_email_link=./);
+    const verify = (t: string) => verifyLink(t, from, browser);
+    // The valid link presented without the asking browser's cookie (forwarded, read on another device): refused, and not
+    // used up (ostrom-server#176, web audit 2 M4).
+    const elsewhere = await verifyLink(token, from);
+    expect(elsewhere.status).toBe(403);
+    expect(((await elsewhere.json()) as { error?: { type?: string } }).error?.type).toBe('email_link_other_browser');
+    expect(elsewhere.headers.getSetCookie().filter((c) => /ostrom_session=[^;]/.test(c))).toEqual([]);
     const first = await verify(token);
     expect(first.status).toBe(200);
     const signed = (await first.json()) as { redirect: string; csrfToken: string };

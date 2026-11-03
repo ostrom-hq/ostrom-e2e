@@ -262,7 +262,8 @@ export interface Answer {
   readonly text: string;
 }
 
-const VOLATILE = new Set(['requestId', 'traceId', 'timestamp', 'time', 'now', 'serverTime']);
+// A governance write answers a confirmation minted for that very call (ostrom-server#146): its id, link and expiry.
+const VOLATILE = new Set(['requestId', 'traceId', 'timestamp', 'time', 'now', 'serverTime', 'confirmationId', 'confirmUrl', 'expiresAt']);
 
 /**
  * An answer's body made comparable: the values the request sent are replaced by `<sent>` (a message may name the id
