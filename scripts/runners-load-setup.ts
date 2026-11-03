@@ -9,7 +9,7 @@
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { isServed } from '../src/probe.ts';
 import { SERVER_URL } from '../scenarios/env.ts';
-import { call, email, signIn } from '../scenarios/org.ts';
+import { call, email, orgOf, signIn } from '../scenarios/org.ts';
 
 const PER_ORG = 100;
 const out = (file: string | undefined, line: string) => (file ? appendFileSync(file, `${line}\n`) : console.log(line));
@@ -23,8 +23,10 @@ async function setup(): Promise<string> {
   const runners: { id: string; token: string }[] = [];
   for (let org = 0; runners.length < wanted; org++) {
     const owner = await signIn(email(`runners-${org}`));
+    // The runners routes name the organization (the `Ostrom-Org` header).
+    const caller = { ...owner.caller, org: (await orgOf(owner)).id };
     for (let i = 0; i < PER_ORG && runners.length < wanted; i++) {
-      const r = await call(owner.caller, 'POST', '/api/v1/runners', { name: `k6-machine-${i}`, labels: ['docker'] });
+      const r = await call(caller, 'POST', '/api/v1/runners', { name: `k6-machine-${i}`, labels: ['docker'] });
       const { id, token } = r.body ?? {};
       if (r.status !== 201 || typeof id !== 'string' || typeof token !== 'string') {
         return `register → ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`;
