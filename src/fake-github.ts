@@ -5,7 +5,7 @@
 // (the App's own JWT, installation tokens, the web-flow code of the install's return and `GET /user/installations`),
 // pull requests, compare, check runs, and signed webhooks sent to the Ostrom server. Every request is recorded for the
 // scenario to assert on.
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -158,7 +158,7 @@ export class FakeGitHub {
     const signature = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
     const r = await fetch(target, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-github-event': event, 'x-github-delivery': `d-${this.nextId++}`, 'x-hub-signature-256': signature },
+      headers: { 'content-type': 'application/json', 'x-github-event': event, 'x-github-delivery': randomUUID(), 'x-hub-signature-256': signature },
       body,
     });
     return r.status;
