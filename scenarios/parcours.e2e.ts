@@ -298,7 +298,8 @@ describe('E2E-PARC: 2. organization setup', () => {
     expect(key.status, JSON.stringify(key.body)).toBe(201);
     // Since ostrom-server#158 a service key holds only what a CI needs: sessions:write and rules:read.
     expect((await call(a.c, 'POST', '/api/v1/service-keys', { name: 'parc-011 reader', scopes: ['receipts:read'] })).status).toBe(400);
-    expect(key.body).toMatchObject({ name: 'parc-011 ci', scopes: ['sessions:write', 'rules:read'] });
+    expect(key.body['name']).toBe('parc-011 ci');
+    expect([...(key.body['scopes'] as string[])].sort(), JSON.stringify(key.body)).toEqual(['rules:read', 'sessions:write']);
     expect(typeof key.body['secret']).toBe('string');
     const keys = await call(a.c, 'GET', '/api/v1/service-keys');
     expect(itemsOf(keys.body).map((k) => k['id'])).toContain(key.body['id']);
