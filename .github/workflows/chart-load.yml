@@ -94,8 +94,12 @@ jobs:
       # passes with the reason (the server does not trust the fakes' certificate).
       - name: Bench CA, the fake MCP servers' certificate, and the server image that trusts it
         continue-on-error: true
+        env:
+          PASS: ${{ matrix.pass }}
         run: |
           docker tag ostrom-server:e2e ostrom-server:e2e-load
+          # The gates leg runs the image as built: no fakes, no CA.
+          [ "$PASS" = relay ] || exit 0
           d="$RUNNER_TEMP/fakes-tls"; mkdir -p "$d"; cd "$d"
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=Ostrom load bench CA" -keyout ca.key -out ca.crt \
             -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign"
@@ -349,6 +353,7 @@ jobs:
       - name: Gate load setup (requester token, approver session)
         id: loadsetup
         env:
+          PASS: ${{ matrix.pass }}
           # The only origin a browser session may write from: the chart's console URL (global.urls.app, S2-08).
           OSTROM_E2E_CONSOLE_ORIGIN: http://app.ostrom.test
         run: |
@@ -370,7 +375,10 @@ jobs:
           fi
           [ -n "$mail" ] || echo "::warning title=mail directory::the sign-in mails of $pod are not readable from the runner"
           echo "OSTROM_LOAD_MAIL_DIR=$mail" >> "$GITHUB_ENV"
-          OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="$mail" node scripts/load-setup.ts
+          # The gates' accounts only in their leg; the relay leg keeps the port-forward and the mail directory alone.
+          if [ "$PASS" = gates ]; then
+            OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="$mail" node scripts/load-setup.ts
+          fi
       - name: k6 gates (push to main + yes) and race (100 simultaneous yes → 1 × 200, 99 × 409)
         if: matrix.pass == 'gates' && steps.loadsetup.outputs.ready == 'true'
         env:
@@ -459,24 +467,31 @@ jobs:
         if: always()
         env:
           SERVER_SHA: ${{ steps.server.outputs.sha }}
-          GATES: ${{ steps.loadsetup.outputs.ready == 'true' && 'run' || steps.loadsetup.outputs.reason }}
-          RELAY: >-
-            inference ${{ steps.relaysetup.outputs.inference == 'true' && 'run' || 'not run' }},
-            mcp ${{ steps.relaysetup.outputs.mcp == 'true' && 'run' || 'not run' }}${{ steps.relaysetup.outputs.reason && format(' ({0})', steps.relaysetup.outputs.reason) || '' }}
+          PASS: ${{ matrix.pass }}
+          GATES: ${{ matrix.pass != 'gates' && 'not in this leg' || (steps.loadsetup.outputs.ready == 'true' && 'run' || steps.loadsetup.outputs.reason) }}
+          RELAY_INFERENCE: ${{ steps.relaysetup.outputs.inference == 'true' && 'run' || 'not run' }}
+          RELAY_MCP: ${{ steps.relaysetup.outputs.mcp == 'true' && 'run' || 'not run' }}
+          RELAY_REASON: ${{ steps.relaysetup.outputs.reason }}
         run: |
           {
             echo "### Chart load pass, ${{ matrix.pass }} (kind, ingress-nginx, 2 server replicas)"
             echo
             echo "ostrom-server@${SERVER_SHA:-?} · gates and race: ${GATES:-not run}"
             echo
-            node scripts/k6-summary.ts "smoke (health, instance)=smoke-summary.json" "chart journeys=journeys-summary.json" \
-              "gates=gates-summary.json" "race=race-summary.json" "inference=inference-summary.json" \
-              "50 streams=streams-50-summary.json" "200 streams=streams-200-summary.json" "cut streams=cut-summary.json" \
-              "mcp relay=mcp-summary.json" || echo "(no k6 summary)"
-            echo
-            echo "gateway and relay: ${RELAY:-not run}"
-            echo
-            node scripts/relay-summary.ts inference-summary.json top-samples.txt phases.txt 2 || echo "(no relay summary)"
+            if [ "$PASS" = gates ]; then
+              node scripts/k6-summary.ts "smoke (health, instance)=smoke-summary.json" "chart journeys=journeys-summary.json" \
+                "gates=gates-summary.json" "race=race-summary.json" || echo "(no k6 summary)"
+              echo
+              echo "gateway and relay: not in this leg"
+            else
+              node scripts/k6-summary.ts "smoke (health, instance)=smoke-summary.json" "chart journeys=journeys-summary.json" \
+                "inference=inference-summary.json" "cut streams=cut-summary.json" "mcp relay=mcp-summary.json" \
+                "50 streams=streams-50-summary.json" "200 streams=streams-200-summary.json" || echo "(no k6 summary)"
+              echo
+              echo "gateway and relay: inference $RELAY_INFERENCE, mcp $RELAY_MCP${RELAY_REASON:+ ($RELAY_REASON)}"
+              echo
+              node scripts/relay-summary.ts inference-summary.json top-samples.txt phases.txt 2 || echo "(no relay summary)"
+            fi
             echo
             echo "| pod | peak CPU | peak memory | samples |"
             echo "|---|---|---|---|"

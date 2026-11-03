@@ -101,8 +101,10 @@ released within 2 s (`load/cut.js`); and MCP servers that answer at once, late, 
 (`load/mcp.js`). `scripts/relay-summary.ts` writes the overhead and memory tables. Each of these phases starts on Ready
 server pods and fails on a restart of its own, with the crashed container's last lines (`scripts/server-pods.sh`).
 The workflow runs in two legs, each on its own runner and kind cluster: `gates` (the smoke, the journeys, the gates
-and the race) and `relay` (the smoke, the journeys, then the gateway and the relay). A crash in one never decides the
-other's numbers. Their artifacts are `chart-load-k6` and `chart-load-k6-relay`.
+and the race) and `relay` (the smoke, the journeys, then the gateway and the relay). Both build the server image and
+open the port-forward and the mail directory of the sign-in; only `gates` runs `scripts/load-setup.ts`, only `relay` the
+CA and the fakes. A crash in one never decides the other's numbers. Their artifacts are `chart-load-k6` and
+`chart-load-k6-relay`; a dispatch may run one leg only (`pass`).
 
 ## Documentation
 
