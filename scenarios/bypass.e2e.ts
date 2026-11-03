@@ -55,10 +55,10 @@ describe.skipIf(OFF !== '')(title, () => {
     ];
     // Each one is refused before it runs: either it asks for the gate of main (a request to say yes to), or the CLI
     // denies it outright, without asking, because it cannot tie a yes to what git would really send (`-c …`,
-    // `--git-dir`: « the action was not run »). Never through.
+    // `--git-dir`: « Ostrom: denied »). Never through.
     for (const r of results) {
       expect(r.blocked, r.why).toBe(true);
-      expect(r.gate !== undefined || /action was not run/.test(r.why), r.why).toBe(true);
+      expect(r.gate !== undefined || /Ostrom: denied/.test(r.why), r.why).toBe(true);
     }
     // The plain forms ask for the gate.
     expect(results[0]?.gate, results[0]?.why).toBeDefined();
