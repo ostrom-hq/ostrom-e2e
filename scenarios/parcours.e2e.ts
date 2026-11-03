@@ -755,8 +755,10 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     expect(listed).toEqual([expect.objectContaining({ usdPerDay: 20, hardStop: false })]);
     expect(listed[0]).not.toHaveProperty('usdPerMonth');
     expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toContain(String(self));
-    // Refused shapes: a workflow budget (not served) and an unknown scope.
-    for (const bad of [{ scope: 'workflow', subject: 'wf', usdPerMonth: 5 }, { scope: 'team', usdPerMonth: 5 }]) expect((await call(a.c, 'PUT', '/api/v1/budgets', bad)).status).toBe(400);
+    // Refused: an unknown scope (400), and a budget on a workflow the org does not have: 400 while workflow budgets are
+    // not served, 404 once they are (ostrom-server#337).
+    expect((await call(a.c, 'PUT', '/api/v1/budgets', { scope: 'team', usdPerMonth: 5 })).status).toBe(400);
+    expect([400, 404]).toContain((await call(a.c, 'PUT', '/api/v1/budgets', { scope: 'workflow', subject: 'wf', usdPerMonth: 5 })).status);
   }, T);
 
   it.skipIf(W019 !== '')(named('E2E-PARC-019 — 3.5 / 6.4 spending of the week and the month, by agent, repo, person and day, against the budget', W019), async () => {
