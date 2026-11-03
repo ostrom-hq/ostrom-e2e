@@ -65,6 +65,7 @@ describe('operations', () => {
       paths: {
         '/api/v1/push-devices/{id}': { delete: { 'x-ostrom-status': 'served' }, get: { 'x-ostrom-status': 'planned' } },
         '/api/v1/push-devices': { $ref: '#/x/devices' },
+        '/api/v1/ghost': { $ref: '#/nope' },
       },
       x: { devices: { post: { 'x-ostrom-status': 'served' } } },
     };
