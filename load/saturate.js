@@ -17,7 +17,7 @@ const retryAfter = new Counter('sat_retry_after');
 const health = new Counter('sat_health');
 
 const kinds = ['stream', 'wait', 'call', 'health'];
-const codes = ['0', '200', '401', '403', '409', '429', '500', '502', '503'];
+const codes = ['0', '200', '401', '403', '409', '429', '500', '502', '503', 'other'];
 export const options = {
   scenarios: {
     streams: { executor: 'per-vu-iterations', vus: STREAMS, iterations: 1, maxDuration: '60s', exec: 'stream' },
@@ -30,6 +30,7 @@ export const options = {
     ...kinds.flatMap((k) => codes.map((c) => [`sat_status{kind:${k},status:${c}}`, ['count>=0']])),
     ...kinds.map((k) => [`sat_retry_after{kind:${k}}`, ['count>=0']]),
     ...['200', 'other'].map((c) => [`sat_health{status:${c}}`, ['count>=0']]),
+    ['http_req_duration{name:sat-call}', ['max>=0']],
   ]),
 };
 
@@ -43,8 +44,15 @@ export function setup() {
   return { heldGate: held.json('gate.id'), approval };
 }
 
+const seen = {};
 function count(kind, r) {
-  statuses.add(1, { kind, status: String(r.status) });
+  const known = codes.includes(String(r.status));
+  statuses.add(1, { kind, status: known ? String(r.status) : 'other' });
+  // An unlisted status is named once per kind, with the start of its body, so the summary is never short of a code.
+  if (!known && !seen[`${kind}${r.status}`]) {
+    seen[`${kind}${r.status}`] = true;
+    console.warn(`SATODD ${kind} status=${r.status} error=${r.error_code} body=${String(r.body).slice(0, 160)}`);
+  }
   if (r.headers['Retry-After'] !== undefined) retryAfter.add(1, { kind });
 }
 

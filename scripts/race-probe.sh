@@ -47,7 +47,7 @@ saturate() {
   echo 5 | sudo tee "/proc/$PID/clear_refs" >/dev/null 2>&1 || echo "clear_refs refused" >&2
   ( m=0; t=0; while :; do r=$(field VmRSS); th=$(field Threads); [ "${r:-0}" -gt "$m" ] && m=$r; if [ "${th:-0}" -gt "$t" ]; then t=$th; names > /tmp/probe-names; fi; echo "$m $t" > /tmp/probe-max; sleep 0.05; done ) &
   local sampler=$!
-  local out; out=$(k6 run -q load/saturate.js 2>&1 | grep '^SAT' || true)
+  local out; out=$(k6 run -q load/saturate.js 2>&1 | grep -o 'SAT.*' | sort -u || true)
   kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null
   local smax tmax; read -r smax tmax < /tmp/probe-max || true
   local hwm; hwm=$(field VmHWM)
