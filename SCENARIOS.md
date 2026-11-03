@@ -309,7 +309,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, faux agent
 - Source : proto/COORD/HOOK-DISPATCH.md §3 (lignes `ls`) et §4 ; proto/launcher/dev/dispatch-bench/bench.py
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks))
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé dès que serveur et CLI servent le jalon (sondes `loginUnavailable` et `journeyUnavailable`) (bloqué : ostrom-cli (hooks))
 
 ### E2E-CLAUDE-004 — Action gardée dont les checks sont déjà passés : coût constant
 
@@ -705,7 +705,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (catalogue), faux agent
 - Source : audit/server/src/bridge/audit-gate.test.ts P1 (première boucle) ; commit 4a74f6a0
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-002 — Contournement : options avant le verbe de déploiement (piste 1b)
 
@@ -741,7 +741,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, faux agent
 - Source : audit/server/src/bridge/audit-gate.test.ts P2
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-006 — Contournement : git redirigé vers un autre dépôt (piste 3)
 
@@ -914,7 +914,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, faux agent
 - Source : audit/COORD/AUDIT-PORTE.md A9 ; audit/bridge/test/audit-push.test.mjs (4 cas) ; audit/launcher/tests/audit_push_refs.rs
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-025 — Contournement A10 : écrire dans une session sans en être le propriétaire
 
