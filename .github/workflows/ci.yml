@@ -108,7 +108,7 @@ jobs:
         uses: ./.github/actions/server
         with:
           # perf/race-memory-probe only: the server branch under measurement.
-          ref: 2d4b930dedef59b9847fb74deab1f5b56fe563c7
+          ref: 77c00d1cc104bbb1cb4f041d2aaa99b348c46698
           deploy-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           core-key: ${{ secrets.DEPLOY_KEY_CORE }}
           database-url: postgresql://localhost:5432/ostrom
