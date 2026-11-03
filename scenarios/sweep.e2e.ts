@@ -51,6 +51,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/orgs/{}/members/{login}': 'login',
   '/api/v1/packages/{digest}': 'package',
   '/api/v1/receipts/{id}': 'receipt',
+  '/api/v1/push-devices/{id}': 'pushDevice',
   '/api/v1/rules/{id}': 'rule',
   '/api/v1/runners/{id}': 'runner',
   '/api/v1/secrets/{name}': 'secret',
@@ -246,6 +247,8 @@ async function makeWorld(): Promise<World> {
     if (!id) throw new Error('no device listed');
     return id;
   });
+  // A's phone for push (ostrom-server#196): the console's browser session holds notifications:write.
+  await make('pushDevice', () => post('/api/v1/push-devices', { pushToken: `ExponentPushToken[sweep-${tag}]`, provider: 'expo', platform: 'ios' }, 'registerPushDevice', ['id']));
   const workflowId = `sweep-${tag}`;
   await make('workflow', () =>
     post(
