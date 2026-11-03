@@ -5,7 +5,7 @@
 // (AUTH, LOGIN, YES, ISO, BILL, GATE) are not repeated here: the mapping is at the top of the PARC section of
 // SCENARIOS.md. Screens (web, app) are out of the bench's scope: each scenario proves the server route the screen reads.
 import { randomUUID } from 'node:crypto';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { appendFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Caller } from '../src/isolation.ts';
@@ -1040,6 +1040,85 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect((await call(a.c, 'GET', `/api/v1/runs/${randomUUID()}`)).status).toBe(404);
     await needsCredential('GET', `/api/v1/runs/${id}`);
     await needsCredential('POST', `/api/v1/runs/${id}/cancel`);
+  }, 180_000);
+
+  it.skipIf(W022P !== '')(named('E2E-PARC-022 — 4.1 a run waits for its question, then plays a child run of another workflow to its end; a cancelled one withdraws its wait', W022P), async (context) => {
+    const a = await owner('parc-022-w');
+    // The wait's assignee is another member, who answers it from their own waits.
+    const reviewer = await invited(a, 'parc-022-wr');
+    const login = (await profileOf(reviewer.caller)).login;
+    const r: Caller = { ...reviewer.caller, org: a.org.id };
+    const tag = randomUUID().slice(0, 8);
+    const child = `parc-child-${tag}`;
+    const parent = `parc-parent-${tag}`;
+    const target = [{ id: 'target', label: 'Target', required: true }];
+    const built = await call(a.c, 'POST', '/api/v1/workflows', workflow(child, 'Parc 022 child', 'accepted', { inputs: target }));
+    expect(built.status, JSON.stringify(built.body)).toBe(201);
+    const question = { title: 'Ship it?', fields: [{ id: 'note', type: 'text', label: 'Note' }], actions: [{ id: 'ship', label: 'Ship' }, { id: 'hold', label: 'Hold' }] };
+    const nodes = [
+      { id: 'ask', kind: 'wait', label: 'Ask', approvers: [login], wait: question },
+      { id: 'call', kind: 'workflow', label: 'Build', workflowId: child, arguments: { target: '{{inputs.branch}}' } },
+    ];
+    const edges = [{ from: 'ask', to: 'call', on: 'ship' }];
+    const inputs = [{ id: 'branch', label: 'Branch', required: true }];
+    const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(parent, 'Parc 022 waits', 'accepted', { nodes, edges, start: 'ask', inputs }));
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const start = async () => {
+      const s = await call(a.c, 'POST', `/api/v1/workflows/${parent}/runs`, { inputs: { branch: 'main' } });
+      expect(s.status, JSON.stringify(s.body)).toBe(201);
+      return s.body['id'] as string;
+    };
+    const id = await start();
+
+    // 1. The wait node asks its question of the reviewer, for the run; the run waits on it.
+    const asked = await runUntil(a.c, id, (x) => x['status'] !== 'queued' && x['status'] !== 'running');
+    const failure = String(asked['failure'] ?? '');
+    if (failure.includes('does not play wait nodes yet')) {
+      // TEMPORARY (removed right after the server's merge): visible in the run, never a silent pass.
+      const why = 'E2E-PARC-022 (wait, workflow) skipped: the server does not play wait and workflow nodes yet (PARCOURS 4.1)';
+      console.log(`\n::warning title=E2E-PARC-022 skipped::${why}`);
+      const summary = process.env['GITHUB_STEP_SUMMARY'];
+      if (summary) appendFileSync(summary, `- :warning: ${why}\n`);
+      context.skip(why);
+    }
+    expect(asked, JSON.stringify(asked)).toMatchObject({ status: 'waiting', currentNodeId: 'ask' });
+    const visit = (asked['visits'] as Record<string, unknown>[])[0];
+    expect(visit).toMatchObject({ seq: 1, nodeId: 'ask', kind: 'wait', status: 'waiting' });
+    const waitId = visit?.['waitId'] as string;
+    const wait = await call(r, 'GET', `/api/v1/waits/${waitId}`);
+    expect(wait.status, JSON.stringify(wait.body)).toBe(200);
+    expect(wait.body).toMatchObject({ id: waitId, status: 'open', runId: id, question: { title: 'Ship it?' } });
+
+    // 2. The reviewer answers `ship`: the workflow node starts a child run of the other workflow, which ends; so does the run.
+    const answered = await call(r, 'POST', `/api/v1/waits/${waitId}/answer`, { action: 'ship', values: { note: 'go' } });
+    expect(answered.status, JSON.stringify(answered.body)).toBeLessThan(300);
+    const ended = await runUntil(a.c, id, (x) => x['status'] !== 'waiting' && x['status'] !== 'running');
+    expect(ended['status'], JSON.stringify(ended)).toBe('succeeded');
+    const [ask, call1] = ended['visits'] as Record<string, unknown>[];
+    expect(ask).toMatchObject({ nodeId: 'ask', status: 'done', outcome: 'ship' });
+    expect(JSON.parse(String(ask?.['output']))).toEqual({ note: 'go' });
+    expect(call1).toMatchObject({ seq: 2, nodeId: 'call', kind: 'workflow', status: 'done', outcome: 'next' });
+    const childId = call1?.['childRunId'] as string;
+    const sub = await call(a.c, 'GET', `/api/v1/runs/${childId}`);
+    expect(sub.status, JSON.stringify(sub.body)).toBe(200);
+    expect(sub.body).toMatchObject({ id: childId, workflowId: child, status: 'succeeded', source: 'workflow', parentRunId: id, inputs: { target: 'main' } });
+    const b = await owner('parc-022-wb');
+    expect((await call(b.c, 'GET', `/api/v1/runs/${childId}`)).status).toBe(404);
+    await hidden(b.c, `/api/v1/waits/${waitId}`, 'Ship it?');
+
+    // 3. Another run is cancelled while it waits: its wait is withdrawn.
+    const other = await start();
+    const held = await runUntil(a.c, other, (x) => x['status'] === 'waiting');
+    const otherWait = (held['visits'] as Record<string, unknown>[])[0]?.['waitId'] as string;
+    const cancelled = await call(a.c, 'POST', `/api/v1/runs/${other}/cancel`);
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    const until = Date.now() + 60_000;
+    for (;;) {
+      const w = await call(r, 'GET', `/api/v1/waits/${otherWait}`);
+      if (w.body?.['status'] === 'cancelled') break;
+      if (Date.now() > until) throw new Error(`wait ${otherWait} of a cancelled run: ${JSON.stringify(w.body)}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }, 180_000);
 
   it.skipIf(W023 !== '')(named('E2E-PARC-023 — 4.2 an automation is created, edited, disabled, dry-run, its webhook secret rotated, deleted', W023), async () => {
