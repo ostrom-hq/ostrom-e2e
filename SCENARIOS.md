@@ -3104,6 +3104,16 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ## DOGFOOD : Le harnais d'une équipe pilote en workflows Ostrom (dogfood)
 
+
+### E2E-LOAD-012 — Rafales sans identifiant puis authentifiées : le serveur tient
+
+- Étapes : k6 `load/burst.js` après la course, dans ci-e2e de chaque PR serveur (image de la PR) : 100 `POST /api/v1/gates` simultanés sans identifiant, puis 100 demandes de porte authentifiées simultanées (actions sans porte).
+- Attendu : 100 × 401 puis 100 × 200, rien d'autre (0 : connexion coupée) ; le conteneur ne s'arrête pas, ne redémarre pas, n'est pas tué (OOM) ; le pic mémoire du conteneur (`memory.peak` de son cgroup) reste sous la limite du chart (512Mi).
+- Surfaces : serveur (image), PostgreSQL (k6, cgroup du conteneur)
+- Source : consigne du coordinateur 14:0x (P1 de 13:5x : 100 requêtes sans identifiant tuent le serveur à 512Mi, propriétaire RELAY, ostrom-server#266)
+- Priorité : P1
+- Statut : codé ; en avertissement dans ci-e2e jusqu'à la fusion de ostrom-server#266, bloquant ensuite
+
 ### E2E-DOGFOOD-001 — Les 8 workflows du harnais pilote compilent en paquets signés
 
 - Étapes : compiler les 8 workflows `wf-*.ts` du dogfood (performance de la base, déploiement, correction d'un ticket, gardes MCP, flux de PR, garde du push, revue, poste) par le compilateur de la réécriture, publier les paquets, `ostrom verify` sur chacun.
@@ -3381,6 +3391,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
 
+### E2E-PARC-039 — 2.8 Groupes : un groupe de membres par login, une pause, un retrait ; une autre org ne voit rien
+
+- Étapes : Le propriétaire invite un membre et crée un groupe qui le nomme par login (`POST /api/v1/groups`) ; le membre lit la liste et le groupe, puis essaie d'en créer un et d'ajouter quelqu'un ; le propriétaire essaie le même nom en majuscules, un compte que l'org ne partage pas et un login hors de l'org ; il met le membre en pause jusqu'en 2099, renomme le groupe (`PATCH`), retire le membre (deux fois), le remet (`PUT`) ; une autre org lit, renomme et supprime le groupe ; le propriétaire le supprime.
+- Attendu : 201 `{name, members: [login], accounts: [], paused: []}` ; le membre lit (200), écrit 403 ; 409 pour le nom, 400 pour le compte et le login ; la pause se lit `paused: [{login, until}]` ; le second retrait 404 ; l'autre org 404 partout et ne voit pas l'id dans sa liste ; supprimé, 404 ; 401 sans identifiant.
+- Surfaces : serveur (l'écran console des groupes n'existe pas encore : sa spec est au JOURNAL de coordination)
+- Source : `demo/PARCOURS.md` 2.8 (groupes)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes quand les routes `/api/v1/groups` sont servies)
+
 ### E2E-PARC-009 — 2.10 Secret : écrit, tourné, supprimé ; la valeur n'est jamais relue
 
 - Étapes : Le propriétaire écrit un secret (`POST /api/v1/secrets`), le tourne (`PUT /secrets/{name}`), liste, le supprime ; une autre org liste.
@@ -3479,8 +3498,8 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-PARC-018 — 3.5 Budget de l'org : réglé, listé avec sa période, lu comme budget du membre
 
-- Étapes : Le propriétaire règle `PUT /api/v1/budgets` `{scope: org, usdPerMonth: 42, hardStop: true}`, lit `GET /budgets` et `GET /budgets/me` ; une autre org lit ses budgets ; trois formes refusées.
-- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; budget par jour, budget sans arrêt et portée inconnue : 400.
+- Étapes : Le propriétaire règle `PUT /api/v1/budgets` `{scope: org, usdPerMonth: 42, hardStop: true}`, lit `GET /budgets` et `GET /budgets/me` ; une autre org lit ses budgets ; il règle le budget d'une personne, la sienne, nommée par l'`id` de `GET /orgs/{org}/members`, par jour et qui prévient seulement (`{scope: member, subject: <id>, usdPerDay: 20, hardStop: false}`) ; deux formes refusées.
+- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; le budget de la personne : 200, listé sous son id avec `usdPerDay: 20`, `hardStop: false` et sans `usdPerMonth`, invisible de l'autre org (un serveur sans ostrom-server#230 le refuse en 400, et refuse alors aussi le budget par jour et le budget sans arrêt de l'org) ; budget de workflow et portée inconnue : 400.
 - Surfaces : serveur (l'écran `/spend` lit ces routes)
 - Source : `demo/PARCOURS.md` 3.5
 - Priorité : P1
@@ -3503,6 +3522,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Source : `demo/PARCOURS.md` 3.6
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`GET /decisions` planned) ; forme du contrat `openapi.yaml`)
+
+### E2E-PARC-040 — 3.6 Journal d'audit de l'org : propriétaire et admin, refus au membre, rien d'une autre org
+
+- Étapes : Le propriétaire d'une org neuve invite une personne, qui rejoint ; il lit `GET /api/v1/audit`, puis le filtre `?event=` de la ligne du membre ; le membre lit la même route ; le propriétaire le fait admin (`PATCH /orgs/{org}/members/{login}`) et il relit ; le propriétaire d'une autre org lit en nommant la première (`Ostrom-Org`), puis son propre journal.
+- Attendu : 200, lignes `{id, at, event, actor, subject, meta}` de la plus récente à la plus ancienne, dont `org:<id>` (création) et une ligne `member:…` (l'arrivée du membre) ; le filtre ne rend que cet événement ; 403 au membre simple ; 200 une fois admin ; 404 pour l'autre org, et son propre journal ne nomme ni la première org ni ses membres ; 401 sans identifiant.
+- Surfaces : serveur (l'écran `/audit` lit cette route)
+- Source : `demo/PARCOURS.md` 3.6 ; ostrom-server#131 (`GET /audit`)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
 
 ### E2E-PARC-021 — 4.1 Workflow : créé, édité avec sa version, listé, supprimé ; le paquet courant
 
@@ -3539,6 +3567,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Source : `demo/PARCOURS.md` 4.3
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-044 — 4.3 Jeton d'agent sur le serveur MCP des attentes : sa personne seule, jamais de réponse, segment repris
+
+- Étapes : Le propriétaire invite une personne, qui rejoint ; il lance un agent (`POST /api/v1/launches`), dont le premier hook ouvre la session ; l'agent parle au serveur MCP des attentes (`POST /api/v1/waits/mcp?session=<id>` : `initialize`, `tools/list`, `ask_human`) ; l'autre personne pose au propriétaire une attente sur la même session ; l'agent liste, lit et annule ; il demande à l'autre personne ; il répond par l'API des attentes ; la session finit, une seconde lancée la reprend (segment `<id>~r<n>`) et son agent demande dans ce segment ; une autre org lit l'attente.
+- Attendu : aucun outil de réponse ; l'attente de l'agent est celle du propriétaire, dans la session ; celle de l'autre personne n'est ni listée, ni lue, ni annulée (erreur d'outil, toujours `open`) ; demander à un autre membre est une erreur d'outil ; l'API des attentes refuse le jeton d'agent (403), réponse comprise ; l'agent lit et annule la sienne ; le segment repris pose son attente (`sessionId` = le segment) et n'y voit que la sienne ; l'autre org n'en lit rien. ostrom-server#227.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 4.3
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
 
 ### E2E-PARC-025 — 5.2 Lancement : jeton d'agent, session tenue en vie, vue, close, rouverte
 
@@ -3620,6 +3657,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Source : `demo/PARCOURS.md` 6.3
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#72)
+
+### E2E-PARC-045 — 6.3 Lignes de porte du fil d'activité : leur dépôt, le réel d'abord, aucun hors dépôt, rien d'une autre org
+
+- Étapes : Le propriétaire pose une règle dont la porte couvre un push sur main dans tout dépôt ; un jeton demande trois pushes : dans un dépôt déclaré, dans un dépôt déclaré avec un autre `realRepo`, sans dépôt ; il lit `GET /api/v1/activity` ; une autre org lit le sien, puis nomme la première.
+- Attendu : chaque push ouvre une porte `pending` ; la ligne `gate.requested:<id>` porte `repo` = le dépôt déclaré, puis le `realRepo`, et n'a pas le champ `repo` sans dépôt ; le fil de l'autre org ne nomme ni ces dépôts ni ces portes ; 404 en nommant la première org. ostrom-server#226.
+- Surfaces : serveur (l'onglet Activity de l'app)
+- Source : `demo/PARCOURS.md` 6.3
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
 
 ### E2E-PARC-034 — 6.4 Usage d'une org neuve
 
