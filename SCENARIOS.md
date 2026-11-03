@@ -686,6 +686,15 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P1
 - Statut : bloqué : ostrom-cli + ostrom-server
 
+### E2E-GATE-016 — PR d'un auteur lié à personne : le oui attend un approbateur lié à un autre GitHub
+
+- Étapes : Politique d'auto-approbation « never ». Le faux GitHub ouvre la PR N d'un compte GitHub (id A) qu'aucune personne Ostrom n'a lié ; l'approbateur `rev-b` n'a lié aucun GitHub, puis lie le compte B, et un troisième lie le compte A.
+- Attendu : Avant le lien, `GET /approvals/{id}` rend `rights.canApprove` = false avec la raison « link your own GitHub account in My account », et `answerApproval` oui répond 403 `github_link_required` ; la porte reste `pending`, le check reste en attente. Un non passe sans lien. Après le lien de B, le oui de `rev-b` passe, check vert. Celui qui a lié A reçoit 403 `self_approval_refused`.
+- Surfaces : serveur, faux GitHub, console (« Mon compte »)
+- Source : décision Q-GATES-G1, option a (03/11) ; ostrom-server feat/gates-unlinked-author
+- Priorité : P1
+- Statut : bloqué : ostrom-server
+
 
 ## BYPASS : Contournements de la porte (audit du 30/10 et trous connus)
 
