@@ -6,6 +6,7 @@
 // src/fake-tokens.ts, OSTROM_GATEWAY_ANTHROPIC_URL) that reaches the limit refuses the next call, « Monthly budget
 // reached », with `Retry-After` until the month's end. Both are 429 in Anthropic's error shape (`rate_limit_error`).
 import { randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { afterAll, describe, expect, it } from 'vitest';
 import { FakeTokens } from '../src/fake-tokens.ts';
 import { isServed } from '../src/probe.ts';
@@ -89,7 +90,13 @@ describe('E2E-BUDGET: the gateway keeps a model call within the monthly budget',
     const first = await infer(agentToken, 1, hello);
     expect(first.status, JSON.stringify(first.body)).toBe(200);
     expect(provider.calls).toHaveLength(1);
-    const spending = await call(c, 'GET', '/api/v1/spending?period=month');
+    // The gateway writes its ledger after it has answered (RelayInference.record, « a call already answered »): the
+    // spend is read until it shows, ten seconds at most (once read as 0 at once, server#237's run 41633689763).
+    let spending = await call(c, 'GET', '/api/v1/spending?period=month');
+    for (let i = 0; i < 20 && spending.status === 200 && Number(spending.body['totalUsd']) < 1; i++) {
+      await sleep(500);
+      spending = await call(c, 'GET', '/api/v1/spending?period=month');
+    }
     expect(spending.status, JSON.stringify(spending.body)).toBe(200);
     expect(Number(spending.body['totalUsd']), JSON.stringify(spending.body)).toBeGreaterThanOrEqual(1);
     // The budget is spent: the next call is refused before the provider, until the month's end.
