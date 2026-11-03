@@ -41,7 +41,10 @@ export function whole(r, stream) {
   return stream ? r.body.trimEnd().endsWith('data: {"type":"message_stop"}') : r.body.includes('"output_tokens"');
 }
 
-/** The fake upstreams' counts (`provider` and `mcp`: open, total, completed, aborted). */
+/**
+ * The fake upstreams' counts: `provider` and `mcp` (open, total, completed, aborted), and `tls`, what their HTTPS port
+ * saw (connections, handshakes, resumed, requests). `resetFake` zeroes all three: the phases run one after another.
+ */
 export function fakeStats() {
   const r = http.get(`${FAKE}/stats`, { tags: { name: 'fake-stats' } });
   return r.status === 200 ? r.json() : null;

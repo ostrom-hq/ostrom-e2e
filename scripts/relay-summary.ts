@@ -9,8 +9,8 @@
 // With `--check`, exits 1 when an overhead at p95 is over OSTROM_LOAD_MAX_OVERHEAD_MS (15), or cannot be computed
 // (a series or a statistic missing from the summary): a check that checks nothing is not a pass.
 // Usage: node scripts/relay-summary.ts [--check] inference-summary.json top-samples.txt phases.txt [replicas]
-//   phases.txt: one `<name> <streams held open> <start epoch s> <end epoch s>` line per phase of load/streams.js (the
-//   streams asked for are in the name, `streams-<asked>`; those refused as overloaded hold nothing).
+//   phases.txt: one `<name> <streams held open> <start epoch s> <end epoch s> [<refused>]` line per phase of
+//   load/streams.js (the streams asked for are in the name, `streams-<asked>`; those refused as overloaded hold nothing).
 import { existsSync, readFileSync } from 'node:fs';
 
 type Trend = Record<string, number | undefined>;
@@ -65,7 +65,7 @@ if (existsSync(samplesFile) && existsSync(phasesFile)) {
   out += '| phase | pod | at rest (Mi) | peak (Mi) | per open stream (KiB) |\n|---|---|---|---|---|\n';
   const phases = readFileSync(phasesFile, 'utf8').split('\n').filter((l) => l.trim() !== '').map((l) => l.trim().split(/\s+/));
   const first = Math.min(...phases.map((f) => Number(f[2] ?? '0')));
-  for (const [name = '', streams = '0', start = '0', end = '0'] of phases) {
+  for (const [name = '', streams = '0', start = '0', end = '0', refused = '0'] of phases) {
     const [from, to] = [Number(start), Number(end) + 20];
     for (const pod of [...new Set(samples.map((s) => s.pod))].sort()) {
       const mine = samples.filter((s) => s.pod === pod);
@@ -77,7 +77,7 @@ if (existsSync(samplesFile) && existsSync(phasesFile)) {
       const held = Number(streams);
       const perStream = held > 0 ? (((peak - base) * 1024) / (held / replicas)).toFixed(0) : 'n/a (none held)';
       // Under its rest: the pod restarted in the phase, and the figure means nothing.
-      out += `| ${name} (${streams} held open) | ${pod} | ${base} | ${peak} | ${peak < base ? 'n/a (restarted)' : perStream} |\n`;
+      out += `| ${name} (${streams} held open, ${refused} refused) | ${pod} | ${base} | ${peak} | ${peak < base ? 'n/a (restarted)' : perStream} |\n`;
     }
   }
   out += '\n';

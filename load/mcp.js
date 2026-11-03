@@ -7,7 +7,8 @@
 //   the load pass) with a tool error, never a hung request.
 // - down: `echo` on a server nothing listens on: a tool error at once.
 // At the end, what the fakes' HTTPS port saw (`mcp_tls_*` in the summary): TCP connections, TLS handshakes (and resumed
-// ones) and requests. As many handshakes as requests means the relay opens a connection per request.
+// ones) and HTTP requests, every one the relay sends (initialize, notifications/initialized, the call, the session's
+// DELETE) to any of the HTTPS servers. As many handshakes as requests means a connection per request; far fewer, reuse.
 // Usage: k6 run load/mcp.js  (OSTROM_URL, OSTROM_LOAD_RELAY_TOKEN; OSTROM_LOAD_MCP_DEADLINE_MS, the relay's deadline)
 import { check, sleep } from 'k6';
 import { Counter, Gauge } from 'k6/metrics';

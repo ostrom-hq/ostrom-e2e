@@ -17,9 +17,18 @@ case "${1:-}" in
     mkdir -p "$dir"
     for pod in $(kubectl -n "$NS" get pods -l "$selector" -o jsonpath='{.items[*].metadata.name}'); do
       (
+        # Each container once: after its log ends, wait for the next one (restartCount up) before following again, so a
+        # crashed container's log is never copied twice. A pod gone ends the loop.
+        seen=-1
         while :; do
-          kubectl -n "$NS" logs -f "$pod" -c server >> "$dir/server-$pod.log" 2>&1 || true
-          echo "== $(date -u +%FT%TZ) the log of $pod ended (container stopped or restarted)" >> "$dir/server-$pod.log"
+          count=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.status.containerStatuses[?(@.name=="server")].restartCount}' 2>/dev/null) || break
+          ready=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.status.containerStatuses[?(@.name=="server")].state.running}' 2>/dev/null)
+          if [ -n "$count" ] && [ "$count" != "$seen" ] && [ -n "$ready" ]; then
+            seen=$count
+            echo "== $(date -u +%FT%TZ) following $pod, container after $count restarts" >> "$dir/server-$pod.log"
+            kubectl -n "$NS" logs -f "$pod" -c server >> "$dir/server-$pod.log" 2>&1 || true
+            echo "== $(date -u +%FT%TZ) the log of $pod ended (container stopped or restarted)" >> "$dir/server-$pod.log"
+          fi
           sleep 1
         done
       ) < /dev/null > /dev/null 2>&1 &
@@ -28,16 +37,12 @@ case "${1:-}" in
     (
       while :; do
         ts=$(date +%s)
-        # The node's /proc: one line per process whose command line names the server binary (not the migrate init
-        # container, gone by now; not an exec of seed-test-account, which ends at once).
+        # In the node: the server processes by name (/proc/<pid>/comm; the migrate init container is gone by now), one grep
+        # over the node's processes and a few forks per server.
         docker exec "$CLUSTER-control-plane" sh -c '
-          for d in /proc/[0-9]*; do
-            c=$(tr "\0" " " < "$d/cmdline" 2>/dev/null) || continue
-            case "$c" in */ostrom-server\ *|*/ostrom-server) ;; *) continue ;; esac
-            case "$c" in *seed-test-account*|*migrate*) continue ;; esac
-            n=$(ls "$d/fd" 2>/dev/null | wc -l)
-            m=$(ls "$d/fd" 2>/dev/null | sort -n | tail -n 1)
-            echo "${d#/proc/} $n ${m:-0}"
+          for p in $(grep -lx ostrom-server /proc/[0-9]*/comm 2>/dev/null | cut -d/ -f3); do
+            fds=$(ls /proc/$p/fd 2>/dev/null)
+            echo "$p $(echo "$fds" | grep -c .) $(echo "$fds" | sort -n | tail -n 1)"
           done' 2>/dev/null | sed "s|^|$ts |" || true
         sleep 1
       done
@@ -47,8 +52,10 @@ case "${1:-}" in
   stop)
     [ -f "$dir/watch.pids" ] || exit 0
     while read -r pid; do
-      pkill -P "$pid" 2>/dev/null || true
+      # The loop first, so it starts nothing more; then what it had running (kubectl logs -f, docker exec, sleep).
+      kids=$(pgrep -P "$pid" || true)
       kill "$pid" 2>/dev/null || true
+      [ -z "$kids" ] || kill $kids 2>/dev/null || true
     done < "$dir/watch.pids"
     rm -f "$dir/watch.pids"
     ;;

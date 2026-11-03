@@ -26,9 +26,10 @@ on:
         description: "ostrom-server ref to build and load (a PR's branch, to prove a fix before it merges)"
         type: string
         default: main
-# A load pass gates nothing: a newer run of the same ref replaces the one in progress (runners are scarce).
+# A load pass gates nothing: a newer run of the same ref replaces the one in progress (runners are scarce). A dispatch
+# that loads another server ref is a proof of its own: a push or the nightly run never cancels it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ inputs.server_ref || 'main' }}
   cancel-in-progress: true
 permissions:
   contents: read
@@ -467,7 +468,8 @@ jobs:
             k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export "streams-$n-summary.json" \
               -e OSTROM_LOAD_STREAMS="$n" load/streams.js || rc=$?
             held=$(jq '.metrics.streams_whole.count // 0' "streams-$n-summary.json" 2>/dev/null || echo 0)
-            echo "streams-$n ${held:-0} $start $(date +%s)" >> phases.txt
+            refused=$(jq '.metrics.streams_refused.count // 0' "streams-$n-summary.json" 2>/dev/null || echo 0)
+            echo "streams-$n ${held:-0} $start $(date +%s) ${refused:-0}" >> phases.txt
             sleep 30
             scripts/server-pods.sh crashed "$before" || rc=1
           done
@@ -511,9 +513,12 @@ jobs:
               echo
               echo "| server process | samples | most open descriptors | highest descriptor |"
               echo "|---|---|---|---|"
-              awk '{ k = $2; n[k]++; if ($3 > o[k]) o[k] = $3; if ($4 > h[k]) h[k] = $4 }
-                   END { for (k in n) printf "| pid %s | %d | %d | %d |\n", k, n[k], o[k], h[k] }' server-watch/fds.txt 2>/dev/null | sort \
-                || echo "| (no sample) | | | |"
+              if [ -s server-watch/fds.txt ]; then
+                awk '{ k = $2; n[k]++; if ($3 > o[k]) o[k] = $3; if ($4 > h[k]) h[k] = $4 }
+                     END { for (k in n) printf "| pid %s | %d | %d | %d |\n", k, n[k], o[k], h[k] }' server-watch/fds.txt | sort -t' ' -k3n
+              else
+                echo "| (no sample: nothing measured) | | | |"
+              fi
             fi
             echo
             echo "| pod | peak CPU | peak memory | samples |"
@@ -536,15 +541,20 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
       # A relay leg whose setup failed measured nothing: it must not end green (run 41618451768 did, its sign-in refused
       # by ostrom-server#176).
-      - name: The relay leg measured the gateway and the MCP relay
+      - name: The relay leg measured the gateway (and says whether it measured the MCP relay)
         if: always() && matrix.pass == 'relay'
         env:
           INFERENCE: ${{ steps.relaysetup.outputs.inference }}
           MCP: ${{ steps.relaysetup.outputs.mcp }}
           REASON: ${{ steps.relaysetup.outputs.reason }}
         run: |
-          if [ "$INFERENCE" != true ] || [ "$MCP" != true ]; then
+          # The gateway is the leg's core: without it nothing was measured. The MCP half may be skipped on purpose (its CA
+          # step never fails the job): a warning, and the run is not a proof of the MCP relay.
+          if [ "$INFERENCE" != true ]; then
             echo "::error title=relay setup::inference ${INFERENCE:-?}, mcp ${MCP:-?}: ${REASON:-no reason given}"; exit 1
+          fi
+          if [ "$MCP" != true ]; then
+            echo "::warning title=relay setup::the MCP relay was not measured: ${REASON:-no reason given}"
           fi
       - name: Gateway overhead under 15 ms at p95 (first byte and end, JSON and stream)
         if: always() && steps.relaysetup.outputs.inference == 'true'
