@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // E2E-AUTH-008 : a yes from the phone app takes an unlock bound to its own request, less than a minute old, used once
 // (Q-APP-STEPUP-RISK, ostrom-core#121). The approver's phone signs in as the app does (GitHub with PKCE S256 to the
-// app's deep link, the bench playing GitHub), then plays the three refusals and a valid yes on one request.
-// TEMPORARY: before the server binds the unlock (ostrom-server, fix/stepup-bound-unlock), its first refused yes is
-// taken, and the test skips loudly (a `::warning` and a line of the run's summary naming PARCOURS 5.4). The pull
-// request right after the server's merge removes this skip: from then on, a server that stops binding fails here.
+// app's deep link, the bench playing GitHub), then plays the three refusals and a valid yes on one request. A server
+// that takes any of the three yeses fails here: there is no skip (ostrom-server#330 binds the unlock).
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { appendFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeGitHub } from '../src/fake-github.ts';
 import { isServed } from '../src/probe.ts';
@@ -66,7 +63,7 @@ describe.skipIf(!READY)(`E2E-AUTH: a yes from the phone app${READY ? '' : ' (nee
     await gh.stop();
   });
 
-  it('E2E-AUTH-008 a phone yes takes an unlock bound to its request: two minutes old, for another request, or already used, it is refused; fresh and for it, it says yes', async (context) => {
+  it('E2E-AUTH-008 a phone yes takes an unlock bound to its request: two minutes old, for another request, or already used, it is refused; fresh and for it, it says yes', async () => {
     // dev asks, rev approves from the phone: rev joins by e-mail, then signs the phone in with GitHub on that address.
     const requester = await signIn(email('phone-dev'));
     const org = await orgOf(requester);
@@ -112,15 +109,6 @@ describe.skipIf(!READY)(`E2E-AUTH: a yes from the phone app${READY ? '' : ' (nee
     if (!/^[0-9a-f-]{36}$/.test(who.id)) throw new Error(`not a user id: ${who.id}`);
     adminSql(`UPDATE identity_api_tokens SET authenticated_at = authenticated_at - interval '2 minutes' WHERE user_id = '${who.id}' AND kind = 'MOBILE'`);
     const stale = await yes();
-    if (stale.status === 200) {
-      // TEMPORARY (removed right after the server's merge): visible in the run, never a silent pass.
-      const why = 'E2E-AUTH-008 skipped: the server takes a phone yes on any unlock of the last 5 minutes, not one bound to its request (PARCOURS 5.4, the second member says yes from the phone; Q-APP-STEPUP-RISK)';
-      // On a line of its own: vitest's colour codes before it would hide the command from the runner.
-      console.log(`\n::warning title=E2E-AUTH-008 skipped::${why}`);
-      const summary = process.env['GITHUB_STEP_SUMMARY'];
-      if (summary) appendFileSync(summary, `- :warning: ${why}\n`);
-      context.skip(why);
-    }
     refusedForWantOfABoundUnlock(stale, 'an unlock two minutes old');
 
     // 2. A fresh unlock, for another request.
