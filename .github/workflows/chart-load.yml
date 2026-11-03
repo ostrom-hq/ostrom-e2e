@@ -356,26 +356,13 @@ jobs:
           [ -n "$mail" ] || echo "::warning title=mail directory::the sign-in mails of $pod are not readable from the runner"
           echo "OSTROM_LOAD_MAIL_DIR=$mail" >> "$GITHUB_ENV"
           OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="$mail" node scripts/load-setup.ts
-      - name: k6 gates (push to main + yes) and race (100 simultaneous yes → 1 × 200, 99 × 409)
-        if: steps.loadsetup.outputs.ready == 'true'
-        env:
-          OSTROM_URL: ${{ env.API_URL }}
-          OSTROM_LOAD_SCENARIOS: gates
-          OSTROM_LOAD_APPROVER_ORIGIN: http://app.ostrom.test
-          # ostrom-server#127: the answer to a yes carries the signed receipt; the check is on.
-          OSTROM_E2E_ANSWER_RECEIPT: "1"
-        run: |
-          # The race runs even when a check of the gates fails: its own thresholds (1 × 200, 99 × 409) are
-          # another question, and its numbers would be lost. The step fails if either run fails.
-          rc=0
-          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js || rc=$?
-          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js || rc=$?
-          exit "$rc"
       # Registered runners (`ostrom-runner machine`): 500 registered in 5 organizations of their own (100 at most each),
       # through the same pod and mail directory as the gate setup, then 100 and then 500 of them beating every 5 s with an
       # empty report, a phase each (runner-phases.txt, apart from the streams' phases.txt that relay-summary.ts reads):
       # the route's p95 is k6's, the server pods' CPU and memory the sampler's.
-      # The queries per heartbeat and their plans are ostrom-server's bench (RunnersHeartbeatBenchTest).
+      # The queries per heartbeat and their plans are ostrom-server's bench (RunnersHeartbeatBenchTest). Before the gates'
+      # race: it may get a server pod OOM-killed (run 41640105075), and with it the port-forward and mail directory the
+      # setup reads.
       - name: Registered runners load setup (500 runners in 5 organizations)
         id: runnerssetup
         if: always() && steps.loadsetup.outcome != 'skipped'
@@ -401,6 +388,21 @@ jobs:
             sleep 15
             scripts/server-pods.sh crashed "$before" || rc=1
           done
+          exit "$rc"
+      - name: k6 gates (push to main + yes) and race (100 simultaneous yes → 1 × 200, 99 × 409)
+        if: steps.loadsetup.outputs.ready == 'true'
+        env:
+          OSTROM_URL: ${{ env.API_URL }}
+          OSTROM_LOAD_SCENARIOS: gates
+          OSTROM_LOAD_APPROVER_ORIGIN: http://app.ostrom.test
+          # ostrom-server#127: the answer to a yes carries the signed receipt; the check is on.
+          OSTROM_E2E_ANSWER_RECEIPT: "1"
+        run: |
+          # The race runs even when a check of the gates fails: its own thresholds (1 × 200, 99 × 409) are
+          # another question, and its numbers would be lost. The step fails if either run fails.
+          rc=0
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js || rc=$?
+          k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js || rc=$?
           exit "$rc"
       # The member, its token and the MCP servers of the gateway and relay load tests (scripts/relay-load-setup.ts),
       # through the same pod and mail directory as the gate setup.
