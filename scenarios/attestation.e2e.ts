@@ -96,7 +96,8 @@ async function sessionWithCheck(who: string) {
     edges: [{ from: 'start', to: 'tests' }],
   });
   expect(made.status, JSON.stringify(made.body)).toBeLessThan(300);
-  const pkg = await call(a.c, 'GET', '/api/v1/packages/current');
+  // The package of the launch's repository: since ostrom-server#174 a session reports only under it.
+  const pkg = await call(a.c, 'GET', '/api/v1/packages/current?repo=acme%2Fatt');
   expect(pkg.status, JSON.stringify(pkg.body)).toBe(200);
   const digest = String(pkg.body['digest'] ?? (pkg.body['package'] as Record<string, unknown> | undefined)?.['digest'] ?? '');
   // The server serves the digest as bare hex (run 41483058195); a `sha256:` prefix is accepted too.

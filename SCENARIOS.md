@@ -3402,7 +3402,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 ### E2E-PARC-011 — 2.11 Clés de service, appareils et sessions du navigateur
 
 - Étapes : Le propriétaire crée une clé de service (`POST /api/v1/service-keys`), liste les clés, les appareils (`GET /devices`) et ses sessions (`GET /auth/sessions`) ; une autre org liste les clés.
-- Attendu : 201 `{id, name, scopes, createdAt, secret}`, le secret absent de la liste ; aucun appareil pour une personne sans `ostrom login` ; au moins la session courante ; l'autre org ne voit pas la clé ; 401 sans identifiant sur les trois listes.
+- Attendu : 201 `{id, name, scopes, createdAt, secret}`, le secret absent de la liste ; aucun appareil pour une personne sans `ostrom login` ; au moins la session courante ; l'autre org ne voit pas la clé ; 401 sans identifiant sur les trois listes. Depuis ostrom-server#158 : une clé de service ne tient que `sessions:write` et `rules:read` (une autre portée, `receipts:read` par exemple : 400).
 - Surfaces : serveur (Écrans hors du banc : le scénario prouve la route que l'écran lit.)
 - Source : `demo/PARCOURS.md` 2.11
 - Priorité : P1

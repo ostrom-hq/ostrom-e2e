@@ -238,7 +238,7 @@ async function makeWorld(): Promise<World> {
     return id;
   });
   await make('token', () => post('/api/v1/tokens', { name: `sweep a ${tag}`, scopes: ['profile:read'], expiresInDays: 1 }, 'createToken', ['token', 'id'], ['id']));
-  await make('serviceKey', () => post('/api/v1/service-keys', { name: `sweep a ${tag}`, scopes: ['receipts:read'] }, 'createServiceKey', ['id']));
+  await make('serviceKey', () => post('/api/v1/service-keys', { name: `sweep a ${tag}`, scopes: SERVICE_KEY_SCOPES }, 'createServiceKey', ['id']));
   await make('device', async () => {
     const got = await deviceToken(c, { clientName: `sweep a ${tag}` });
     if (!got.token) throw new Error(got.why);
@@ -444,6 +444,9 @@ const contractDoc = () => (docOnce ??= contract().doc);
 // ---------------------------------------------------------------------------------------------------------------------
 // The intruders: five credentials of organization B
 
+/** The only scopes a service key may hold since ostrom-server#158: the CI's report and rule reads. */
+const SERVICE_KEY_SCOPES = ['sessions:write', 'rules:read'];
+
 const scopesOf = async (caller: Caller): Promise<string[]> => {
   const r = await call(caller, 'GET', '/api/v1/tokens/scopes');
   const list = (r.body?.['scopes'] as { scope?: string }[] | undefined) ?? [];
@@ -490,7 +493,7 @@ const INTRUDERS: Record<string, () => Promise<Intruder | string>> = {
   },
   'service key': async () => {
     const b = await sideB();
-    const r = await call(b.caller, 'POST', '/api/v1/service-keys', { name: 'sweep b', scopes: await scopesOf(b.caller) });
+    const r = await call(b.caller, 'POST', '/api/v1/service-keys', { name: 'sweep b', scopes: SERVICE_KEY_SCOPES });
     const secret = field(r.body, 'secret');
     if (!secret) throw new Error(`POST /api/v1/service-keys → ${text(r)}`);
     return { name: 'service key', caller: { token: secret, from: address() }, org: b.org };

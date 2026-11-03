@@ -294,9 +294,11 @@ describe('E2E-PARC: 2. organization setup', () => {
 
   it.skipIf(W011 !== '')(named('E2E-PARC-011 — 2.11 service keys, devices and browser sessions are listed and revocable by their owner', W011), async () => {
     const a = await owner('parc-011');
-    const key = await call(a.c, 'POST', '/api/v1/service-keys', { name: 'parc-011 ci', scopes: ['receipts:read'] });
+    const key = await call(a.c, 'POST', '/api/v1/service-keys', { name: 'parc-011 ci', scopes: ['sessions:write', 'rules:read'] });
     expect(key.status, JSON.stringify(key.body)).toBe(201);
-    expect(key.body).toMatchObject({ name: 'parc-011 ci', scopes: ['receipts:read'] });
+    // Since ostrom-server#158 a service key holds only what a CI needs: sessions:write and rules:read.
+    expect((await call(a.c, 'POST', '/api/v1/service-keys', { name: 'parc-011 reader', scopes: ['receipts:read'] })).status).toBe(400);
+    expect(key.body).toMatchObject({ name: 'parc-011 ci', scopes: ['sessions:write', 'rules:read'] });
     expect(typeof key.body['secret']).toBe('string');
     const keys = await call(a.c, 'GET', '/api/v1/service-keys');
     expect(itemsOf(keys.body).map((k) => k['id'])).toContain(key.body['id']);
