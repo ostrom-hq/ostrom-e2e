@@ -257,6 +257,9 @@ jobs:
           OSTROM_LOAD_APPROVER_ORIGIN: http://127.0.0.1:4600
           # main dies on the 400 simultaneous yes (the race OOM #266 fixes): the rounds hold streams and waits only.
           OSTROM_SAT_CALLS: "0"
+          # main has no ceiling: hold exactly what #266 holds (100 streams, 75 waits), nothing past it.
+          OSTROM_SAT_STREAMS: "100"
+          OSTROM_SAT_WAITS: "75"
         run: scripts/race-probe.sh ostrom-e2e-server | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Server logs
         if: always() && steps.server.outputs.available == 'true'
