@@ -17,6 +17,8 @@ const codes = new Counter('probe_status');
 
 export const options = {
   scenarios: { probe: { executor: 'per-vu-iterations', vus: N, iterations: 1, maxDuration: '60s' } },
+  // Sub-metrics only exist in the summary when a threshold names them.
+  thresholds: Object.fromEntries(['200', '401', '403', '409', '429', '500', '502', '503', '0'].map((s) => [`probe_status{status:${s}}`, ['count>=0']])),
 };
 
 export function setup() {
@@ -45,6 +47,7 @@ export default function (approval) {
 export function handleSummary(data) {
   const byStatus = Object.entries(data.metrics)
     .filter(([k]) => k.startsWith('probe_status{status:'))
+    .filter(([, v]) => v.values.count > 0)
     .map(([k, v]) => `${k.slice('probe_status{status:'.length, -1)}x${v.values.count}`)
     .join(' ');
   const d = data.metrics['http_req_duration{name:probe}'] || data.metrics.http_req_duration;
