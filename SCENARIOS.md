@@ -693,7 +693,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, faux GitHub, console (« Mon compte »)
 - Source : décision Q-GATES-G1, option a (03/11) ; ostrom-server feat/gates-unlinked-author
 - Priorité : P1
-- Statut : vert : `scenarios/gate-unlinked.e2e.ts` (ostrom-server#281), run https://github.com/ostrom-hq/ostrom-server/actions/runs/41673313006 (e2e-journey, image `ghcr.io/ostrom-hq/ostrom-server:sha-a8a3782`, e2e dfb700e, 1 passé, 0 sauté)
+- Statut : vert : `scenarios/gate-unlinked.e2e.ts` (ostrom-server#281), sur main : e2e-journey https://github.com/ostrom-hq/ostrom-server/actions/runs/41719276122 (workflow main 7366a16, image `ghcr.io/ostrom-hq/ostrom-server:sha-5e3a267`, e2e main 2b6c0ff, sans filtre, passé ; avant la fusion : run 41673313006 sur une branche)
 
 
 ## BYPASS : Contournements de la porte (audit du 30/10 et trous connus)
