@@ -90,7 +90,9 @@ describe.skipIf(WHY !== '')(`E2E-GH-INSTALL: an organization installs only its o
     expect(await back(a.caller, 42, 'acme-admin', stateA)).toBe('?error=forbidden');
     // B names A's organization: 404, an organization B is not in is not found (ostrom-server#143).
     expect((await visit(b.caller, `${START}?org=${(await orgOf(a)).id}`)).status).toBe(404);
-    // The person's token is used to list their installations, never sent anywhere else.
-    expect(github.requests.filter((r) => r.authorization.includes('ghu_')).every((r) => r.path === '/user/installations')).toBe(true);
+    // The person's token lists their installations and names them (`GET /user`, compared with who installed it since
+    // ostrom-server#118); it is never sent anywhere else.
+    const withToken = github.requests.filter((r) => r.authorization.includes('ghu_')).map((r) => r.path);
+    expect(withToken.filter((p) => p !== '/user/installations' && p !== '/user')).toEqual([]);
   });
 });
