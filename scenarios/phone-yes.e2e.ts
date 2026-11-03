@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // E2E-AUTH-008 : a yes from the phone app takes an unlock bound to its own request, less than a minute old, used once
 // (Q-APP-STEPUP-RISK, ostrom-core#121). The approver's phone signs in as the app does (GitHub with PKCE S256 to the
-// app's deep link, the bench playing GitHub), then plays the three refusals and a valid yes on one request. Before the
-// server binds the unlock (ostrom-server, fix/stepup-bound-unlock), its first refused yes is taken: the test then says
-// so and skips, so the bench runs on main both before and after the server.
+// app's deep link, the bench playing GitHub), then plays the three refusals and a valid yes on one request.
+// TEMPORARY: before the server binds the unlock (ostrom-server, fix/stepup-bound-unlock), its first refused yes is
+// taken, and the test skips loudly (a `::warning` and a line of the run's summary naming PARCOURS 5.4). The pull
+// request right after the server's merge removes this skip: from then on, a server that stops binding fails here.
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeGitHub } from '../src/fake-github.ts';
 import { isServed } from '../src/probe.ts';
@@ -111,7 +113,12 @@ describe.skipIf(!READY)(`E2E-AUTH: a yes from the phone app${READY ? '' : ' (nee
     adminSql(`UPDATE identity_api_tokens SET authenticated_at = authenticated_at - interval '2 minutes' WHERE user_id = '${who.id}' AND kind = 'MOBILE'`);
     const stale = await yes();
     if (stale.status === 200) {
-      context.skip('the server takes any yes within five minutes of an unlock: it does not bind the unlock to the request yet');
+      // TEMPORARY (removed right after the server's merge): visible in the run, never a silent pass.
+      const why = 'E2E-AUTH-008 skipped: the server takes a phone yes on any unlock of the last 5 minutes, not one bound to its request (PARCOURS 5.4, the second member says yes from the phone; Q-APP-STEPUP-RISK)';
+      console.log(`::warning title=E2E-AUTH-008 skipped::${why}`);
+      const summary = process.env['GITHUB_STEP_SUMMARY'];
+      if (summary) appendFileSync(summary, `- :warning: ${why}\n`);
+      context.skip(why);
     }
     refusedForWantOfABoundUnlock(stale, 'an unlock two minutes old');
 
