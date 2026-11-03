@@ -228,6 +228,13 @@ jobs:
           k6 run --summary-export gates-summary.json load/smoke.js || rc=$?
           k6 run --summary-export race-summary.json load/race.js || rc=$?
           exit "$rc"
+      # perf/race-memory-probe only: the server's memory around bursts of N simultaneous requests (never merged).
+      - name: Race memory probe
+        if: always() && steps.loadsetup.outputs.ready == 'true'
+        env:
+          OSTROM_URL: ${{ steps.server.outputs.url }}
+          OSTROM_LOAD_APPROVER_ORIGIN: http://127.0.0.1:4600
+        run: scripts/race-probe.sh ostrom-e2e-server | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Server logs
         if: always() && steps.server.outputs.available == 'true'
         run: docker logs ostrom-e2e-server 2>&1 | tail -n 200
