@@ -75,6 +75,10 @@ export class FakeGitHub {
   private readonly webCodes = new Map<string, string>();
   private server: Server | undefined;
   private nextId = 1;
+  // Each instance numbers its users from its own base: the scenarios share one server and its database, so two fakes
+  // started by two files must never give one GitHub id to two logins (a later file would find its user linked to an
+  // earlier file's person).
+  private readonly idBase = 1000 + Math.floor(Math.random() * 100_000) * 1000;
   url = '';
 
   readonly approveAfter: number;
@@ -87,7 +91,7 @@ export class FakeGitHub {
 
   /** Registers a user; returns the token that identifies them. */
   user(login: string, token = `gho_${login}`): string {
-    const id = this.ids.get(login) ?? 1000 + this.ids.size;
+    const id = this.ids.get(login) ?? this.idBase + this.ids.size;
     this.ids.set(login, id);
     this.tokens.set(token, { login, id });
     return token;
@@ -100,7 +104,7 @@ export class FakeGitHub {
   oauthCode(login: string, email: string): string {
     const code = `code_${this.nextId++}`;
     this.codes.set(code, login);
-    const id = this.ids.get(login) ?? 1000 + this.ids.size;
+    const id = this.ids.get(login) ?? this.idBase + this.ids.size;
     this.ids.set(login, id);
     this.tokens.set(`gho_${login}`, { login, id, email });
     return code;
