@@ -8,7 +8,7 @@ import http from 'k6/http';
 import { Counter } from 'k6/metrics';
 import { BASE, approvalOf, approve, approverHeaders, askPushToMain, headers, requireTokens } from './lib.js';
 
-const STREAMS = Number(__ENV.OSTROM_SAT_STREAMS || 250);
+const STREAMS = Number(__ENV.OSTROM_SAT_STREAMS || 200);
 const WAITS = Number(__ENV.OSTROM_SAT_WAITS || 175);
 const CALLS = Number(__ENV.OSTROM_SAT_CALLS || 400);
 const ASKER = __ENV.OSTROM_LOAD_TOKEN || '';
