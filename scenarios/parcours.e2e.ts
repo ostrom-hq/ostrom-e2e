@@ -854,7 +854,7 @@ async function waitsTool(caller: Caller, session: string, name: string, args: Re
 const askedWait = (text: string) => /wait ([0-9a-f-]{36}) is open/.exec(text)?.[1] ?? '';
 
 /** A workflow of the contract (`Workflow`): one trigger node, no edge. */
-const workflow = (id: string, name: string) => ({ id, name, domain: 'git', nodes: [{ id: 'start', kind: 'trigger', label: 'Session start' }], edges: [], start: 'start', status: 'proposed', foundAt: new Date().toISOString() });
+const workflow = (id: string, name: string, status = 'proposed', extra: Record<string, unknown> = {}) => ({ id, name, domain: 'git', nodes: [{ id: 'start', kind: 'trigger', label: 'Session start' }], edges: [], start: 'start', status, foundAt: new Date().toISOString(), ...extra });
 
 describe('E2E-PARC: 4. workflows and automations', () => {
   it.skipIf(W021 !== '')(named('E2E-PARC-021 — 4.1 a workflow is created, edited with its version, listed, deleted; the current package reads', W021), async () => {
@@ -870,7 +870,13 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect(JSON.stringify(edited.body)).toContain('Parc 021 bis');
     const stale = await call(a.c, 'PUT', `/api/v1/workflows/${wid}`, { workflow: workflow(wid, 'stale'), expectedVersion: version });
     expect(stale.status).toBe(409);
+    // A PUT on an id the organization does not have is not found and creates nothing (contract: 200 or 404, no 201).
+    const unknown = `parc-${randomUUID().slice(0, 8)}`;
+    const notFound = await call(a.c, 'PUT', `/api/v1/workflows/${unknown}`, { workflow: workflow(unknown, 'Parc 021 ghost') });
+    expect(notFound.status, JSON.stringify(notFound.body)).toBe(404);
+    expect((await call(a.c, 'GET', `/api/v1/workflows/${unknown}`)).status).toBe(404);
     expect(JSON.stringify((await call(a.c, 'GET', '/api/v1/workflows')).body)).toContain('Parc 021 bis');
+    expect(JSON.stringify((await call(a.c, 'GET', '/api/v1/workflows')).body)).not.toContain(unknown);
     const b = await owner('parc-021-b');
     await hidden(b.c, '/api/v1/workflows', wid);
     // Deleted before the package is read: reading `packages/current` pins a package, and a workflow a pinned package
@@ -885,15 +891,46 @@ describe('E2E-PARC: 4. workflows and automations', () => {
   it.skipIf(W022 !== '')(named('E2E-PARC-022 — 4.1 a workflow run is started, listed under its workflow and among the runs', W022), async () => {
     const a = await owner('parc-022');
     const wid = `parc-${randomUUID().slice(0, 8)}`;
-    expect((await call(a.c, 'POST', '/api/v1/workflows', { workflow: workflow(wid, 'Parc 022') })).status).toBeLessThan(300);
-    const run = await call(a.c, 'POST', `/api/v1/workflows/${wid}/runs`, { inputs: {} });
+    // POST takes the workflow itself (as in PARC-021); an owner's console creates it accepted, which a run needs.
+    const inputs = [{ id: 'branch', label: 'Branch', required: true }, { id: 'note', label: 'Note', default: 'none', maxLength: 8 }];
+    const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(wid, 'Parc 022', 'accepted', { inputs }));
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const version = made.body['version'] as number;
+    const runs = `/api/v1/workflows/${wid}/runs`;
+    // What the workflow does not declare, a required input left out, a value too long: 400, nothing started.
+    expect((await call(a.c, 'POST', runs, { inputs: { branch: 'main', target: 'prod' } })).status).toBe(400);
+    expect((await call(a.c, 'POST', runs, { inputs: {} })).status).toBe(400);
+    expect((await call(a.c, 'POST', runs, { inputs: { branch: 'main', note: 'far too long' } })).status).toBe(400);
+    const run = await call(a.c, 'POST', runs, { inputs: { branch: 'main' } });
     expect(run.status, JSON.stringify(run.body)).toBe(201);
-    expect(run.body).toMatchObject({ workflowId: wid, workflowName: 'Parc 022' });
-    for (const k of ['id', 'status', 'startedBy', 'source', 'startedAt']) expect(run.body).toHaveProperty(k);
-    expect(itemsOf((await call(a.c, 'GET', `/api/v1/workflows/${wid}/runs`)).body).map((r) => r['id'])).toContain(run.body['id']);
-    expect(JSON.stringify((await call(a.c, 'GET', '/api/v1/runs')).body)).toContain(run.body['id'] as string);
+    // No engine plays a run yet: it is recorded queued, with the version it started from and its inputs (default taken).
+    expect(run.body).toMatchObject({ workflowId: wid, workflowName: 'Parc 022', workflowVersion: version, status: 'queued', source: 'manual', inputs: { branch: 'main', note: 'none' } });
+    for (const k of ['id', 'startedBy', 'startedAt']) expect(run.body).toHaveProperty(k);
+    const id = run.body['id'] as string;
+    expect(itemsOf((await call(a.c, 'GET', runs)).body).map((r) => r['id'])).toContain(id);
+    expect(itemsOf((await call(a.c, 'GET', '/api/v1/runs')).body).map((r) => r['id'])).toContain(id);
+    expect(itemsOf((await call(a.c, 'GET', '/api/v1/runs?status=queued')).body).map((r) => r['id'])).toContain(id);
+    expect(itemsOf((await call(a.c, 'GET', '/api/v1/runs?status=succeeded')).body).map((r) => r['id'])).not.toContain(id);
+    expect((await call(a.c, 'GET', '/api/v1/runs?status=lost')).status).toBe(400);
+    // A proposed workflow is accepted before it runs; an unknown one is not found.
+    const proposed = `parc-${randomUUID().slice(0, 8)}`;
+    expect((await call(a.c, 'POST', '/api/v1/workflows', workflow(proposed, 'Parc 022 proposed'))).status).toBe(201);
+    expect((await call(a.c, 'POST', `/api/v1/workflows/${proposed}/runs`, { inputs: {} })).status).toBe(409);
+    expect((await call(a.c, 'POST', `/api/v1/workflows/parc-absent-${ID.slice(0, 8)}/runs`, { inputs: {} })).status).toBe(404);
+    expect((await call(a.c, 'GET', `/api/v1/workflows/parc-absent-${ID.slice(0, 8)}/runs`)).status).toBe(404);
+    // A member reads the runs and starts none.
+    const member = await invited(a, 'parc-022-m');
+    const m: Caller = { ...member.caller, org: a.org.id };
+    expect(itemsOf((await call(m, 'GET', runs)).body).map((r) => r['id'])).toContain(id);
+    expect((await call(m, 'POST', runs, { inputs: { branch: 'main' } })).status).toBe(403);
+    // Another organization neither sees, reads nor starts them.
     const b = await owner('parc-022-b');
-    await hidden(b.c, '/api/v1/runs', run.body['id'] as string);
+    await hidden(b.c, '/api/v1/runs', id);
+    expect((await call(b.c, 'GET', runs)).status).toBe(404);
+    expect((await call(b.c, 'POST', runs, { inputs: { branch: 'main' } })).status).toBe(404);
+    expect(itemsOf((await call(a.c, 'GET', runs)).body)).toHaveLength(1);
+    await needsCredential('GET', '/api/v1/runs');
+    await needsCredential('POST', runs, { inputs: {} });
   }, T);
 
   it.skipIf(W023 !== '')(named('E2E-PARC-023 — 4.2 an automation is created, edited, disabled, dry-run, its webhook secret rotated, deleted', W023), async () => {

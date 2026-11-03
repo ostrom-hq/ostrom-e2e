@@ -3552,8 +3552,8 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-PARC-021 — 4.1 Workflow : créé, édité avec sa version, listé, supprimé ; le paquet courant
 
-- Étapes : Le propriétaire crée un workflow (`POST /api/v1/workflows` `{workflow}`), l'édite avec `expectedVersion`, rejoue la même version, liste, lit `GET /packages/current`, supprime ; une autre org liste.
-- Attendu : La création et l'édition rendent le workflow (nouveau nom) ; la version périmée rend 409 ; l'autre org ne voit pas l'id ; le paquet courant rend 200 ou 404 (aucun paquet compilé), jamais une erreur ; supprimé, il disparaît ; 401 sans identifiant. Hypothèse : le corps de #43 (`SaveWorkflowRequest {workflow, expectedVersion}`), le workflow suivant le schéma `Workflow` du contrat.
+- Étapes : Le propriétaire crée un workflow (`POST /api/v1/workflows` avec le workflow lui-même), l'édite avec `expectedVersion`, rejoue la même version, envoie un `PUT` sur un id que l'org n'a pas, liste, lit `GET /packages/current`, supprime ; une autre org liste.
+- Attendu : La création et l'édition rendent le workflow (nouveau nom) ; la version périmée rend 409 ; le `PUT` d'un id inconnu rend 404 et ne crée rien (ni `GET`, ni la liste ne le montrent) ; l'autre org ne voit pas l'id ; le paquet courant rend 200 ou 404 (aucun paquet compilé), jamais une erreur ; supprimé, il disparaît ; 401 sans identifiant. Hypothèse : le corps de #43 (`SaveWorkflowRequest {workflow, expectedVersion}`), le workflow suivant le schéma `Workflow` du contrat.
 - Surfaces : serveur (`ostrom harness` en attente, non couvert)
 - Source : `demo/PARCOURS.md` 4.1
 - Priorité : jalon
@@ -3561,12 +3561,12 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-PARC-022 — 4.1 Exécution d'un workflow, listée sous son workflow et parmi les exécutions
 
-- Étapes : Le propriétaire crée un workflow, lance `POST /api/v1/workflows/{id}/runs` `{inputs: {}}`, lit `GET /workflows/{id}/runs` et `GET /runs` ; une autre org lit `/runs`.
-- Attendu : 201 `{id, workflowId, workflowName, status, startedBy, source, startedAt}` ; l'exécution est dans les deux listes ; l'autre org ne la voit pas.
-- Surfaces : serveur
+- Étapes : Le propriétaire crée un workflow accepté qui déclare deux entrées (`branch` requise, `note` avec `default` et `maxLength`), lance `POST /api/v1/workflows/{id}/runs` avec une entrée non déclarée, sans l'entrée requise, avec une valeur trop longue, puis `{inputs: {branch}}` ; lit `GET /workflows/{id}/runs`, `GET /runs` et `GET /runs?status=` ; lance un workflow proposé et un id inconnu ; un membre invité lit et lance ; une autre org lit et lance ; sans identifiant.
+- Attendu : 400 pour les trois entrées refusées, rien de lancé ; 201 `WorkflowRun` `{id, workflowId, workflowName, workflowVersion (celle de la création), status: queued, startedBy, source: manual, inputs (le default pris), startedAt}` (aucun moteur ne joue encore une exécution : elle reste `queued`) ; l'exécution est dans les deux listes et dans `status=queued`, pas dans `status=succeeded` ; un statut inconnu rend 400 ; le workflow proposé rend 409, l'id inconnu 404 (lancement et liste) ; le membre la lit et reçoit 403 au lancement ; l'autre org ne la voit pas et reçoit 404 sur la liste et le lancement du workflow ; 401 sans identifiant.
+- Surfaces : serveur (écrans : `/workflows/$id` et la vue des exécutions, WEB-PARCOURS)
 - Source : `demo/PARCOURS.md` 4.1
 - Priorité : P1
-- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`/workflows/{id}/runs`, `/runs` planned) ; forme du contrat `openapi.yaml`)
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume seul quand ostrom-server sert les trois routes : PR WORKFLOW-RUNS ; contrat `openapi.yaml`, `startWorkflowRun`, `listWorkflowRuns`, `listRuns`)
 
 ### E2E-PARC-023 — 4.2 Automatisation : créée, éditée, activée, désactivée, essai à blanc, secret tourné, supprimée
 
