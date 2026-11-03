@@ -40,13 +40,21 @@ stage() { # $1 = kind, $2 = N
     echo; echo "Thread names:"; cat "$NAMES"; exit 1
   fi
 }
-stage race 100
-stage race 200
-stage race 500
-stage unauth 100
-stage unauth 200
-stage unauth 500
-stage read 100
-stage read 200
-stage read 500
-echo; echo "Thread names (trailing digits folded):"; cat "$NAMES"
+# server#266 (JOURNAL 03/11 16:52): the three ceilings filled at once, 100 calls past each, /health polled all along.
+saturate() {
+  sleep 2
+  local before threads0; before=$(field VmRSS); threads0=$(field Threads)
+  echo 5 | sudo tee "/proc/$PID/clear_refs" >/dev/null 2>&1 || echo "clear_refs refused" >&2
+  ( m=0; t=0; while :; do r=$(field VmRSS); th=$(field Threads); [ "${r:-0}" -gt "$m" ] && m=$r; if [ "${th:-0}" -gt "$t" ]; then t=$th; names > /tmp/probe-names; fi; echo "$m $t" > /tmp/probe-max; sleep 0.05; done ) &
+  local sampler=$!
+  local out; out=$(k6 run -q load/saturate.js 2>&1 | grep '^SAT' || true)
+  kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null
+  local smax tmax; read -r smax tmax < /tmp/probe-max || true
+  local hwm; hwm=$(field VmHWM)
+  sleep 60; local a60 t60; a60=$(field VmRSS); t60=$(field Threads)
+  echo "$out"
+  echo "SATMEM before=$(mib "$before") peak_hwm=$(mib "$hwm") peak_50ms=$(mib "$smax") after60=$(mib "$a60") threads=$threads0/$tmax/$t60"
+  echo "SATTHREADS peak: $(cat /tmp/probe-names) | +60 s: $(names)"
+  docker inspect -f 'SATSTATE running={{.State.Running}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}' "$CONTAINER"
+}
+saturate
