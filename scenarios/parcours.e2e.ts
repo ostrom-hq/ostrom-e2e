@@ -5,7 +5,7 @@
 // (AUTH, LOGIN, YES, ISO, BILL, GATE) are not repeated here: the mapping is at the top of the PARC section of
 // SCENARIOS.md. Screens (web, app) are out of the bench's scope: each scenario proves the server route the screen reads.
 import { randomUUID } from 'node:crypto';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { appendFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Caller } from '../src/isolation.ts';
@@ -755,8 +755,10 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     expect(listed).toEqual([expect.objectContaining({ usdPerDay: 20, hardStop: false })]);
     expect(listed[0]).not.toHaveProperty('usdPerMonth');
     expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toContain(String(self));
-    // Refused shapes: a workflow budget (not served) and an unknown scope.
-    for (const bad of [{ scope: 'workflow', subject: 'wf', usdPerMonth: 5 }, { scope: 'team', usdPerMonth: 5 }]) expect((await call(a.c, 'PUT', '/api/v1/budgets', bad)).status).toBe(400);
+    // Refused: an unknown scope (400), and a budget on a workflow the org does not have: 400 while workflow budgets are
+    // not served, 404 once they are (ostrom-server#337).
+    expect((await call(a.c, 'PUT', '/api/v1/budgets', { scope: 'team', usdPerMonth: 5 })).status).toBe(400);
+    expect([400, 404]).toContain((await call(a.c, 'PUT', '/api/v1/budgets', { scope: 'workflow', subject: 'wf', usdPerMonth: 5 })).status);
   }, T);
 
   it.skipIf(W019 !== '')(named('E2E-PARC-019 — 3.5 / 6.4 spending of the week and the month, by agent, repo, person and day, against the budget', W019), async () => {
@@ -830,11 +832,15 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
 // --------------------------------------------------------------------------------------- 4. Workflows and automations
 
 const W021 = (await needs(['GET', '/api/v1/workflows'], ['POST', '/api/v1/workflows'], ['PUT', '/api/v1/workflows/{id}'], ['DELETE', '/api/v1/workflows/{id}'], ['GET', '/api/v1/packages/current'])) || ACTORS;
-const W022 = await needs(['GET', '/api/v1/workflows/{id}/runs'], ['POST', '/api/v1/workflows/{id}/runs'], ['GET', '/api/v1/runs']);
+// The runs of a workflow need the workflow engine: until the server serves their routes (`planned` in the contract),
+// PARC-022 is skipped by name with PARCOURS 4.1, never silently.
+const W022 = await needs(['GET', '/api/v1/workflows/{id}/runs'], ['POST', '/api/v1/workflows/{id}/runs'], ['GET', '/api/v1/runs']).then((why) =>
+  why ? `no workflow engine on the server yet, PARCOURS 4.1: ${why}` : '',
+);
 // The engine that plays a run comes with the run's own routes (ostrom-server, feat/workflow-run-engine): before them a
 // run stays queued; with them a lone trigger ends succeeded, and an agent then a gate are played to the end.
 const PLAYED = (await needs(['GET', '/api/v1/runs/{id}'], ['POST', '/api/v1/runs/{id}/cancel'])) === '';
-const W022P = W022 || (PLAYED ? '' : 'not served yet: GET /api/v1/runs/{id}, POST /api/v1/runs/{id}/cancel') || ACTORS;
+const W022P = W022 || (PLAYED ? '' : 'no workflow engine on the server yet, PARCOURS 4.1: not served yet: GET /api/v1/runs/{id}, POST /api/v1/runs/{id}/cancel') || ACTORS;
 const W023 = (await needs(['POST', '/api/v1/automations'], ['POST', '/api/v1/automations/{id}/enable'], ['PUT', '/api/v1/automations/{id}'], ['POST', '/api/v1/automations/{id}/run'], ['POST', '/api/v1/automations/{id}/webhook/rotate-secret'], ['DELETE', '/api/v1/automations/{id}'])) || ORG64;
 const W024 = (await needs(['POST', '/api/v1/waits'], ['GET', '/api/v1/waits/{id}'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/waits/{id}/cancel'])) || ORG64;
 const W044 = (await needs(['POST', '/api/v1/waits/mcp'], ['POST', '/api/v1/waits'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/launches'], ['POST', '/api/v1/sessions'])) || ACTORS || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
@@ -1034,6 +1040,85 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect((await call(a.c, 'GET', `/api/v1/runs/${randomUUID()}`)).status).toBe(404);
     await needsCredential('GET', `/api/v1/runs/${id}`);
     await needsCredential('POST', `/api/v1/runs/${id}/cancel`);
+  }, 180_000);
+
+  it.skipIf(W022P !== '')(named('E2E-PARC-022 — 4.1 a run waits for its question, then plays a child run of another workflow to its end; a cancelled one withdraws its wait', W022P), async (context) => {
+    const a = await owner('parc-022-w');
+    // The wait's assignee is another member, who answers it from their own waits.
+    const reviewer = await invited(a, 'parc-022-wr');
+    const login = (await profileOf(reviewer.caller)).login;
+    const r: Caller = { ...reviewer.caller, org: a.org.id };
+    const tag = randomUUID().slice(0, 8);
+    const child = `parc-child-${tag}`;
+    const parent = `parc-parent-${tag}`;
+    const target = [{ id: 'target', label: 'Target', required: true }];
+    const built = await call(a.c, 'POST', '/api/v1/workflows', workflow(child, 'Parc 022 child', 'accepted', { inputs: target }));
+    expect(built.status, JSON.stringify(built.body)).toBe(201);
+    const question = { title: 'Ship it?', fields: [{ id: 'note', type: 'text', label: 'Note' }], actions: [{ id: 'ship', label: 'Ship' }, { id: 'hold', label: 'Hold' }] };
+    const nodes = [
+      { id: 'ask', kind: 'wait', label: 'Ask', approvers: [login], wait: question },
+      { id: 'call', kind: 'workflow', label: 'Build', workflowId: child, arguments: { target: '{{inputs.branch}}' } },
+    ];
+    const edges = [{ from: 'ask', to: 'call', on: 'ship' }];
+    const inputs = [{ id: 'branch', label: 'Branch', required: true }];
+    const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(parent, 'Parc 022 waits', 'accepted', { nodes, edges, start: 'ask', inputs }));
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const start = async () => {
+      const s = await call(a.c, 'POST', `/api/v1/workflows/${parent}/runs`, { inputs: { branch: 'main' } });
+      expect(s.status, JSON.stringify(s.body)).toBe(201);
+      return s.body['id'] as string;
+    };
+    const id = await start();
+
+    // 1. The wait node asks its question of the reviewer, for the run; the run waits on it.
+    const asked = await runUntil(a.c, id, (x) => x['status'] !== 'queued' && x['status'] !== 'running');
+    const failure = String(asked['failure'] ?? '');
+    if (failure.includes('does not play wait nodes yet')) {
+      // TEMPORARY (removed right after the server's merge): visible in the run, never a silent pass.
+      const why = 'E2E-PARC-022 (wait, workflow) skipped: the server does not play wait and workflow nodes yet (PARCOURS 4.1)';
+      console.log(`\n::warning title=E2E-PARC-022 skipped::${why}`);
+      const summary = process.env['GITHUB_STEP_SUMMARY'];
+      if (summary) appendFileSync(summary, `- :warning: ${why}\n`);
+      context.skip(why);
+    }
+    expect(asked, JSON.stringify(asked)).toMatchObject({ status: 'waiting', currentNodeId: 'ask' });
+    const visit = (asked['visits'] as Record<string, unknown>[])[0];
+    expect(visit).toMatchObject({ seq: 1, nodeId: 'ask', kind: 'wait', status: 'waiting' });
+    const waitId = visit?.['waitId'] as string;
+    const wait = await call(r, 'GET', `/api/v1/waits/${waitId}`);
+    expect(wait.status, JSON.stringify(wait.body)).toBe(200);
+    expect(wait.body).toMatchObject({ id: waitId, status: 'open', runId: id, question: { title: 'Ship it?' } });
+
+    // 2. The reviewer answers `ship`: the workflow node starts a child run of the other workflow, which ends; so does the run.
+    const answered = await call(r, 'POST', `/api/v1/waits/${waitId}/answer`, { action: 'ship', values: { note: 'go' } });
+    expect(answered.status, JSON.stringify(answered.body)).toBeLessThan(300);
+    const ended = await runUntil(a.c, id, (x) => x['status'] !== 'waiting' && x['status'] !== 'running');
+    expect(ended['status'], JSON.stringify(ended)).toBe('succeeded');
+    const [ask, call1] = ended['visits'] as Record<string, unknown>[];
+    expect(ask).toMatchObject({ nodeId: 'ask', status: 'done', outcome: 'ship' });
+    expect(JSON.parse(String(ask?.['output']))).toEqual({ note: 'go' });
+    expect(call1).toMatchObject({ seq: 2, nodeId: 'call', kind: 'workflow', status: 'done', outcome: 'next' });
+    const childId = call1?.['childRunId'] as string;
+    const sub = await call(a.c, 'GET', `/api/v1/runs/${childId}`);
+    expect(sub.status, JSON.stringify(sub.body)).toBe(200);
+    expect(sub.body).toMatchObject({ id: childId, workflowId: child, status: 'succeeded', source: 'workflow', parentRunId: id, inputs: { target: 'main' } });
+    const b = await owner('parc-022-wb');
+    expect((await call(b.c, 'GET', `/api/v1/runs/${childId}`)).status).toBe(404);
+    await hidden(b.c, `/api/v1/waits/${waitId}`, 'Ship it?');
+
+    // 3. Another run is cancelled while it waits: its wait is withdrawn.
+    const other = await start();
+    const held = await runUntil(a.c, other, (x) => x['status'] === 'waiting');
+    const otherWait = (held['visits'] as Record<string, unknown>[])[0]?.['waitId'] as string;
+    const cancelled = await call(a.c, 'POST', `/api/v1/runs/${other}/cancel`);
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    const until = Date.now() + 60_000;
+    for (;;) {
+      const w = await call(r, 'GET', `/api/v1/waits/${otherWait}`);
+      if (w.body?.['status'] === 'cancelled') break;
+      if (Date.now() > until) throw new Error(`wait ${otherWait} of a cancelled run: ${JSON.stringify(w.body)}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }, 180_000);
 
   it.skipIf(W023 !== '')(named('E2E-PARC-023 — 4.2 an automation is created, edited, disabled, dry-run, its webhook secret rotated, deleted', W023), async () => {

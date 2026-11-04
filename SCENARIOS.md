@@ -309,7 +309,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, faux agent
 - Source : proto/COORD/HOOK-DISPATCH.md §3 (lignes `ls`) et §4 ; proto/launcher/dev/dispatch-bench/bench.py
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks))
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé dès que serveur et CLI servent le jalon (sondes `loginUnavailable` et `journeyUnavailable`) (bloqué : ostrom-cli (hooks))
 
 ### E2E-CLAUDE-004 — Action gardée dont les checks sont déjà passés : coût constant
 
@@ -693,7 +693,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, faux GitHub, console (« Mon compte »)
 - Source : décision Q-GATES-G1, option a (03/11) ; ostrom-server feat/gates-unlinked-author
 - Priorité : P1
-- Statut : vert : `scenarios/gate-unlinked.e2e.ts` (ostrom-server#281), run https://github.com/ostrom-hq/ostrom-server/actions/runs/41673313006 (e2e-journey, image `ghcr.io/ostrom-hq/ostrom-server:sha-a8a3782`, e2e dfb700e, 1 passé, 0 sauté)
+- Statut : vert : `scenarios/gate-unlinked.e2e.ts` (ostrom-server#281), sur main : e2e-journey https://github.com/ostrom-hq/ostrom-server/actions/runs/41719276122 (workflow main 7366a16, image `ghcr.io/ostrom-hq/ostrom-server:sha-5e3a267`, e2e main 2b6c0ff, sans filtre, passé ; avant la fusion : run 41673313006 sur une branche)
 
 
 ## BYPASS : Contournements de la porte (audit du 30/10 et trous connus)
@@ -701,11 +701,11 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 ### E2E-BYPASS-001 — Contournement : options avant le verbe `push` (piste 1a)
 
 - Étapes : Catalogue du dépôt ; commandes `git -C /work/core push origin main`, `git -C "/my work/core" push origin HEAD:main`, `git -c core.sshCommand=ssh push origin main`, `git --no-pager push origin main`, `git --git-dir /work/core/.git push origin main`.
-- Attendu : Toutes sont classées `push-main` (porte demandée).
-- Surfaces : serveur (catalogue), faux agent
-- Source : audit/server/src/bridge/audit-gate.test.ts P1 (première boucle) ; commit 4a74f6a0
+- Attendu : Aucune n'atteint l'origine. Les formes simples (`git -C <dépôt>`, `git --no-pager`, le chemin avec espace depuis une session ouverte dans ce dépôt) demandent la porte de main. Celles qui changent où git lit ou envoie sont refusées d'emblée, sans demande : `--git-dir` par le hook (audit A6, `GateTexts.redirected`), `-c core.sshCommand=…` par le serveur. Le même push depuis une session ouverte dans un autre dépôt est refusé aussi (« do not cover »). Assoupli le 03/11 (QA, e2e#65) : « porte demandée pour toutes » est devenu « refusée, par une demande ou d'emblée », pour suivre la décision A6 ; PARCOURS 5.3.
+- Surfaces : serveur (catalogue), CLI (hook), faux agent
+- Source : audit/server/src/bridge/audit-gate.test.ts P1 (première boucle) ; commit 4a74f6a0 ; ostrom-cli `GitInvocation.kt` (audit A6)
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-002 — Contournement : options avant le verbe de déploiement (piste 1b)
 
@@ -741,7 +741,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, faux agent
 - Source : audit/server/src/bridge/audit-gate.test.ts P2
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-006 — Contournement : git redirigé vers un autre dépôt (piste 3)
 
@@ -914,7 +914,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, faux agent
 - Source : audit/COORD/AUDIT-PORTE.md A9 ; audit/bridge/test/audit-push.test.mjs (4 cas) ; audit/launcher/tests/audit_push_refs.rs
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-025 — Contournement A10 : écrire dans une session sans en être le propriétaire
 
@@ -3568,14 +3568,14 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : jalon
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#43)
 
-### E2E-PARC-022 — 4.1 Exécution d'un workflow, listée, jouée jusqu'au bout (agent puis porte), annulée
+### E2E-PARC-022 — 4.1 Exécution d'un workflow, listée, jouée jusqu'au bout (agent puis porte ; attente puis exécution fille), annulée
 
 - Étapes : (a) Le propriétaire crée un workflow accepté qui déclare deux entrées (`branch` requise, `note` avec `default` et `maxLength`), lance `POST /api/v1/workflows/{id}/runs` avec une entrée non déclarée, sans l'entrée requise, avec une valeur trop longue, puis `{inputs: {branch}}` ; lit `GET /workflows/{id}/runs`, `GET /runs` et `GET /runs?status=` ; lance un workflow proposé et un id inconnu ; un membre invité lit et lance ; une autre org lit et lance ; sans identifiant. (b) Quand le moteur est servi (`GET /runs/{id}`, `POST /runs/{id}/cancel`) : un workflow `agent` (`build`) → `gate` (`review`, approbateur : un membre invité, jamais celui qui a lancé l'exécution, règle des quatre yeux) → fin ; l'exécution lancée est lue jusqu'à sa session cloud, la session est close (`DELETE /cloud/sessions/{id}` : aucun runner ne la prend sur le banc), la porte est approuvée par l'approbation en attente de ce membre ; une seconde exécution est annulée pendant que son agent travaille, par un membre puis par le propriétaire ; une autre org la lit et l'annule ; sans identifiant.
-- Attendu : (a) 400 pour les trois entrées refusées, rien de lancé ; 201 `WorkflowRun` `{id, workflowId, workflowName, workflowVersion (celle de la création), status: queued, startedBy, source: manual, inputs (le default pris), startedAt}` ; l'exécution est dans les deux listes ; sans moteur elle reste `queued` (dans `status=queued`, pas dans `status=succeeded`), avec le moteur son seul déclencheur n'a rien après lui et elle finit `succeeded`, sans nœud courant (dans `status=succeeded`, plus dans `status=queued`) ; un statut inconnu rend 400 ; le workflow proposé rend 409, l'id inconnu 404 (lancement et liste) ; le membre la lit et reçoit 403 au lancement ; l'autre org ne la voit pas et reçoit 404 sur la liste et le lancement du workflow ; 401 sans identifiant. (b) `running` sur `build`, la visite 1 `agent` porte le `sessionId` de l'exécution, session cloud du propriétaire nommée « <workflow> · Build » ; la session close, la visite 1 est `done`/`next` et l'exécution `waiting` sur la visite 2 `gate` ; le oui (200) la finit `succeeded` (`endedAt`, visites `build done next`, `review done approved`) ; l'annuler ensuite rend 409 ; la seconde : le membre la lit et reçoit 403 à l'annulation, l'autre org 404 aux deux, le propriétaire l'annule (200, `cancelled`, visite `failed`/`cancelled`), une seconde annulation rend 409, et sa session cloud est terminée ; un id inconnu rend 404 ; 401 sans identifiant. Le serveur du banc sert les sessions cloud à toutes les org, pilote `registered` (`OSTROM_RUNNERS_DRIVER`, `OSTROM_RUNNERS_SERVER_URL`, `OSTROM_RUNNERS_ALLOWED_ORGS=*`).
+- Attendu : (a) 400 pour les trois entrées refusées, rien de lancé ; 201 `WorkflowRun` `{id, workflowId, workflowName, workflowVersion (celle de la création), status: queued, startedBy, source: manual, inputs (le default pris), startedAt}` ; l'exécution est dans les deux listes ; sans moteur elle reste `queued` (dans `status=queued`, pas dans `status=succeeded`), avec le moteur son seul déclencheur n'a rien après lui et elle finit `succeeded`, sans nœud courant (dans `status=succeeded`, plus dans `status=queued`) ; un statut inconnu rend 400 ; le workflow proposé rend 409, l'id inconnu 404 (lancement et liste) ; le membre la lit et reçoit 403 au lancement ; l'autre org ne la voit pas et reçoit 404 sur la liste et le lancement du workflow ; 401 sans identifiant. (b) `running` sur `build`, la visite 1 `agent` porte le `sessionId` de l'exécution, session cloud du propriétaire nommée « <workflow> · Build » ; la session close, la visite 1 est `done`/`next` et l'exécution `waiting` sur la visite 2 `gate` ; le oui (200) la finit `succeeded` (`endedAt`, visites `build done next`, `review done approved`) ; l'annuler ensuite rend 409 ; la seconde : le membre la lit et reçoit 403 à l'annulation, l'autre org 404 aux deux, le propriétaire l'annule (200, `cancelled`, visite `failed`/`cancelled`), une seconde annulation rend 409, et sa session cloud est terminée ; un id inconnu rend 404 ; 401 sans identifiant. (c) Un workflow `wait` (`ask`, posée à un membre invité, actions `ship` et `hold`) → `workflow` (`call`, un autre workflow accepté de l'org, une entrée `target` = `{{inputs.branch}}`) : l'exécution `waiting` sur la visite 1 `wait`, dont l'attente (`waitId`) est ouverte au membre, pour l'exécution (`runId`) ; le membre répond `ship` avec une note : l'exécution finit `succeeded` (visite 1 `done`/`ship`, sortie `{note}` ; visite 2 `workflow` `done`/`next` avec son `childRunId`), l'exécution fille est `succeeded`, `source: workflow`, `parentRunId` du parent, `inputs.target: main` ; l'autre org ne lit ni la fille ni l'attente ; une seconde exécution annulée pendant qu'elle attend voit son attente `cancelled`. Tant que le serveur ne joue pas ces nœuds (l'exécution échoue sur « does not play wait nodes yet »), (c) est sauté avec un avertissement visible dans le run, retiré après la fusion du serveur. Le serveur du banc sert les sessions cloud à toutes les org, pilote `registered` (`OSTROM_RUNNERS_DRIVER`, `OSTROM_RUNNERS_SERVER_URL`, `OSTROM_RUNNERS_ALLOWED_ORGS=*`).
 - Surfaces : serveur (écrans : `/workflows/$id` et la vue des exécutions, WEB-PARCOURS)
 - Source : `demo/PARCOURS.md` 4.1
 - Priorité : P1
-- Statut : codé : `scenarios/parcours.e2e.ts` ((a) s'allume seul quand ostrom-server sert les trois routes : PR WORKFLOW-RUNS ; (b) quand il sert `getRun` et `cancelRun` : PR du moteur des exécutions ; contrat `openapi.yaml`, `startWorkflowRun`, `listWorkflowRuns`, `listRuns`, `getRun`, `cancelRun`)
+- Statut : codé : `scenarios/parcours.e2e.ts` ((a) s'allume seul quand ostrom-server sert les trois routes : PR WORKFLOW-RUNS ; (b) quand il sert `getRun` et `cancelRun` : PR du moteur des exécutions  ; (c) en plus quand il joue les nœuds `wait` et `workflow` : PR suivante du moteur ; contrat `openapi.yaml`, `startWorkflowRun`, `listWorkflowRuns`, `listRuns`, `getRun`, `cancelRun`)
 
 ### E2E-PARC-023 — 4.2 Automatisation : créée, éditée, activée, désactivée, essai à blanc, secret tourné, supprimée
 

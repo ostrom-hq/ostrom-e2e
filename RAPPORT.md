@@ -126,7 +126,7 @@ PostgreSQL 18. `vert` porte le lien du run ; `rouge` dit ce qui casse ; `manquan
 - 30/10 02:15 — 14 contournements de l'audit de la porte ajoutés (BYPASS-020 à 033 : A1, A2, A3, A7b, A9, A10, A12 à A20, A24), dont 6 au jalon ; actions épinglées par SHA (CONVENTIONS § 11) ; pour Kotlin, le gabarit de CONVENTIONS (job `linux`) fait foi.
 - 30/10 02:45 — faux GitHub local (`src/fake-github.ts`), bacs à sable git sans réseau (`src/git.ts`), parcours du jalon
   codés (`scenarios/jalon.e2e.ts` : LOGIN-001, CLAUDE-001, CLAUDE-003, GATE-001 avec YES-001, YES-003, YESCLI-002,
-  RECEIPT-001), lancés dès que serveur et CLI les servent (`OSTROM_E2E_JALON=1`) ; k6 aligné sur le contrat `/api/v1` ;
+  RECEIPT-001), lancés dès que serveur et CLI les servent (sondes du serveur et du binaire, plus de variable) ; k6 aligné sur le contrat `/api/v1` ;
   le banc tourne en un seul job `ci`.
 - 30/10 03:20 — Règles de CI de l'organisation (JOURNAL 03:10) : un seul job `ci` par PR, pas de CI sur un
   brouillon, `concurrency` annulant sauf sur `main`, caches ; check obligatoire `ci` partout. Gabarits mis à jour.
