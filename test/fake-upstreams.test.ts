@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { connect } from 'node:net';
-import { get as httpsGet } from 'node:https';
+import { Agent as HttpsAgent, get as httpsGet } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -197,5 +197,44 @@ describe('FakeUpstreams over TLS', () => {
     const again = await fixed.start(0, { key: readFileSync(join(dir, 'key.pem'), 'utf8'), cert: readFileSync(join(dir, 'cert.pem'), 'utf8'), port });
     expect(again.https).toBe(`https://127.0.0.1:${port}`);
     await fixed.stop();
+  });
+
+  // The relay's MCP calls cost about 55 ms per HTTPS round trip in chart-load 41612342204: the fake tells whether the
+  // client reuses its connections (one handshake for many requests) or opens one per request.
+  it('counts the connections, full and resumed TLS handshakes, and requests of its HTTPS port', async () => {
+    const tlsStats = async () => {
+      const text = await new Promise<string>((resolve) =>
+        httpsGet(`${String(urls.https)}/stats`, { rejectUnauthorized: false, agent: false }, (res) => {
+          let body = '';
+          res.on('data', (c: Buffer) => (body += c.toString()));
+          res.on('end', () => resolve(body));
+        }),
+      );
+      return (JSON.parse(text) as { tls: Record<string, number> }).tls;
+    };
+    const health = (agent: HttpsAgent) =>
+      new Promise<void>((resolve) =>
+        httpsGet(`${String(urls.https)}/health`, { rejectUnauthorized: false, agent }, (res) => {
+          res.resume();
+          res.on('end', () => resolve());
+        }),
+      );
+    tlsFakes.reset();
+    expect(tlsFakes.tls).toEqual({ connections: 0, handshakes: 0, resumed: 0, requests: 0 });
+    // Kept alive: three requests on one connection, one handshake.
+    const kept = new HttpsAgent({ keepAlive: true, maxSockets: 1 });
+    for (let i = 0; i < 3; i++) await health(kept);
+    kept.destroy();
+    expect(tlsFakes.tls).toEqual({ connections: 1, handshakes: 1, resumed: 0, requests: 3 });
+    // A connection per request, the TLS session resumed from the first (TLS 1.2 session ids: resumed at once).
+    const fresh = new HttpsAgent({ keepAlive: false, maxVersion: 'TLSv1.2' });
+    await health(fresh);
+    await health(fresh);
+    fresh.destroy();
+    expect(tlsFakes.tls).toEqual({ connections: 3, handshakes: 3, resumed: 1, requests: 5 });
+    // The stats request itself is counted after it is read.
+    expect((await tlsStats())['requests']).toBe(6);
+    tlsFakes.reset();
+    expect(tlsFakes.tls['requests']).toBe(0);
   });
 });

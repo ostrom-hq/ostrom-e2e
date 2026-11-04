@@ -6,8 +6,12 @@
 # cluster, where the queries of ostrom-infra's alerts and product dashboard are run (scripts/observability-check.ts).
 # The inference gateway and the MCP relay are loaded against fake upstreams in a namespace of their own
 # (src/fake-upstreams.ts): the gateway's overhead against the fake called directly, the memory of open streams, a client
-# that leaves mid-stream, and MCP servers that are slow or down. By hand, `server_ref` builds another server and
-# `helm_ref` installs another chart. Not on pull requests: the organisation runs a single `ci` job per PR.
+# that leaves mid-stream, and MCP servers that are slow or down.
+# Two legs, each on its own runner and kind cluster: `gates` (smoke, journeys, registered runners, gates and the race,
+# then the alert and dashboard queries) and `relay` (smoke, journeys, then the gateway and the relay). A pod the race
+# kills (OOMKilled, run 41549238361) then never takes the relay's setup down with it, and the 200 streams never crash
+# the pods the gates are measured on. By hand, `server_ref` builds another server and `helm_ref` installs another chart.
+# Not on pull requests: the organisation runs a single `ci` job per PR.
 name: Chart load
 on:
   push:
@@ -16,9 +20,14 @@ on:
     - cron: "17 2 * * *"
   workflow_dispatch:
     inputs:
+      pass:
+        description: "Which leg: gates, relay, or both"
+        type: choice
+        options: [both, gates, relay]
+        default: both
       server_ref:
-        description: "ostrom-server branch, tag or commit to build (default: main)"
-        required: false
+        description: "ostrom-server ref to build and load (a PR's branch, to prove a fix before it merges)"
+        type: string
         default: main
       helm_ref:
         description: "ostrom-helm branch, tag or commit whose chart is installed (default: main)"
@@ -28,21 +37,29 @@ on:
         description: "Ids of scripts/observability-check.ts that must see data (comma-separated)"
         required: false
         default: ""
-# A load pass gates nothing: a newer run of the same ref replaces the one in progress (runners are scarce).
+# A load pass gates nothing: a newer run of the same ref replaces the one in progress (runners are scarce). A dispatch
+# that loads another server ref is a proof of its own: a push or the nightly run never cancels it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ inputs.server_ref || 'main' }}
   cancel-in-progress: true
 permissions:
   contents: read
 
 jobs:
   chart-load:
-    name: chart-load
+    name: chart-load (${{ matrix.pass }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both on push and schedule; a dispatch may run one leg only.
+        pass: ${{ fromJSON(inputs.pass == 'gates' && '["gates"]' || inputs.pass == 'relay' && '["relay"]' || '["gates","relay"]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       NS: ostrom
       CLUSTER: ostrom-load
+      # The open streams asked for, phase by phase (load/streams.js).
+      STREAM_RAMP: "50 100 150 200 300"
       API_URL: http://api.ostrom.test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,7 +89,7 @@ jobs:
         run: printf '\nostrom.core.local=true\n' >> .ostrom/server/gradle.properties
       # The action builds the image and then starts it against `database-url`; only the image is wanted here, so the
       # start is let fail (nothing listens there, `required: "false"`) and the next step checks the image.
-      - name: Server image (ostrom-server main, its own Dockerfile)
+      - name: Server image (that ostrom-server checkout, its own Dockerfile)
         id: server
         uses: ./.github/actions/server
         with:
@@ -96,8 +113,12 @@ jobs:
       # passes with the reason (the server does not trust the fakes' certificate).
       - name: Bench CA, the fake MCP servers' certificate, and the server image that trusts it
         continue-on-error: true
+        env:
+          PASS: ${{ matrix.pass }}
         run: |
           docker tag ostrom-server:e2e ostrom-server:e2e-load
+          # The gates leg runs the image as built: no fakes, no CA.
+          [ "$PASS" = relay ] || exit 0
           d="$RUNNER_TEMP/fakes-tls"; mkdir -p "$d"; cd "$d"
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=Ostrom load bench CA" -keyout ca.key -out ca.crt \
             -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign"
@@ -171,6 +192,7 @@ jobs:
       # src/fake-upstreams.ts run by Node from a ConfigMap. Reached by the server (an extraEgress rule of the chart's
       # NetworkPolicy, below) and by k6 through the ingress (fake.ostrom.test), the baseline of the gateway's overhead.
       - name: Fake upstreams of the gateway and the MCP relay (namespace ostrom-fakes)
+        if: matrix.pass == 'relay'
         # Like the CA: a failure here skips the relay passes (their setup gives the reason), never the passes before.
         continue-on-error: true
         run: |
@@ -380,6 +402,7 @@ jobs:
       - name: Gate load setup (requester token, approver session)
         id: loadsetup
         env:
+          PASS: ${{ matrix.pass }}
           # The only origin a browser session may write from: the chart's console URL (global.urls.app, S2-08).
           OSTROM_E2E_CONSOLE_ORIGIN: http://app.ostrom.test
         run: |
@@ -402,8 +425,11 @@ jobs:
           [ -n "$mail" ] || echo "::warning title=mail directory::the sign-in mails of $pod are not readable from the runner"
           echo "OSTROM_LOAD_MAIL_DIR=$mail" >> "$GITHUB_ENV"
           echo "OSTROM_LOAD_POD=$pod" >> "$GITHUB_ENV"
-          OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="$mail" node scripts/load-setup.ts
-      # Registered runners (`ostrom-runner machine`): 500 registered in 5 organizations of their own (100 at most each),
+          # The gates' accounts only in their leg; the relay leg keeps the port-forward and the mail directory alone.
+          if [ "$PASS" = gates ]; then
+            OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="$mail" node scripts/load-setup.ts
+          fi
+      # Registered runners (`ostrom-runner machine`), in the gates leg: 500 registered in 5 organizations of their own (100 at most each),
       # through the same pod and mail directory as the gate setup, then 100 and then 500 of them beating every 5 s with an
       # empty report, a phase each (runner-phases.txt, apart from the streams' phases.txt that relay-summary.ts reads):
       # the route's p95 is k6's, the server pods' CPU and memory the sampler's.
@@ -412,14 +438,14 @@ jobs:
       # setup reads.
       - name: Registered runners load setup (500 runners in 5 organizations)
         id: runnerssetup
-        if: always() && steps.loadsetup.outcome != 'skipped'
+        if: always() && matrix.pass == 'gates' && steps.loadsetup.outcome != 'skipped'
         env:
           OSTROM_E2E_CONSOLE_ORIGIN: http://app.ostrom.test
           OSTROM_LOAD_RUNNERS: "500"
           OSTROM_LOAD_RUNNERS_FILE: ${{ runner.temp }}/runners.json
         run: OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="${OSTROM_LOAD_MAIL_DIR:-}" node scripts/runners-load-setup.ts
       - name: k6 registered runners' heartbeats (100, then 500, every 5 s, 2 minutes each)
-        if: always() && steps.runnerssetup.outputs.ready == 'true'
+        if: always() && matrix.pass == 'gates' && steps.runnerssetup.outputs.ready == 'true'
         env:
           OSTROM_URL: ${{ env.API_URL }}
           OSTROM_LOAD_RUNNERS_FILE: ${{ runner.temp }}/runners.json
@@ -442,7 +468,7 @@ jobs:
       # through the same pod and mail directory; the gates and the race take under two minutes. The port-forward is
       # opened again if the runners' phase cost the pod its connection.
       - name: Approver signs in again right before the yes (a yes needs a sign-in of less than 5 minutes)
-        if: steps.loadsetup.outputs.ready == 'true'
+        if: matrix.pass == 'gates' && steps.loadsetup.outputs.ready == 'true'
         env:
           OSTROM_E2E_CONSOLE_ORIGIN: http://app.ostrom.test
         run: |
@@ -457,7 +483,7 @@ jobs:
           fi
           OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="${OSTROM_LOAD_MAIL_DIR:-}" node scripts/load-approver-signin.ts
       - name: k6 gates (push to main + yes) and race (100 simultaneous yes → 1 × 200, 99 × 409)
-        if: steps.loadsetup.outputs.ready == 'true'
+        if: matrix.pass == 'gates' && steps.loadsetup.outputs.ready == 'true'
         env:
           OSTROM_URL: ${{ env.API_URL }}
           OSTROM_LOAD_SCENARIOS: gates
@@ -482,8 +508,8 @@ jobs:
       # The server exports its metrics every minute: two exports after the last gate, then the queries of the alerts and
       # of the product dashboard (ostrom-infra), against what the real server sent. Right after the gates, before the
       # gateway and relay phases: the counters' queries look at the last 5 minutes (run 41614001097).
-      - name: Alert and dashboard queries against the server's metrics
-        if: always() && steps.image.outcome == 'success'
+      - name: Alert and dashboard queries against the server's metrics (gates leg)
+        if: always() && matrix.pass == 'gates' && steps.image.outcome == 'success'
         env:
           OSTROM_OBS_REQUIRED: ${{ inputs.observability_required }}
           OSTROM_PROMETHEUS_URL: http://127.0.0.1:19090
@@ -497,12 +523,17 @@ jobs:
       # through the same pod and mail directory as the gate setup.
       - name: Gateway and relay load setup (member token, MCP servers on the fakes)
         id: relaysetup
-        if: always() && steps.loadsetup.outcome != 'skipped'
+        if: always() && matrix.pass == 'relay' && steps.loadsetup.outcome != 'skipped'
         env:
           OSTROM_E2E_CONSOLE_ORIGIN: http://app.ostrom.test
           OSTROM_LOAD_FAKE_MCP_URL: https://fakes.ostrom-fakes.svc:8443
           OSTROM_LOAD_FAKE_MCP_DOWN_URL: https://fakes.ostrom-fakes.svc:8444/mcp/fast
         run: OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="${OSTROM_LOAD_MAIL_DIR:-}" node scripts/relay-load-setup.ts
+      # The server's own account of the relay phases: its log followed across restarts (the crash's last lines) and its
+      # open descriptors every second (scripts/server-watch.sh), both in the artifact.
+      - name: Follow the server logs and descriptors (relay leg)
+        if: always() && steps.relaysetup.outputs.inference == 'true'
+        run: scripts/server-watch.sh start server-watch
       # Each relay phase starts on Ready server pods and fails on its own restart, with the crashed container's last
       # lines (scripts/server-pods.sh): a crash in one phase never passes for the next phase's result (run 41539188060:
       # the 200 streams crashed both pods, then the cut and the MCP phases only met nginx's 503). The heaviest phase,
@@ -532,26 +563,32 @@ jobs:
         env:
           OSTROM_URL: ${{ env.API_URL }}
           OSTROM_LOAD_MCP_DEADLINE_MS: "5000"
+          # The fakes' counts: what their HTTPS port saw of the relay's connections (load/mcp.js teardown).
+          OSTROM_LOAD_FAKE_URL: http://fake.ostrom.test
         run: |
           scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts); rc=0
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export mcp-summary.json load/mcp.js || rc=$?
           scripts/server-pods.sh crashed "$before" || rc=1
           exit "$rc"
-      # Each phase's start and end go to phases.txt: scripts/relay-summary.ts reads the pods' memory in each window. A
-      # restart of a server pod (an OOM kill at the chart's 256 Mi, or a crash) fails the phase, and the 200 streams
-      # then start on Ready pods again.
-      - name: k6 open streams (50, then 200, a minute each) and the pods' memory
+      # Each phase's start and end go to phases.txt, with the streams held open (refused ones hold nothing):
+      # scripts/relay-summary.ts reads the pods' memory in each window. The ramp goes past what two replicas hold
+      # (OSTROM_GATEWAY_MAX_OPEN_CALLS each, 26 under 256 Mi, and a memory ceiling): a phase is refused in part, never
+      # cut. A restart of a server pod (an OOM kill at the chart's 256 Mi, or a crash) fails the phase, and the next one
+      # starts on Ready pods again.
+      - name: k6 open streams (a ramp from 50 to 300, a minute each) and the pods' memory
         if: always() && steps.relaysetup.outputs.inference == 'true'
         env:
           OSTROM_URL: ${{ env.API_URL }}
         run: |
           rc=0
-          for n in 50 200; do
+          for n in $STREAM_RAMP; do
             scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts)
             start=$(date +%s)
             k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export "streams-$n-summary.json" \
               -e OSTROM_LOAD_STREAMS="$n" load/streams.js || rc=$?
-            echo "streams-$n $n $start $(date +%s)" >> phases.txt
+            held=$(jq '.metrics.streams_whole.count // 0' "streams-$n-summary.json" 2>/dev/null || echo 0)
+            refused=$(jq '.metrics.streams_refused.count // 0' "streams-$n-summary.json" 2>/dev/null || echo 0)
+            echo "streams-$n ${held:-0} $start $(date +%s) ${refused:-0}" >> phases.txt
             sleep 30
             scripts/server-pods.sh crashed "$before" || rc=1
           done
@@ -560,45 +597,63 @@ jobs:
         if: always()
         run: |
           for f in top port-forward prometheus-forward; do [ -f "$RUNNER_TEMP/$f.pid" ] && kill "$(cat "$RUNNER_TEMP/$f.pid")" 2>/dev/null || true; done
+          scripts/server-watch.sh stop server-watch
           mountpoint -q "$RUNNER_TEMP/ostrom-mail" && sudo umount "$RUNNER_TEMP/ostrom-mail" || true
           cp "$RUNNER_TEMP/top.txt" top-samples.txt 2>/dev/null || true
       - name: Summary (k6 per script, peak CPU and memory per pod, restarts)
         if: always()
         env:
           SERVER_SHA: ${{ steps.server.outputs.sha }}
-          GATES: ${{ steps.loadsetup.outputs.ready == 'true' && 'run' || steps.loadsetup.outputs.reason }}
-          RUNNERS: ${{ steps.runnerssetup.outputs.ready == 'true' && 'run' || steps.runnerssetup.outputs.reason }}
-          RELAY: >-
-            inference ${{ steps.relaysetup.outputs.inference == 'true' && 'run' || 'not run' }},
-            mcp ${{ steps.relaysetup.outputs.mcp == 'true' && 'run' || 'not run' }}${{ steps.relaysetup.outputs.reason && format(' ({0})', steps.relaysetup.outputs.reason) || '' }}
+          PASS: ${{ matrix.pass }}
+          GATES: ${{ matrix.pass != 'gates' && 'not in this leg' || (steps.loadsetup.outputs.ready == 'true' && 'run' || steps.loadsetup.outputs.reason) }}
+          RUNNERS: ${{ matrix.pass != 'gates' && 'not in this leg' || (steps.runnerssetup.outputs.ready == 'true' && 'run' || steps.runnerssetup.outputs.reason) }}
+          RELAY_INFERENCE: ${{ steps.relaysetup.outputs.inference == 'true' && 'run' || 'not run' }}
+          RELAY_MCP: ${{ steps.relaysetup.outputs.mcp == 'true' && 'run' || 'not run' }}
+          RELAY_REASON: ${{ steps.relaysetup.outputs.reason }}
         run: |
           {
-            echo "### Chart load pass (kind, ingress-nginx, 2 server replicas)"
+            echo "### Chart load pass, ${{ matrix.pass }} (kind, ingress-nginx, 2 server replicas)"
             echo
             echo "ostrom-server@${SERVER_SHA:-?} · gates and race: ${GATES:-not run} · registered runners: ${RUNNERS:-not run}"
             echo
-            node scripts/k6-summary.ts "smoke (health, instance)=smoke-summary.json" "chart journeys=journeys-summary.json" \
-              "gates=gates-summary.json" "race=race-summary.json" "inference=inference-summary.json" \
-              "50 streams=streams-50-summary.json" "200 streams=streams-200-summary.json" "cut streams=cut-summary.json" \
-              "mcp relay=mcp-summary.json" "runners 100=runners-100-summary.json" \
-              "runners 500=runners-500-summary.json" || echo "(no k6 summary)"
-            echo
-            echo "| runners phase | server pod | peak CPU | peak memory | samples |"
-            echo "|---|---|---|---|---|"
-            if [ -s runner-phases.txt ] && [ -s top-samples.txt ]; then
-              while read -r phase _ start end; do
-                awk -v p="$phase" -v s="$start" -v e="$end" -v ns="$NS" \
-                  '$1 >= s && $1 <= e && $2 == ns && $3 ~ /server/ { c = $4; m = $5; sub(/m$/, "", c); sub(/Mi$/, "", m); n[$3]++
-                     if (c + 0 > cpu[$3]) cpu[$3] = c + 0; if (m + 0 > mem[$3]) mem[$3] = m + 0 }
-                   END { for (k in n) printf "| %s | %s | %d m | %d Mi | %d |\n", p, k, cpu[k], mem[k], n[k] }' top-samples.txt | sort
-              done < runner-phases.txt
+            if [ "$PASS" = gates ]; then
+              node scripts/k6-summary.ts "smoke (health, instance)=smoke-summary.json" "chart journeys=journeys-summary.json" \
+                "gates=gates-summary.json" "race=race-summary.json" "runners 100=runners-100-summary.json" \
+                "runners 500=runners-500-summary.json" || echo "(no k6 summary)"
+              echo
+              echo "| runners phase | server pod | peak CPU | peak memory | samples |"
+              echo "|---|---|---|---|---|"
+              if [ -s runner-phases.txt ] && [ -s top-samples.txt ]; then
+                while read -r phase _ start end; do
+                  awk -v p="$phase" -v s="$start" -v e="$end" -v ns="$NS" \
+                    '$1 >= s && $1 <= e && $2 == ns && $3 ~ /server/ { c = $4; m = $5; sub(/m$/, "", c); sub(/Mi$/, "", m); n[$3]++
+                       if (c + 0 > cpu[$3]) cpu[$3] = c + 0; if (m + 0 > mem[$3]) mem[$3] = m + 0 }
+                     END { for (k in n) printf "| %s | %s | %d m | %d Mi | %d |\n", p, k, cpu[k], mem[k], n[k] }' top-samples.txt | sort
+                done < runner-phases.txt
+              else
+                echo "| (not run) | | | | |"
+              fi
+              echo
+              echo "gateway and relay: not in this leg"
             else
-              echo "| (not run) | | | | |"
+              ramp=(); for n in $STREAM_RAMP; do ramp+=("$n streams=streams-$n-summary.json"); done
+              node scripts/k6-summary.ts "smoke (health, instance)=smoke-summary.json" "chart journeys=journeys-summary.json" \
+                "inference=inference-summary.json" "cut streams=cut-summary.json" "mcp relay=mcp-summary.json" \
+                "${ramp[@]}" || echo "(no k6 summary)"
+              echo
+              echo "gateway and relay: inference $RELAY_INFERENCE, mcp $RELAY_MCP${RELAY_REASON:+ ($RELAY_REASON)}"
+              echo
+              node scripts/relay-summary.ts inference-summary.json top-samples.txt phases.txt 2 || echo "(no relay summary)"
+              echo
+              echo "| server process | samples | most open descriptors | highest descriptor |"
+              echo "|---|---|---|---|"
+              if [ -s server-watch/fds.txt ]; then
+                awk '{ k = $2; n[k]++; if ($3 > o[k]) o[k] = $3; if ($4 > h[k]) h[k] = $4 }
+                     END { for (k in n) printf "| pid %s | %d | %d | %d |\n", k, n[k], o[k], h[k] }' server-watch/fds.txt | sort -t' ' -k3n
+              else
+                echo "| (no sample: nothing measured) | | | |"
+              fi
             fi
-            echo
-            echo "gateway and relay: ${RELAY:-not run}"
-            echo
-            node scripts/relay-summary.ts inference-summary.json top-samples.txt phases.txt 2 || echo "(no relay summary)"
             echo
             echo "| pod | peak CPU | peak memory | samples |"
             echo "|---|---|---|---|"
@@ -618,6 +673,23 @@ jobs:
               -o custom-columns='P:.metadata.name,R:.status.containerStatuses[*].restartCount,T:.status.containerStatuses[*].state.terminated.reason,L:.status.containerStatuses[*].lastState.terminated.reason' \
               2>/dev/null | awk '{ printf "| %s | %s | %s | %s |\n", $1, $2, ($3 == "<none>" ? "" : $3), ($4 == "<none>" ? "" : $4) }' || true
           } | tee -a "$GITHUB_STEP_SUMMARY"
+      # A relay leg whose setup failed measured nothing: it must not end green (run 41618451768 did, its sign-in refused
+      # by ostrom-server#176).
+      - name: The relay leg measured the gateway (and says whether it measured the MCP relay)
+        if: always() && matrix.pass == 'relay'
+        env:
+          INFERENCE: ${{ steps.relaysetup.outputs.inference }}
+          MCP: ${{ steps.relaysetup.outputs.mcp }}
+          REASON: ${{ steps.relaysetup.outputs.reason }}
+        run: |
+          # The gateway is the leg's core: without it nothing was measured. The MCP half may be skipped on purpose (its CA
+          # step never fails the job): a warning, and the run is not a proof of the MCP relay.
+          if [ "$INFERENCE" != true ]; then
+            echo "::error title=relay setup::inference ${INFERENCE:-?}, mcp ${MCP:-?}: ${REASON:-no reason given}"; exit 1
+          fi
+          if [ "$MCP" != true ]; then
+            echo "::warning title=relay setup::the MCP relay was not measured: ${REASON:-no reason given}"
+          fi
       - name: Gateway overhead under 15 ms at p95 (first byte and end, JSON and stream)
         if: always() && steps.relaysetup.outputs.inference == 'true'
         run: node scripts/relay-summary.ts --check inference-summary.json top-samples.txt phases.txt 2 > /dev/null
@@ -641,7 +713,8 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: chart-load-k6
-          path: "*-summary.json\ntop-samples.txt\nphases.txt\nrunner-phases.txt"
+          # The gates leg keeps the artifact's name of before; the relay leg's has its own.
+          name: chart-load-k6${{ matrix.pass == 'relay' && '-relay' || '' }}
+          path: "*-summary.json\ntop-samples.txt\nphases.txt\nrunner-phases.txt\nserver-watch/"
           retention-days: 7
           if-no-files-found: ignore

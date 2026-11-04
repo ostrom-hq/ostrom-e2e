@@ -15,6 +15,8 @@ import { call, email, orgOf, orgsUnavailable, signIn } from '../scenarios/org.ts
 const MCP_URL = (process.env['OSTROM_LOAD_FAKE_MCP_URL'] ?? '').replace(/\/$/, '');
 const DOWN_URL = process.env['OSTROM_LOAD_FAKE_MCP_DOWN_URL'] ?? '';
 const MODEL = process.env['OSTROM_LOAD_MODEL'] ?? 'claude-opus-5';
+// A probe that hangs (a port-forward stalled without closing) ends in a reason, not in the job's timeout.
+const PROBE_TIMEOUT_MS = 60_000;
 const out = (file: string | undefined, line: string) => (file ? appendFileSync(file, `${line}\n`) : console.log(line));
 
 interface Ready {
@@ -28,6 +30,7 @@ const bearer = (token: string) => ({ authorization: `Bearer ${token}`, 'content-
 async function inferenceWorks(token: string): Promise<string> {
   const r = await fetch(`${SERVER_URL.replace(/\/$/, '')}/api/v1/inference/v1/messages`, {
     method: 'POST',
+    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     headers: { ...bearer(token), 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model: MODEL, max_tokens: 16, messages: [{ role: 'user', content: 'hi' }], ostrom_fake: { chunks: 1 } }),
   });
@@ -45,6 +48,7 @@ async function mcpWorks(token: string, owner: Parameters<typeof call>[0]): Promi
   }
   const r = await fetch(`${SERVER_URL.replace(/\/$/, '')}/api/v1/mcp/fast`, {
     method: 'POST',
+    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     headers: { ...bearer(token), accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
   });
@@ -70,14 +74,36 @@ async function setup(): Promise<Ready> {
   return { inference: inference === '', mcp: mcp === '', reasons: [inference, mcp].filter((r) => r !== '') };
 }
 
+function report(ready: Ready): void {
+  const reason = ready.reasons.join('; ').replaceAll('\n', ' ').slice(0, 500);
+  out(process.env['GITHUB_OUTPUT'], `inference=${ready.inference}`);
+  out(process.env['GITHUB_OUTPUT'], `mcp=${ready.mcp}`);
+  out(process.env['GITHUB_OUTPUT'], `reason=${reason}`);
+  if (reason) console.log(`::notice title=relay load tests::${reason}`);
+}
+
+// A rejection outside `setup`'s awaits (a request of a helper left running) still ends in a reason, never in a failed
+// step (run 41549238361: "fetch failed, other side closed", the server pod behind the port-forward OOMKilled).
+// Set only once a report is written: a report that throws still leaves this path to write one.
+let reported = false;
+const fail = (error: unknown) => {
+  if (!reported) {
+    try {
+      report({ inference: false, mcp: false, reasons: [`setup failed: ${String(error)}`] });
+    } catch (again) {
+      console.log(`::error title=relay load tests::no output written: ${String(again)}`);
+    }
+  }
+  process.exit(0);
+};
+process.on('unhandledRejection', fail);
+process.on('uncaughtException', fail);
+
 let ready: Ready;
 try {
   ready = await setup();
 } catch (error) {
   ready = { inference: false, mcp: false, reasons: [`setup failed: ${String(error)}`] };
 }
-const reason = ready.reasons.join('; ').replaceAll('\n', ' ').slice(0, 500);
-out(process.env['GITHUB_OUTPUT'], `inference=${ready.inference}`);
-out(process.env['GITHUB_OUTPUT'], `mcp=${ready.mcp}`);
-out(process.env['GITHUB_OUTPUT'], `reason=${reason}`);
-if (reason) console.log(`::notice title=relay load tests::${reason}`);
+report(ready);
+reported = true;
