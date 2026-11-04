@@ -1454,8 +1454,8 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-RECEIPT-001 — `ostrom verify` d'un reçu de porte, hors ligne
 
-- Étapes : Après E2E-GATE-001, `OSTROM_URL` pointant sur un port fermé, `ostrom verify <receipt>`.
-- Attendu : `VERIFIED offline`, exit 0 ; chaîne des oui vérifiée (« approved by X, the same in both receipts »).
+- Étapes : Après E2E-GATE-001, `OSTROM_URL` pointant sur un port fermé, `ostrom verify <receipt> --org <id de l'organisation>` (depuis ostrom-cli#127, l'organisation signée dans le reçu, `orgId` d'ostrom-server#327, est vérifiée : sans organisation nommée, le reçu est « incomplet », exit 2), puis le même reçu avec `--org` d'une autre organisation.
+- Attendu : `VERIFIED offline`, exit 0 ; chaîne des oui vérifiée (« approved by X, the same in both receipts ») ; pour une autre organisation, exit 1, sans dire celle du reçu.
 - Surfaces : CLI
 - Source : proto/COORD/GATE-GITHUB.md (t = 50,3 s) ; proto/COORD/VERIF-LANCEUR.md §1 (gate → hook + oui + reçu) ; cli/COORD/CLI.md §1a (verify)
 - Priorité : jalon

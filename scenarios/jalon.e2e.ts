@@ -5,6 +5,7 @@
 // No switch to set: each describe probes the server and switches itself on the day its pieces are on main
 // (login: ostrom-server#62 on top of ostrom-cli#40; journey: ostrom-server#43 and #26). Until then it is skipped, and
 // the reason is in its title.
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -237,10 +238,18 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     // the server gave it is saved to a file, then checked with no server reachable, on the key pinned at first use.
     const file = join(w.dev.cli.home, 'gate-receipt.json');
     writeFileSync(file, String(receiptJson));
-    const offline = await w.dev.cli.ostrom(['verify', file], { env: { OSTROM_URL: 'http://127.0.0.1:9' } });
-    expect(offline.code, offline.stderr).toBe(0);
+    // Since ostrom-cli#127 (4bd9e538) the organisation the receipt was signed for (orgId, ostrom-server#327) is checked
+    // too, against the one named by --org, OSTROM_ORG or `ostrom init`: none named is « incomplete » (exit 2). The
+    // milestone's organisation is named by its id, which needs no lookup offline.
+    const unreachable = { env: { OSTROM_URL: 'http://127.0.0.1:9' } };
+    const offline = await w.dev.cli.ostrom(['verify', file, '--org', w.orgId], unreachable);
+    expect(offline.code, `${offline.stdout}${offline.stderr}`).toBe(0);
     expect(offline.stdout).toMatch(/VERIFIED/);
     expect(offline.stdout).toContain(w.rev.login);
+    // The same receipt is not valid for another organisation (exit 1), and the one it was signed for is never said.
+    const elsewhere = await w.dev.cli.ostrom(['verify', file, '--org', randomUUID()], unreachable);
+    expect(elsewhere.code, `${elsewhere.stdout}${elsewhere.stderr}`).toBe(1);
+    expect(elsewhere.stdout).not.toContain(w.orgId);
   }, 60_000);
 
   it('E2E-CLAUDE-003 — the gate hook starts within budget on an ordinary call', async () => {
