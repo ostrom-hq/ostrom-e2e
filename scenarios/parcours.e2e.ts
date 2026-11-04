@@ -5,7 +5,7 @@
 // (AUTH, LOGIN, YES, ISO, BILL, GATE) are not repeated here: the mapping is at the top of the PARC section of
 // SCENARIOS.md. Screens (web, app) are out of the bench's scope: each scenario proves the server route the screen reads.
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Caller } from '../src/isolation.ts';
@@ -1042,7 +1042,7 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     await needsCredential('POST', `/api/v1/runs/${id}/cancel`);
   }, 180_000);
 
-  it.skipIf(W022P !== '')(named('E2E-PARC-022 — 4.1 a run waits for its question, then plays a child run of another workflow to its end; a cancelled one withdraws its wait', W022P), async (context) => {
+  it.skipIf(W022P !== '')(named('E2E-PARC-022 — 4.1 a run waits for its question, then a check follows its answer and a child run of another workflow plays to its end; a cancelled one withdraws its wait', W022P), async () => {
     const a = await owner('parc-022-w');
     // The wait's assignee is another member, who answers it from their own waits.
     const reviewer = await invited(a, 'parc-022-wr');
@@ -1057,9 +1057,10 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     const question = { title: 'Ship it?', fields: [{ id: 'note', type: 'text', label: 'Note' }], actions: [{ id: 'ship', label: 'Ship' }, { id: 'hold', label: 'Hold' }] };
     const nodes = [
       { id: 'ask', kind: 'wait', label: 'Ask', approvers: [login], wait: question },
+      { id: 'verdict', kind: 'check', label: 'Shipped?', condition: { step: 'ask', path: 'outcome', op: 'equals', value: 'ship' } },
       { id: 'call', kind: 'workflow', label: 'Build', workflowId: child, arguments: { target: '{{inputs.branch}}' } },
     ];
-    const edges = [{ from: 'ask', to: 'call', on: 'ship' }];
+    const edges = [{ from: 'ask', to: 'verdict', on: 'ship' }, { from: 'verdict', to: 'call', on: 'true' }];
     const inputs = [{ id: 'branch', label: 'Branch', required: true }];
     const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(parent, 'Parc 022 waits', 'accepted', { nodes, edges, start: 'ask', inputs }));
     expect(made.status, JSON.stringify(made.body)).toBe(201);
@@ -1072,15 +1073,6 @@ describe('E2E-PARC: 4. workflows and automations', () => {
 
     // 1. The wait node asks its question of the reviewer, for the run; the run waits on it.
     const asked = await runUntil(a.c, id, (x) => x['status'] !== 'queued' && x['status'] !== 'running');
-    const failure = String(asked['failure'] ?? '');
-    if (failure.includes('does not play wait nodes yet')) {
-      // TEMPORARY (removed right after the server's merge): visible in the run, never a silent pass.
-      const why = 'E2E-PARC-022 (wait, workflow) skipped: the server does not play wait and workflow nodes yet (PARCOURS 4.1)';
-      console.log(`\n::warning title=E2E-PARC-022 skipped::${why}`);
-      const summary = process.env['GITHUB_STEP_SUMMARY'];
-      if (summary) appendFileSync(summary, `- :warning: ${why}\n`);
-      context.skip(why);
-    }
     expect(asked, JSON.stringify(asked)).toMatchObject({ status: 'waiting', currentNodeId: 'ask' });
     const visit = (asked['visits'] as Record<string, unknown>[])[0];
     expect(visit).toMatchObject({ seq: 1, nodeId: 'ask', kind: 'wait', status: 'waiting' });
@@ -1094,10 +1086,11 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect(answered.status, JSON.stringify(answered.body)).toBeLessThan(300);
     const ended = await runUntil(a.c, id, (x) => x['status'] !== 'waiting' && x['status'] !== 'running');
     expect(ended['status'], JSON.stringify(ended)).toBe('succeeded');
-    const [ask, call1] = ended['visits'] as Record<string, unknown>[];
+    const [ask, verdict, call1] = ended['visits'] as Record<string, unknown>[];
     expect(ask).toMatchObject({ nodeId: 'ask', status: 'done', outcome: 'ship' });
     expect(JSON.parse(String(ask?.['output']))).toEqual({ note: 'go' });
-    expect(call1).toMatchObject({ seq: 2, nodeId: 'call', kind: 'workflow', status: 'done', outcome: 'next' });
+    expect(verdict).toMatchObject({ seq: 2, nodeId: 'verdict', kind: 'check', status: 'done', outcome: 'true' });
+    expect(call1).toMatchObject({ seq: 3, nodeId: 'call', kind: 'workflow', status: 'done', outcome: 'next' });
     const childId = call1?.['childRunId'] as string;
     const sub = await call(a.c, 'GET', `/api/v1/runs/${childId}`);
     expect(sub.status, JSON.stringify(sub.body)).toBe(200);
