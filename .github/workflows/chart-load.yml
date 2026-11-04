@@ -2,10 +2,12 @@
 # chart in a kind cluster (built-in PostgreSQL, `ostrom-server migrate` init container, 2 server replicas, ingress-nginx,
 # namespace under the restricted Pod Security standard), loaded by QA's k6 scripts through the ingress. The job
 # summary gives p95/p99, error rate and requests/s per script, and the peak CPU and memory of every pod (what the
-# chart's `resources` are set from). The inference gateway and the MCP relay are loaded against fake upstreams in a
-# namespace of their own (src/fake-upstreams.ts): the gateway's overhead against the fake called directly, the memory
-# of open streams, a client that leaves mid-stream, and MCP servers that are slow or down.
-# Not on pull requests: the organisation runs a single `ci` job per PR.
+# chart's `resources` are set from). The server sends its metrics to an OpenTelemetry Collector and a Prometheus in the
+# cluster, where the queries of ostrom-infra's alerts and product dashboard are run (scripts/observability-check.ts).
+# The inference gateway and the MCP relay are loaded against fake upstreams in a namespace of their own
+# (src/fake-upstreams.ts): the gateway's overhead against the fake called directly, the memory of open streams, a client
+# that leaves mid-stream, and MCP servers that are slow or down. By hand, `server_ref` builds another server and
+# `helm_ref` installs another chart. Not on pull requests: the organisation runs a single `ci` job per PR.
 name: Chart load
 on:
   push:
@@ -13,6 +15,19 @@ on:
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
+    inputs:
+      server_ref:
+        description: "ostrom-server branch, tag or commit to build (default: main)"
+        required: false
+        default: main
+      helm_ref:
+        description: "ostrom-helm branch, tag or commit whose chart is installed (default: main)"
+        required: false
+        default: main
+      observability_required:
+        description: "Ids of scripts/observability-check.ts that must see data (comma-separated)"
+        required: false
+        default: ""
 # A load pass gates nothing: a newer run of the same ref replaces the one in progress (runners are scarce).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -34,11 +49,11 @@ jobs:
         with: { persist-credentials: false }
       # The server needs ostrom-core next to its checkout (ostrom.core.local): GitHub Packages of another repository
       # are not readable from here, like in ostrom-server's own CI (JOURNAL 05:50).
-      - name: Checkout ostrom-server main
+      - name: Checkout ostrom-server (main, or the dispatch's server_ref)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-server
-          ref: main
+          ref: ${{ inputs.server_ref || 'main' }}
           ssh-key: ${{ secrets.DEPLOY_KEY_SERVER }}
           path: .ostrom/server
           persist-credentials: false
@@ -66,6 +81,7 @@ jobs:
           database-url: postgresql://127.0.0.1:1/none
           required: "false"
       - name: The image is built
+        id: image
         env:
           SHA: ${{ steps.server.outputs.sha }}
         run: |
@@ -95,11 +111,11 @@ jobs:
           mkdir -p image && cat system.crt ca.crt > image/bundle.crt
           printf 'FROM ostrom-server:e2e\nCOPY bundle.crt /etc/ssl/certs/ca-certificates.crt\n' > image/Dockerfile
           docker build -q -t ostrom-server:e2e-load image
-      - name: Checkout ostrom-helm main
+      - name: Checkout ostrom-helm (main, or the dispatch's helm_ref)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-helm
-          ref: main
+          ref: ${{ inputs.helm_ref || 'main' }}
           ssh-key: ${{ secrets.DEPLOY_KEY_HELM }}
           path: .ostrom/helm
           persist-credentials: false
@@ -243,6 +259,11 @@ jobs:
       # Test values of the bench, never real ones. Sign-in mails go to a directory (as in ci.yml); billing stays off:
       # no route of the load pass needs it, and the chart's NetworkPolicy denies the server any private address, so an
       # in-cluster stripe-mock would not be reachable anyway. Test accounts are allowed for `seed-test-account`.
+      - name: Metrics path (OpenTelemetry Collector and Prometheus in namespace observe)
+        run: |
+          kubectl apply -f load/observability/kind.yaml
+          kubectl -n observe rollout status deployment/otel-collector --timeout=300s
+          kubectl -n observe rollout status deployment/prometheus --timeout=300s
       - name: helm install charts/ostrom (built-in PostgreSQL, migrate init container, 2 server replicas)
         run: |
           cat > "$RUNNER_TEMP/load-values.yaml" <<'EOF'
@@ -272,6 +293,10 @@ jobs:
             enabled: true
             persistence: { size: 1Gi }
           cloudSessions: { enabled: false }
+          observability:
+            otel:
+              enabled: true
+              endpoint: http://otel-collector.observe.svc.cluster.local:4318
           polis: { enabled: false }
           site: { enabled: false }
           # No console image is built by the bench: the API is reached on its own host only.
@@ -292,6 +317,27 @@ jobs:
             sleep 1
           done
           curl -sS -i "$API_URL/health" || true; exit 1
+      # The chart's body sizes (ingress.bodySizes, S2-46): the ingress refuses a body over the route's size with its own
+      # HTML 413 before the server sees it, and passes a body under it (the server answers itself: no credentials).
+      - name: Body sizes at the ingress (inference 32m, import 8m, every other API route 16m)
+        run: |
+          head -c $((20 * 1024 * 1024)) /dev/zero > "$RUNNER_TEMP/20m"
+          head -c $((9 * 1024 * 1024)) /dev/zero > "$RUNNER_TEMP/9m"
+          head -c $((2 * 1024 * 1024)) /dev/zero > "$RUNNER_TEMP/2m"
+          fail=0
+          probe() { # path, body file, expected: ingress (its 413) or server (anything else)
+            code=$(curl -sS -o "$RUNNER_TEMP/probe.out" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+              --data-binary "@$RUNNER_TEMP/$2" "$API_URL$1")
+            by=server; if [ "$code" = 413 ] && grep -qi nginx "$RUNNER_TEMP/probe.out"; then by=ingress; fi
+            echo "POST $1 ($2): $code, refused by the $by"
+            if [ "$by" != "$3" ]; then echo "::error title=body size::POST $1 with $2: expected the $3, got $code from the $by"; fail=1; fi
+          }
+          probe /api/v1/inference/v1/messages 20m server
+          probe /api/v1/import/teamcode 9m ingress
+          probe /api/v1/import/teamcode 2m server
+          probe /api/v1/tokens 20m ingress
+          probe /api/v1/tokens 9m server
+          exit $fail
       - name: Sample CPU and memory of every pod (kubectl top, every 5 s, in the background)
         run: |
           for _ in $(seq 1 36); do kubectl top pods -n "$NS" >/dev/null 2>&1 && break; sleep 5; done
@@ -399,11 +445,33 @@ jobs:
           OSTROM_E2E_ANSWER_RECEIPT: "1"
         run: |
           # The race runs even when a check of the gates fails: its own thresholds (1 × 200, 99 × 409) are
-          # another question, and its numbers would be lost. The step fails if either run fails.
+          # another question, and its numbers would be lost. The step fails if either run fails. Each phase starts on
+          # Ready server pods and fails on its own restart, with the pod's last termination (reason OOMKilled, Error…,
+          # exit code) and the crashed container's last lines (scripts/server-pods.sh): a pod that died in the gates
+          # phase never passes for a race result.
           rc=0
+          scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts)
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export gates-summary.json load/smoke.js || rc=$?
+          scripts/server-pods.sh crashed "$before" || rc=1
+          scripts/server-pods.sh ready; before=$(scripts/server-pods.sh restarts)
           k6 run --summary-trend-stats "avg,min,med,max,p(90),p(95),p(99)" --summary-export race-summary.json load/race.js || rc=$?
+          scripts/server-pods.sh crashed "$before" || rc=1
+          kubectl -n "$NS" get events --field-selector involvedObject.kind=Pod --sort-by=.lastTimestamp | grep -E 'Unhealthy|Killing|BackOff|OOM' | tail -20 || true
           exit "$rc"
+      # The server exports its metrics every minute: two exports after the last gate, then the queries of the alerts and
+      # of the product dashboard (ostrom-infra), against what the real server sent. Right after the gates, before the
+      # gateway and relay phases: the counters' queries look at the last 5 minutes (run 41614001097).
+      - name: Alert and dashboard queries against the server's metrics
+        if: always() && steps.image.outcome == 'success'
+        env:
+          OSTROM_OBS_REQUIRED: ${{ inputs.observability_required }}
+          OSTROM_PROMETHEUS_URL: http://127.0.0.1:19090
+        run: |
+          sleep 130
+          kubectl -n observe port-forward svc/prometheus 19090:9090 > "$RUNNER_TEMP/prometheus-forward.log" 2>&1 < /dev/null &
+          echo $! > "$RUNNER_TEMP/prometheus-forward.pid"
+          for _ in $(seq 1 30); do curl -fsS "$OSTROM_PROMETHEUS_URL/-/ready" >/dev/null 2>&1 && break; sleep 1; done
+          node scripts/observability-check.ts >> "$GITHUB_STEP_SUMMARY"
       # The member, its token and the MCP servers of the gateway and relay load tests (scripts/relay-load-setup.ts),
       # through the same pod and mail directory as the gate setup.
       - name: Gateway and relay load setup (member token, MCP servers on the fakes)
@@ -470,7 +538,7 @@ jobs:
       - name: Stop the background sampler and port-forward
         if: always()
         run: |
-          for f in top port-forward; do [ -f "$RUNNER_TEMP/$f.pid" ] && kill "$(cat "$RUNNER_TEMP/$f.pid")" 2>/dev/null || true; done
+          for f in top port-forward prometheus-forward; do [ -f "$RUNNER_TEMP/$f.pid" ] && kill "$(cat "$RUNNER_TEMP/$f.pid")" 2>/dev/null || true; done
           mountpoint -q "$RUNNER_TEMP/ostrom-mail" && sudo umount "$RUNNER_TEMP/ostrom-mail" || true
           cp "$RUNNER_TEMP/top.txt" top-samples.txt 2>/dev/null || true
       - name: Summary (k6 per script, peak CPU and memory per pod, restarts)
