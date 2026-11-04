@@ -572,7 +572,7 @@ jobs:
           exit "$rc"
       # Each phase's start and end go to phases.txt, with the streams held open (refused ones hold nothing):
       # scripts/relay-summary.ts reads the pods' memory in each window. The ramp goes past what two replicas hold
-      # (OSTROM_GATEWAY_MAX_OPEN_CALLS each, 26 under 256 Mi, and a memory ceiling): a phase is refused in part, never
+      # (OSTROM_MAX_HELD_CALLS each, 37 under 256 Mi, and a memory ceiling): a phase is refused in part, never
       # cut. A restart of a server pod (an OOM kill at the chart's 256 Mi, or a crash) fails the phase, and the next one
       # starts on Ready pods again.
       - name: k6 open streams (a ramp from 50 to 300, a minute each) and the pods' memory
