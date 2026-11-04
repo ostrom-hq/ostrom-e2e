@@ -86,7 +86,7 @@ describe('FakeGitHub', () => {
     const t = `token ${gh.user('app')}`;
     gh.pull('acme/api', { number: 3, headSha: 'abc', baseRef: 'main', headRef: 'feat' });
     gh.compare('acme/api', 'main', 'abc', ['c1', 'c2']);
-    expect((await call('GET', '/repos/acme/api/pulls/3', { token: t })).json).toEqual({ number: 3, head: { sha: 'abc', ref: 'feat' }, base: { ref: 'main' } });
+    expect((await call('GET', '/repos/acme/api/pulls/3', { token: t })).json).toEqual({ number: 3, state: 'open', merged: false, head: { sha: 'abc', ref: 'feat' }, base: { ref: 'main' }, user: { login: 'octocat' } });
     expect((await call('GET', '/repos/acme/api/pulls/4', { token: t })).status).toBe(404);
     expect((await call('GET', '/repos/acme/api/compare/main...abc', { token: t })).json).toEqual({ commits: [{ sha: 'c1' }, { sha: 'c2' }], total_commits: 2 });
     expect((await call('GET', '/repos/acme/api/compare/main...zzz', { token: t })).status).toBe(404);

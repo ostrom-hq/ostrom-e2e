@@ -309,7 +309,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, faux agent
 - Source : proto/COORD/HOOK-DISPATCH.md §3 (lignes `ls`) et §4 ; proto/launcher/dev/dispatch-bench/bench.py
 - Priorité : jalon
-- Statut : codé : `scenarios/jalon.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks))
+- Statut : codé : `scenarios/jalon.e2e.ts`, lancé dès que serveur et CLI servent le jalon (sondes `loginUnavailable` et `journeyUnavailable`) (bloqué : ostrom-cli (hooks))
 
 ### E2E-CLAUDE-004 — Action gardée dont les checks sont déjà passés : coût constant
 
@@ -686,17 +686,26 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P1
 - Statut : bloqué : ostrom-cli + ostrom-server
 
+### E2E-GATE-016 — PR d'un auteur lié à personne : le oui attend un approbateur lié à un autre GitHub
+
+- Étapes : Politique d'auto-approbation « never ». Le faux GitHub ouvre la PR N d'un compte GitHub (id A) qu'aucune personne Ostrom n'a lié ; l'approbateur `rev-b` n'a lié aucun GitHub, puis lie le compte B, et un troisième lie le compte A.
+- Attendu : Avant le lien, `GET /approvals/{id}` rend `rights.canApprove` = false avec la raison « link your own GitHub account in My account », et `answerApproval` oui répond 403 `github_link_required` ; la porte reste `pending`, le check reste en attente. Un non passe sans lien. Après le lien de B, le oui de `rev-b` passe, check vert. Celui qui a lié A reçoit 403 `self_approval_refused`.
+- Surfaces : serveur, faux GitHub, console (« Mon compte »)
+- Source : décision Q-GATES-G1, option a (03/11) ; ostrom-server feat/gates-unlinked-author
+- Priorité : P1
+- Statut : vert : `scenarios/gate-unlinked.e2e.ts` (ostrom-server#281), sur main : e2e-journey https://github.com/ostrom-hq/ostrom-server/actions/runs/41719276122 (workflow main 7366a16, image `ghcr.io/ostrom-hq/ostrom-server:sha-5e3a267`, e2e main 2b6c0ff, sans filtre, passé ; avant la fusion : run 41673313006 sur une branche)
+
 
 ## BYPASS : Contournements de la porte (audit du 30/10 et trous connus)
 
 ### E2E-BYPASS-001 — Contournement : options avant le verbe `push` (piste 1a)
 
 - Étapes : Catalogue du dépôt ; commandes `git -C /work/core push origin main`, `git -C "/my work/core" push origin HEAD:main`, `git -c core.sshCommand=ssh push origin main`, `git --no-pager push origin main`, `git --git-dir /work/core/.git push origin main`.
-- Attendu : Toutes sont classées `push-main` (porte demandée).
-- Surfaces : serveur (catalogue), faux agent
-- Source : audit/server/src/bridge/audit-gate.test.ts P1 (première boucle) ; commit 4a74f6a0
+- Attendu : Aucune n'atteint l'origine. Les formes simples (`git -C <dépôt>`, `git --no-pager`, le chemin avec espace depuis une session ouverte dans ce dépôt) demandent la porte de main. Celles qui changent où git lit ou envoie sont refusées d'emblée, sans demande : `--git-dir` par le hook (audit A6, `GateTexts.redirected`), `-c core.sshCommand=…` par le serveur. Le même push depuis une session ouverte dans un autre dépôt est refusé aussi (« do not cover »). Assoupli le 03/11 (QA, e2e#65) : « porte demandée pour toutes » est devenu « refusée, par une demande ou d'emblée », pour suivre la décision A6 ; PARCOURS 5.3.
+- Surfaces : serveur (catalogue), CLI (hook), faux agent
+- Source : audit/server/src/bridge/audit-gate.test.ts P1 (première boucle) ; commit 4a74f6a0 ; ostrom-cli `GitInvocation.kt` (audit A6)
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-002 — Contournement : options avant le verbe de déploiement (piste 1b)
 
@@ -732,7 +741,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur, faux agent
 - Source : audit/server/src/bridge/audit-gate.test.ts P2
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-006 — Contournement : git redirigé vers un autre dépôt (piste 3)
 
@@ -905,7 +914,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : CLI, faux agent
 - Source : audit/COORD/AUDIT-PORTE.md A9 ; audit/bridge/test/audit-push.test.mjs (4 cas) ; audit/launcher/tests/audit_push_refs.rs
 - Priorité : jalon
-- Statut : codé : `scenarios/bypass.e2e.ts`, lancé quand `OSTROM_E2E_JALON=1` (bloqué : ostrom-cli (hooks) + ostrom-server (GATES))
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
 
 ### E2E-BYPASS-025 — Contournement A10 : écrire dans une session sans en être le propriétaire
 
@@ -3000,6 +3009,15 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : jalon
 - Statut : codé : `scenarios/identity.e2e.ts` (bloqué : ostrom-server#43 compilateur pour la demande, #41 pour le step-up)
 
+### E2E-AUTH-008 — StepUp de l'app : un oui exige un déverrouillage lié à sa demande, de moins d'une minute, à usage unique
+
+- Étapes : flux accepté avec une porte sur les pushs vers main, l'approbateur nommé. L'approbateur rejoint l'org par lien, puis connecte son téléphone comme l'app (GitHub, PKCE S256 vers `ostrom://auth/callback`, échange du code). Le demandeur pose la question. Sur cette demande : (1) déverrouillage lié à elle, vieilli de 2 min en base (`identity_api_tokens.authenticated_at`), puis oui ; (2) déverrouillage lié à une autre demande, puis oui ; (3) déverrouillage lié à elle, un premier oui sur un autre `shownDigest` (409), puis oui ; (4) déverrouillage lié à elle, puis oui.
+- Attendu : (1), (2) et (3) : 403 `error.type = step_up_required` avec `error.requestBound = true`. (4) : 200, demande `approved`, reçu signé qui nomme le commit.
+- Surfaces : serveur (image), identité, portes, base
+- Source : Q-APP-STEPUP-RISK (audit sécurité de l'app, A-S1) ; ostrom-core#121 ; ostrom-server `fix/stepup-bound-unlock`
+- Priorité : jalon
+- Statut : codé : `scenarios/phone-yes.e2e.ts`, sans mise de côté : un serveur qui accepte l'un des trois oui refusés fait échouer le scénario (le lien est posé par ostrom-server#330).
+
 ## LOAD : Charge (k6)
 
 ### E2E-LOAD-001 — Démarrage à froid du serveur de contrôle
@@ -3102,23 +3120,33 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/40999403849 — `/health` p95 1,31 ms, p99 2,14 ms ; `/api/v1/instance` p95 1,92 ms, p99 3,04 ms ; 0 % d'erreurs sur 6 002 requêtes, 9 003 checks sur 9 003 (`load/smoke.js`, job `ci` d'ostrom-e2e)
 
 
-## DOGFOOD : Le harnais ControlResell en workflows Ostrom (dogfood)
+## DOGFOOD : Le harnais d'une équipe pilote en workflows Ostrom (dogfood)
 
-### E2E-DOGFOOD-001 — Les 8 workflows du harnais CR compilent en paquets signés
 
-- Étapes : compiler les 8 workflows `wf-cr-*.ts` du dogfood (db-perf, deploy, fix-ticket, mcp-guards, pr-workflow, push-guard, review, station) par le compilateur de la réécriture, publier les paquets, `ostrom verify` sur chacun.
+### E2E-LOAD-012 — Rafales sans identifiant puis authentifiées : le serveur tient
+
+- Étapes : k6 `load/burst.js` après la course, dans ci-e2e de chaque PR serveur (image de la PR) : 100 `POST /api/v1/gates` simultanés sans identifiant, puis 100 demandes de porte authentifiées simultanées (actions sans porte).
+- Attendu : 100 × 401 puis 100 × 200, rien d'autre (0 : connexion coupée) ; le conteneur ne s'arrête pas, ne redémarre pas, n'est pas tué (OOM) ; le pic mémoire du conteneur (`memory.peak` de son cgroup) reste sous la limite du chart (512Mi).
+- Surfaces : serveur (image), PostgreSQL (k6, cgroup du conteneur)
+- Source : consigne du coordinateur 14:0x (P1 de 13:5x : 100 requêtes sans identifiant tuent le serveur à 512Mi, propriétaire RELAY, ostrom-server#266)
+- Priorité : P1
+- Statut : codé ; en avertissement dans ci-e2e jusqu'à la fusion de ostrom-server#266, bloquant ensuite
+
+### E2E-DOGFOOD-001 — Les 8 workflows du harnais pilote compilent en paquets signés
+
+- Étapes : compiler les 8 workflows `wf-*.ts` du dogfood (performance de la base, déploiement, correction d'un ticket, gardes MCP, flux de PR, garde du push, revue, poste) par le compilateur de la réécriture, publier les paquets, `ostrom verify` sur chacun.
 - Attendu : 4 paquets (au moins) signés et vérifiés hors ligne ; le résumé de chaque paquet liste les nœuds compilés ; aucune porte sans action ne compile.
 - Surfaces : serveur, CLI
-- Source : dogfood/examples/controlresell/README et COUVERTURE.md (`out/`, `summary.json`) ; JOURNAL du 30/10 02:05
+- Source : dogfood/examples/pilote/README et COUVERTURE.md (`out/`, `summary.json`) ; JOURNAL du 30/10 02:05
 - Priorité : P1
 - Statut : bloqué : ostrom-server (compilateur) + ostrom-core (modèle de workflow)
 
-### E2E-DOGFOOD-002 — `behave.mjs` porté : chaque hook CR rejoué par le faux agent donne la décision attendue
+### E2E-DOGFOOD-002 — `behave.mjs` porté : chaque hook du harnais pilote rejoué par le faux agent donne la décision attendue
 
 - Étapes : sur des dépôts jetables, le faux agent rejoue les actions de `behave.mjs` (push, deploy, merge, appels MCP gardés…) sous `ostrom claude` avec les paquets du dogfood.
-- Attendu : les 27 cas de `out/behave.json` donnent la même décision qu'au prototype ; puis la cible de la réécriture : 85 % des hooks CR appliqués (contre 40 % au prototype), mesurée et publiée dans RAPPORT.md.
+- Attendu : les 27 cas de `out/behave.json` donnent la même décision qu'au prototype ; puis la cible de la réécriture : 85 % des hooks du harnais pilote appliqués (contre 40 % au prototype), mesurée et publiée dans RAPPORT.md.
 - Surfaces : CLI, serveur, faux agent
-- Source : dogfood/examples/controlresell/behave.mjs, COUVERTURE.md § « Ce que le hook fait vraiment » et § 4 (5 extensions)
+- Source : dogfood/examples/pilote/behave.mjs, COUVERTURE.md § « Ce que le hook fait vraiment » et § 4 (5 extensions)
 - Priorité : P1
 - Statut : bloqué : ostrom-cli (hooks) + ostrom-server (paquets)
 
@@ -3299,15 +3327,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | 1.2 Connexion GitHub | E2E-AUTH-002 |
 | 1.3 Première connexion, création du compte | E2E-AUTH-001, E2E-AUTH-002 (le compte naît à la première connexion) |
 | 2.1 Onboarding guidé | aucune route serveur ; `ostrom init` en attente (famille HARNESS) |
-| 2.11 Révocation et déconnexion | E2E-AUTH-004 (complété par E2E-PARC-010 et 011) |
+| 2.11 Révocation et déconnexion | E2E-AUTH-004 (complété par E2E-PARC-010, 011, 041 et 042) |
 | 5.1 `ostrom login` (appareil) | E2E-LOGIN-001, E2E-AUTH-003 |
 | 5.3 Action protégée, la porte s'ouvre (boucle CLI) | E2E-GATE-001 (complété par E2E-PARC-013 et 027) |
-| 5.4 Le second membre dit oui (step-up) | E2E-YES-001, E2E-AUTH-007 |
+| 5.4 Le second membre dit oui (step-up) | E2E-YES-001, E2E-AUTH-007, E2E-AUTH-008 |
 | 5.6 Auto-approbation refusée | E2E-YES-003 |
 | 5.8 Isolation entre deux orgs | E2E-ISO-001, E2E-ISO-002 |
 | 6.5 Facturation : plan, checkout, portail | E2E-BILL-005, E2E-BILL-006, E2E-BILL-007 |
 
-Étapes de ce chapitre : 2.2 → PARC-001 ; 2.3 → 002 ; 2.4 → 003 ; 2.5 → 004 ; 2.6 → 005 ; 2.7 → 006 ; 2.8 → 007 ; 2.9 → 008 ; 2.10 → 009 ; 2.11 → 010, 011 ; 3.1 → 012 ; 3.2 → 013 ; 3.3 → 014, 015 ; 3.4 → 016, 017 ; 3.5 → 018, 019 ; 3.6 → 020 ; 4.1 → 021, 022 ; 4.2 → 023 ; 4.3 → 024 ; 5.2 → 025, 026, 017 ; 5.3 → 027 ; 5.5 → 028 ; 5.7 → 029, 030 ; 6.1 → 031 ; 6.2 → 032 ; 6.3 → 033 ; 6.4 → 034, 019 ; 6.6 → 035 ; 6.7 → 036, 037.
+Étapes de ce chapitre : 2.2 → PARC-001 ; 2.3 → 002 ; 2.4 → 003 ; 2.5 → 004 ; 2.6 → 005 ; 2.7 → 006 ; 2.8 → 007 ; 2.9 → 008 ; 2.10 → 009 ; 2.11 → 010, 011, 041, 042 ; 3.1 → 012 ; 3.2 → 013 ; 3.3 → 014, 015 ; 3.4 → 016, 017 ; 3.5 → 018, 019, 047 ; 3.6 → 020 ; 4.1 → 021, 022 ; 4.2 → 023 ; 4.3 → 024 ; 5.2 → 025, 026, 017 ; 5.3 → 027 ; 5.5 → 028 ; 5.7 → 029, 030 ; 6.1 → 031 ; 6.2 → 032 ; 6.3 → 033 ; 6.4 → 034, 019 ; 6.6 → 035 ; 6.7 → 036, 037.
 
 ### E2E-PARC-001 — 2.2 Créer l'organisation et la relire, propriétaire
 
@@ -3380,6 +3408,24 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Source : `demo/PARCOURS.md` 2.9
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-039 — 2.8 Groupes : un groupe de membres par login, une pause, un retrait ; une autre org ne voit rien
+
+- Étapes : Le propriétaire invite un membre et crée un groupe qui le nomme par login (`POST /api/v1/groups`) ; le membre lit la liste et le groupe, puis essaie d'en créer un et d'ajouter quelqu'un ; le propriétaire essaie le même nom en majuscules, un compte que l'org ne partage pas et un login hors de l'org ; il met le membre en pause jusqu'en 2099, renomme le groupe (`PATCH`), retire le membre (deux fois), le remet (`PUT`) ; une autre org lit, renomme et supprime le groupe ; le propriétaire le supprime.
+- Attendu : 201 `{name, members: [login], accounts: [], paused: []}` ; le membre lit (200), écrit 403 ; 409 pour le nom, 400 pour le compte et le login ; la pause se lit `paused: [{login, until}]` ; le second retrait 404 ; l'autre org 404 partout et ne voit pas l'id dans sa liste ; supprimé, 404 ; 401 sans identifiant.
+- Surfaces : serveur (l'écran console des groupes n'existe pas encore : sa spec est au JOURNAL de coordination)
+- Source : `demo/PARCOURS.md` 2.8 (groupes)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes quand les routes `/api/v1/groups` sont servies)
+
+### E2E-PARC-043 — 2.8 Prêt d'un compte à un groupe : ses membres hors pause l'utilisent, personne d'autre, pas même son propriétaire
+
+- Étapes : Le propriétaire invite deux membres, crée un groupe qui nomme le premier, écrit un secret et prête un abonnement Claude au groupe seul (`POST /api/v1/accounts` avec `credentialSecret` et `sharedWith: ["group:<id>"]`) ; chacun (membre du groupe, membre hors du groupe, propriétaire) appelle la passerelle (`POST /api/v1/inference/v1/messages`) avec un jeton personnel `inference:use`, le faux fournisseur de `src/fake-tokens.ts` tenant l'API d'Anthropic ; le propriétaire met le membre en pause jusqu'en 2099, puis jusqu'à un instant passé (la reprise) ; une autre org crée son groupe, que le propriétaire essaie de nommer dans `sharedWith` (`PATCH` et enrôlement), avec aussi un id mal formé.
+- Attendu : 201, `sharedWith: ["group:<id>"]`, et le compte dans `accounts` du groupe ; le membre du groupe est servi (200, l'appel arrive au fournisseur avec le jeton du secret) ; le membre hors du groupe et le propriétaire ne le sont pas (rien n'arrive au fournisseur) ; en pause, plus servi, servi de nouveau à la reprise ; le groupe de l'autre org et l'id mal formé : 400, le compte garde son groupe et le groupe de l'autre org reste sans compte ; l'autre org modifie le compte : 404.
+- Surfaces : serveur (passerelle, pool des comptes partagés)
+- Source : `demo/PARCOURS.md` 2.8 (prêt aux groupes, ostrom-server#245)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes ; demande `OSTROM_E2E_MAIL_DIR` et le faux fournisseur, `OSTROM_E2E_FAKE_TOKENS_PORT`)
 
 ### E2E-PARC-009 — 2.10 Secret : écrit, tourné, supprimé ; la valeur n'est jamais relue
 
@@ -3479,8 +3525,8 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-PARC-018 — 3.5 Budget de l'org : réglé, listé avec sa période, lu comme budget du membre
 
-- Étapes : Le propriétaire règle `PUT /api/v1/budgets` `{scope: org, usdPerMonth: 42, hardStop: true}`, lit `GET /budgets` et `GET /budgets/me` ; une autre org lit ses budgets ; trois formes refusées.
-- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; budget par jour, budget sans arrêt et portée inconnue : 400.
+- Étapes : Le propriétaire règle `PUT /api/v1/budgets` `{scope: org, usdPerMonth: 42, hardStop: true}`, lit `GET /budgets` et `GET /budgets/me` ; une autre org lit ses budgets ; il règle le budget d'une personne, la sienne, nommée par l'`id` de `GET /orgs/{org}/members`, par jour et qui prévient seulement (`{scope: member, subject: <id>, usdPerDay: 20, hardStop: false}`) ; deux formes refusées.
+- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; le budget de la personne : 200, listé sous son id avec `usdPerDay: 20`, `hardStop: false` et sans `usdPerMonth`, invisible de l'autre org (ostrom-server#230, 629ae71) ; portée inconnue : 400 ; budget sur un workflow que l'org n'a pas : 404 (ostrom-server#337, 2869359).
 - Surfaces : serveur (l'écran `/spend` lit ces routes)
 - Source : `demo/PARCOURS.md` 3.5
 - Priorité : P1
@@ -3504,23 +3550,32 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`GET /decisions` planned) ; forme du contrat `openapi.yaml`)
 
+### E2E-PARC-040 — 3.6 Journal d'audit de l'org : propriétaire et admin, refus au membre, rien d'une autre org
+
+- Étapes : Le propriétaire d'une org neuve invite une personne, qui rejoint ; il lit `GET /api/v1/audit`, puis le filtre `?event=` de la ligne du membre ; le membre lit la même route ; le propriétaire le fait admin (`PATCH /orgs/{org}/members/{login}`) et il relit ; le propriétaire d'une autre org lit en nommant la première (`Ostrom-Org`), puis son propre journal.
+- Attendu : 200, lignes `{id, at, event, actor, subject, meta}` de la plus récente à la plus ancienne, dont `org:<id>` (création) et une ligne `member:…` (l'arrivée du membre) ; le filtre ne rend que cet événement ; 403 au membre simple ; 200 une fois admin ; 404 pour l'autre org, et son propre journal ne nomme ni la première org ni ses membres ; 401 sans identifiant.
+- Surfaces : serveur (l'écran `/audit` lit cette route)
+- Source : `demo/PARCOURS.md` 3.6 ; ostrom-server#131 (`GET /audit`)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
+
 ### E2E-PARC-021 — 4.1 Workflow : créé, édité avec sa version, listé, supprimé ; le paquet courant
 
-- Étapes : Le propriétaire crée un workflow (`POST /api/v1/workflows` `{workflow}`), l'édite avec `expectedVersion`, rejoue la même version, liste, lit `GET /packages/current`, supprime ; une autre org liste.
-- Attendu : La création et l'édition rendent le workflow (nouveau nom) ; la version périmée rend 409 ; l'autre org ne voit pas l'id ; le paquet courant rend 200 ou 404 (aucun paquet compilé), jamais une erreur ; supprimé, il disparaît ; 401 sans identifiant. Hypothèse : le corps de #43 (`SaveWorkflowRequest {workflow, expectedVersion}`), le workflow suivant le schéma `Workflow` du contrat.
+- Étapes : Le propriétaire crée un workflow (`POST /api/v1/workflows` avec le workflow lui-même), l'édite avec `expectedVersion`, rejoue la même version, envoie un `PUT` sur un id que l'org n'a pas, liste, lit `GET /packages/current`, supprime ; une autre org liste.
+- Attendu : La création et l'édition rendent le workflow (nouveau nom) ; la version périmée rend 409 ; le `PUT` d'un id inconnu rend 404 et ne crée rien (ni `GET`, ni la liste ne le montrent) ; l'autre org ne voit pas l'id ; le paquet courant rend 200 ou 404 (aucun paquet compilé), jamais une erreur ; supprimé, il disparaît ; 401 sans identifiant. Hypothèse : le corps de #43 (`SaveWorkflowRequest {workflow, expectedVersion}`), le workflow suivant le schéma `Workflow` du contrat.
 - Surfaces : serveur (`ostrom harness` en attente, non couvert)
 - Source : `demo/PARCOURS.md` 4.1
 - Priorité : jalon
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#43)
 
-### E2E-PARC-022 — 4.1 Exécution d'un workflow, listée sous son workflow et parmi les exécutions
+### E2E-PARC-022 — 4.1 Exécution d'un workflow, listée, jouée jusqu'au bout (agent puis porte ; attente, vérification puis exécution fille), annulée
 
-- Étapes : Le propriétaire crée un workflow, lance `POST /api/v1/workflows/{id}/runs` `{inputs: {}}`, lit `GET /workflows/{id}/runs` et `GET /runs` ; une autre org lit `/runs`.
-- Attendu : 201 `{id, workflowId, workflowName, status, startedBy, source, startedAt}` ; l'exécution est dans les deux listes ; l'autre org ne la voit pas.
-- Surfaces : serveur
+- Étapes : (a) Le propriétaire crée un workflow accepté qui déclare deux entrées (`branch` requise, `note` avec `default` et `maxLength`), lance `POST /api/v1/workflows/{id}/runs` avec une entrée non déclarée, sans l'entrée requise, avec une valeur trop longue, puis `{inputs: {branch}}` ; lit `GET /workflows/{id}/runs`, `GET /runs` et `GET /runs?status=` ; lance un workflow proposé et un id inconnu ; un membre invité lit et lance ; une autre org lit et lance ; sans identifiant. (b) Quand le moteur est servi (`GET /runs/{id}`, `POST /runs/{id}/cancel`) : un workflow `agent` (`build`) → `gate` (`review`, approbateur : un membre invité, jamais celui qui a lancé l'exécution, règle des quatre yeux) → fin ; l'exécution lancée est lue jusqu'à sa session cloud, la session est close (`DELETE /cloud/sessions/{id}` : aucun runner ne la prend sur le banc), la porte est approuvée par l'approbation en attente de ce membre ; une seconde exécution est annulée pendant que son agent travaille, par un membre puis par le propriétaire ; une autre org la lit et l'annule ; sans identifiant.
+- Attendu : (a) 400 pour les trois entrées refusées, rien de lancé ; 201 `WorkflowRun` `{id, workflowId, workflowName, workflowVersion (celle de la création), status: queued, startedBy, source: manual, inputs (le default pris), startedAt}` ; l'exécution est dans les deux listes ; sans moteur elle reste `queued` (dans `status=queued`, pas dans `status=succeeded`), avec le moteur son seul déclencheur n'a rien après lui et elle finit `succeeded`, sans nœud courant (dans `status=succeeded`, plus dans `status=queued`) ; un statut inconnu rend 400 ; le workflow proposé rend 409, l'id inconnu 404 (lancement et liste) ; le membre la lit et reçoit 403 au lancement ; l'autre org ne la voit pas et reçoit 404 sur la liste et le lancement du workflow ; 401 sans identifiant. (b) `running` sur `build`, la visite 1 `agent` porte le `sessionId` de l'exécution, session cloud du propriétaire nommée « <workflow> · Build » ; la session close, la visite 1 est `done`/`next` et l'exécution `waiting` sur la visite 2 `gate` ; le oui (200) la finit `succeeded` (`endedAt`, visites `build done next`, `review done approved`) ; l'annuler ensuite rend 409 ; la seconde : le membre la lit et reçoit 403 à l'annulation, l'autre org 404 aux deux, le propriétaire l'annule (200, `cancelled`, visite `failed`/`cancelled`), une seconde annulation rend 409, et sa session cloud est terminée ; un id inconnu rend 404 ; 401 sans identifiant. (c) Un workflow `wait` (`ask`, posée à un membre invité, actions `ship` et `hold`) → `workflow` (`call`, un autre workflow accepté de l'org, une entrée `target` = `{{inputs.branch}}`) : l'exécution `waiting` sur la visite 1 `wait`, dont l'attente (`waitId`) est ouverte au membre, pour l'exécution (`runId`) ; le membre répond `ship` avec une note : l'exécution finit `succeeded` (visite 1 `done`/`ship`, sortie `{note}` ; visite 2 `workflow` `done`/`next` avec son `childRunId`), l'exécution fille est `succeeded`, `source: workflow`, `parentRunId` du parent, `inputs.target: main` ; l'autre org ne lit ni la fille ni l'attente ; une seconde exécution annulée pendant qu'elle attend voit son attente `cancelled`. Tant que le serveur ne joue pas ces nœuds (l'exécution échoue sur « does not play wait nodes yet »), (c) est sauté avec un avertissement visible dans le run, retiré après la fusion du serveur. Le serveur du banc sert les sessions cloud à toutes les org, pilote `registered` (`OSTROM_RUNNERS_DRIVER`, `OSTROM_RUNNERS_SERVER_URL`, `OSTROM_RUNNERS_ALLOWED_ORGS=*`).
+- Surfaces : serveur (écrans : `/workflows/$id` et la vue des exécutions, WEB-PARCOURS)
 - Source : `demo/PARCOURS.md` 4.1
 - Priorité : P1
-- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR (`/workflows/{id}/runs`, `/runs` planned) ; forme du contrat `openapi.yaml`)
+- Statut : codé : `scenarios/parcours.e2e.ts` ((a) s'allume seul quand ostrom-server sert les trois routes : PR WORKFLOW-RUNS ; (b) quand il sert `getRun` et `cancelRun` : PR du moteur des exécutions  ; (c) en plus quand il joue les nœuds `wait` et `workflow` : PR suivante du moteur ; contrat `openapi.yaml`, `startWorkflowRun`, `listWorkflowRuns`, `listRuns`, `getRun`, `cancelRun`)
 
 ### E2E-PARC-023 — 4.2 Automatisation : créée, éditée, activée, désactivée, essai à blanc, secret tourné, supprimée
 
@@ -3539,6 +3594,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Source : `demo/PARCOURS.md` 4.3
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
+
+### E2E-PARC-044 — 4.3 Jeton d'agent sur le serveur MCP des attentes : sa personne seule, jamais de réponse, segment repris
+
+- Étapes : Le propriétaire invite une personne, qui rejoint ; il lance un agent (`POST /api/v1/launches`), dont le premier hook ouvre la session ; l'agent parle au serveur MCP des attentes (`POST /api/v1/waits/mcp?session=<id>` : `initialize`, `tools/list`, `ask_human`) ; l'autre personne pose au propriétaire une attente sur la même session ; l'agent liste, lit et annule ; il demande à l'autre personne ; il répond par l'API des attentes ; la session finit, une seconde lancée la reprend (segment `<id>~r<n>`) et son agent demande dans ce segment ; une autre org lit l'attente.
+- Attendu : aucun outil de réponse ; l'attente de l'agent est celle du propriétaire, dans la session ; celle de l'autre personne n'est ni listée, ni lue, ni annulée (erreur d'outil, toujours `open`) ; demander à un autre membre est une erreur d'outil ; l'API des attentes refuse le jeton d'agent (403), réponse comprise ; l'agent lit et annule la sienne ; le segment repris pose son attente (`sessionId` = le segment) et n'y voit que la sienne ; l'autre org n'en lit rien. ostrom-server#227.
+- Surfaces : serveur
+- Source : `demo/PARCOURS.md` 4.3
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
 
 ### E2E-PARC-025 — 5.2 Lancement : jeton d'agent, session tenue en vie, vue, close, rouverte
 
@@ -3621,6 +3685,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#72)
 
+### E2E-PARC-045 — 6.3 Lignes de porte du fil d'activité : leur dépôt, le réel d'abord, aucun hors dépôt, rien d'une autre org
+
+- Étapes : Le propriétaire pose une règle dont la porte couvre un push sur main dans tout dépôt ; un jeton demande trois pushes : dans un dépôt déclaré, dans un dépôt déclaré avec un autre `realRepo`, sans dépôt ; il lit `GET /api/v1/activity` ; une autre org lit le sien, puis nomme la première.
+- Attendu : chaque push ouvre une porte `pending` ; la ligne `gate.requested:<id>` porte `repo` = le dépôt déclaré, puis le `realRepo`, et n'a pas le champ `repo` sans dépôt ; le fil de l'autre org ne nomme ni ces dépôts ni ces portes ; 404 en nommant la première org. ostrom-server#226.
+- Surfaces : serveur (l'onglet Activity de l'app)
+- Source : `demo/PARCOURS.md` 6.3
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
+
 ### E2E-PARC-034 — 6.4 Usage d'une org neuve
 
 - Étapes : Une org neuve lit `GET /api/v1/usage`, `/usage/summary` et `/usage/events`.
@@ -3655,8 +3728,53 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur
 - Source : `demo/PARCOURS.md` 6.7
 - Priorité : P1
-- Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : ostrom-server#47)
+- Statut : vert : `scenarios/parcours.e2e.ts`, run https://github.com/ostrom-hq/ostrom-server/actions/runs/41618704932 (image `sha-e3244cc`, ostrom-server#196)
 
+### E2E-PARC-046 — 6.7 Une demande de oui part sur les téléphones vivants de l'approbateur et par e-mail, jamais ailleurs
+
+- Étapes : un propriétaire invite un relecteur (admin) ; le relecteur enregistre un téléphone dans l'org (`POST /api/v1/push-devices`), un deuxième depuis une autre session qu'il ferme (`POST /api/v1/auth/logout`), un troisième dans une autre org dont il est membre ; le propriétaire enregistre le sien. Une règle pose une porte sur un push vers main avec le relecteur pour approbateur ; un jeton `gates:ask` demande la porte. Puis le faux Expo refuse la requête suivante et une deuxième porte est demandée.
+- Attendu : le faux Expo (`src/fake-expo.ts`, port `OSTROM_E2E_FAKE_EXPO_PORT`, serveur lancé avec `OSTROM_EXPO_PUSH_URL`) reçoit un push pour le seul téléphone vivant du relecteur dans l'org de la porte, avec `data = {kind: "approval", approvalId}` de sa demande ; aucun pour le téléphone de la session fermée, celui de l'autre org, ni celui du propriétaire ; un e-mail au relecteur dans `OSTROM_MAIL_DIR` porte le lien `/yes/{approvalId}`. Expo en panne : la porte est en attente tout de suite, l'e-mail part, le push arrive à la relance (5 s) et le refus n'est compté qu'une fois.
+- Surfaces : serveur (image), module `notifications`
+- Source : `demo/PARCOURS.md` 6.7 ; ostrom-server#228 (remplace #47)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume avec `OSTROM_E2E_FAKE_EXPO_PORT` : `e2e-journey.yml` du serveur et `ci.yml`)
+
+
+### E2E-PARC-041 — 2.11 Réglages de l'org : nom et fuseau changés par un admin ; un membre ou un approbateur ne peut pas, une autre org reçoit 404
+
+- Étapes : Le propriétaire invite un admin, un membre et un approbateur. L'admin change le nom et le fuseau (`PATCH /api/v1/orgs/{org}`, `{name, timeZone}`) ; le propriétaire relit l'org par son id, son nom court et sa liste ; il change le fuseau seul en renvoyant le nom court inchangé, puis essaie un autre nom court, un fuseau inconnu, un nom vide. Le membre et l'approbateur tentent un renommage ; le propriétaire d'une autre org aussi, et sur une org qui n'existe pas.
+- Attendu : une org neuve est en `UTC` ; 200 `{id, slug, name, timeZone, role: admin}` pour l'admin, relu tel quel par le propriétaire ; un champ omis ne change pas, le nom court ne change jamais (400 s'il diffère) ; 400 pour un fuseau hors IANA et un nom vide ; 403 avec l'enveloppe d'erreur pour le membre et l'approbateur ; 404 pour l'autre org comme pour une org absente, sans rien de l'org dans la réponse ; rien n'a changé après les refus ; 401 sans identifiant.
+- Surfaces : serveur (l'écran Réglages de la console lit cette route : `settings.spec` d'ostrom-web)
+- Source : `demo/PARCOURS.md` 2.11
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`
+
+### E2E-PARC-042 — 2.11 Suppression de l'org par le propriétaire : plus rien ne se lit, une autre org intacte, la relance sans effet
+
+- Étapes : Le propriétaire invite un membre et un admin et écrit un secret dans son org ; une autre org écrit le sien. Le propriétaire crée un jeton `orgs:write`, qui renomme l'org (`PATCH`). Tentatives de `DELETE /api/v1/orgs/{org}` `{confirm}` : par ce jeton, par le membre, par l'admin, par le propriétaire de l'autre org, par le propriétaire sur l'autre org, avec un nom court mal retapé, sans identifiant. Puis le propriétaire, connecté depuis moins de 5 minutes, supprime avec le bon nom court ; il relance la suppression.
+- Attendu : le contrat n'exige pas de confirmation de gouvernance mais une session de navigateur : le jeton renomme (200) mais ne supprime pas (403, « browser session ») ; 403 pour le membre et pour l'admin (le propriétaire seul) ; 404 pour l'autre org dans les deux sens ; 400 pour un nom court qui ne correspond pas ; 401 sans identifiant ; l'org et ses trois membres se lisent toujours après ces refus. Puis 204 ; pour le propriétaire comme pour le membre, l'org (par id et nom court) et ses membres rendent 404, `GET /orgs` et `GET /me/organizations` rendent 200 sans elle, et ses secrets (`Ostrom-Org`) ne se lisent plus (refus 4xx sans le nom du secret) ; `PATCH` rend 404, par session comme par le jeton. La relance rend 404 ; l'autre org et son secret sont intacts.
+- Surfaces : serveur (l'écran Réglages de la console lit cette route : `settings.spec` d'ostrom-web)
+- Source : `demo/PARCOURS.md` 2.11
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts`. Non joué ici : une connexion de plus de 5 minutes (le banc n'avance pas l'horloge du serveur ; prouvé par `OrgSettingsUseCasesTest` d'ostrom-server)
+
+### E2E-PARC-047 — 3.5 Budget d'une personne par jour : « bloquer » ne refuse qu'elle, « prévenir » laisse passer, se lit dans `/spending` et s'écrit à l'audit
+
+- Étapes : le propriétaire lit son `id` dans `GET /api/v1/orgs/{org}/members` et se met un budget de personne de 1 $ par jour qui bloque (`PUT /api/v1/budgets {scope: member, subject: <id>, usdPerDay: 1, hardStop: true}`) ; un compte Claude partagé ; il lance un agent. Le faux fournisseur (`src/fake-tokens.ts`) facture 300 000 jetons d'entrée (1,50 $) : un appel `max_tokens` 1, la dépense lue jusqu'à 1 $, puis un second appel. Il invite un membre, qui accepte, lance un agent et fait un appel que le faux fournisseur facture 100 000 jetons d'entrée (0,50 $) ; il lit `byPerson` de `GET /api/v1/spending?period=month`. Le propriétaire repasse son budget en « prévenir » (`hardStop: false`, même 1 $ par jour) et refait un appel ; il lit `GET /api/v1/spending?period=month` et `GET /api/v1/audit?event=budget.exceeded`. Une autre org lit ses budgets, sa dépense et son audit.
+- Attendu : le premier appel est servi (200) ; le second est refusé en 429, `rate_limit_error`, « Daily budget reached: your limit of $1.00 a day is spent; it resets on <date>. », `Retry-After` > 0 et au plus un jour, sans atteindre le fournisseur ; l'appel de l'autre membre est servi (200, un second appel au fournisseur) : le compte partagé, créé sans `allowedMembers`, est prêté à toute l'org ; sa dépense (au moins 0,50 $) est comptée sous son `id` dans `byPerson`, et celle du propriétaire n'a pas bougé. En « prévenir », la réponse au `PUT` porte `{scope: member, subject: <id>, usdPerDay: 1, hardStop: false}` et l'appel est servi (200) bien que la journée soit au-delà ; `exceeded` de `/spending` porte `{scope: member, subject: <id>, period: day, usd: 1, hardStop: false}` ; la ligne d'audit `budget.exceeded` existe sous cette personne, `meta` `{scope: member, period: day, action: warn, limit_usd: "1"}`. L'autre org ne voit ni le budget, ni le dépassement, ni la ligne.
+- Surfaces : serveur (image), gateway, budgets, rapports, audit, partage
+- Source : `demo/PARCOURS.md` 3.5 ; ostrom-server#230 (629ae71, budget d'une personne, jour, `warn`) ; ostrom-server#300 (4f50dd5) ; contrat core#86
+- Priorité : P1
+- Statut : codé : `scenarios/budget.e2e.ts` (s'allume avec le faux fournisseur et `OSTROM_E2E_MAIL_DIR`)
+
+### E2E-PARC-048 — 3.5 Budget d'un workflow par mois : « bloquer » ne refuse que les sessions qui le jouent, « prévenir » laisse passer, se lit dans `/spending` et s'écrit à l'audit
+
+- Étapes : le propriétaire crée deux workflows de l'org (`POST /api/v1/workflows`) et pose sur le premier un budget de 0,01 $ par mois qui bloque (`PUT /api/v1/budgets {scope: workflow, subject: <id du workflow>, usdPerMonth: 0.01, hardStop: true}`), qu'il relit dans `GET /api/v1/budgets` ; un compte Claude partagé ; il lance un agent qui joue ce workflow (`POST /api/v1/launches {workflowId}`). Le faux fournisseur facture 300 000 jetons d'entrée (1,50 $) : un appel `max_tokens` 1, la dépense lue jusqu'à 1 $, puis un second appel. Il lance un agent sans workflow et un agent de l'autre workflow, et fait un appel avec chacun, puis un de plus avec la session du workflow. Il repasse le budget en « prévenir » (`hardStop: false`, même 0,01 $) et refait un appel ; il lit `GET /api/v1/spending?period=month` et `GET /api/v1/audit?event=budget.exceeded`. Une autre org pose un budget sur ce workflow, puis lit ses budgets, sa dépense et son audit.
+- Attendu : le premier appel est servi (200) ; le second est refusé en 429, `rate_limit_error`, « Monthly budget reached: this workflow's limit of $0.01 is spent; it resets on <1er du mois suivant>. », `Retry-After` > 0, sans atteindre le fournisseur ; les appels de la session sans workflow et de celle de l'autre workflow sont servis (200, deux appels de plus au fournisseur), la session du workflow reste refusée (429). En « prévenir », la réponse au `PUT` porte `{scope: workflow, subject: <id>, usdPerMonth: 0.01, hardStop: false}` et l'appel est servi (200) ; `exceeded` de `/spending` porte `{scope: workflow, subject: <id>, period: month, usd: 0.01, hardStop: false}`, rien pour l'autre workflow ; la ligne d'audit `budget.exceeded` existe sous ce workflow, `meta` `{scope: workflow, period: month, action: warn, limit_usd: "0.01"}`. L'autre org reçoit 404 sur le budget (un workflow qu'elle n'a pas) et ne voit ni le budget, ni le dépassement, ni la ligne.
+- Surfaces : serveur (image), lanceur, gateway, budgets, rapports, audit
+- Source : `demo/PARCOURS.md` 3.5 (« un run de main qui joue un budget de workflow qui bloque ») ; ostrom-server#337 (2869359, budgets de workflow, image `sha-f031ec9` de main) ; ostrom-server#314 (7a4fbc5, `createLaunch.workflowId`) ; contrat core#116
+- Priorité : P1
+- Statut : codé : `scenarios/budget.e2e.ts` (s'allume avec le faux fournisseur ; sauté, avec son motif, si `POST /api/v1/workflows`, `GET /api/v1/spending` ou `GET /api/v1/audit` ne sont pas servies)
 
 ## ATT : Attestation des checks d'un reçu (décision du 30/10 13:23)
 
@@ -3739,12 +3857,12 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-SWEEP-001 — Chaque route servie a un cas
 
-- Étapes : les routes servies : `served-routes.txt` d'ostrom-core plus celles que `scripts/served-routes.py` lit dans le serveur testé ; pour chacune, l'opération OpenAPI (`security: []` public, en-tête `Ostrom-Org`, paramètres de chemin, corps échantillonné depuis le schéma) et le type de ressource de chaque paramètre (`PARAM_KINDS`, par préfixe).
+- Étapes : les routes servies : `served-routes.txt` d'ostrom-core, celles que `scripts/served-routes.py` lit dans le serveur testé, et chaque opération que le contrat marque `x-ostrom-status: served` (une route que la lecture du serveur manquerait) ; pour chacune, l'opération OpenAPI (`security: []` public, en-tête `Ostrom-Org`, paramètres de chemin, corps échantillonné depuis le schéma) et le type de ressource de chaque paramètre (`PARAM_KINDS`, par préfixe).
 - Attendu : aucune route servie sans cas : une route absente du contrat, un paramètre de type inconnu, ou une écriture sur le compte de l'appelant sans raison écrite (`SKIPPED`) fait échouer le scénario et nomme ce qu'il faut ajouter.
 - Surfaces : serveur (image), identité, organisations, chaque module
 - Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; contrat `api/openapi.yaml` et `api/contract/served-routes.txt` d'ostrom-core, `scripts/served-routes.py` lu sur ostrom-server main
 - Priorité : P1
-- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite)
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite) ; les routes que le contrat marque servies s'y ajoutent depuis le 03/11 (après `DELETE /push-devices/{id}`, vu seulement après la fusion de server#196). Joué aussi sur chaque PR d'ostrom-server contre l'image qu'elle construit (job `ci-e2e`).
 
 ### E2E-SWEEP-002 — Une session navigateur de B n'obtient rien de A, sur chaque route servie
 
@@ -3830,7 +3948,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 | DIST | Distribution et mise à jour | 4 | 0 | 2 | 2 |
 | TC | Migration depuis le prototype et compatibilité TeamCode | 2 | 0 | 0 | 2 |
 | LOAD | Charge (k6) | 11 | 0 | 2 | 9 |
-| DOGFOOD | Le harnais ControlResell en workflows Ostrom | 3 | 0 | 3 | 0 |
+| DOGFOOD | Le harnais d'une équipe pilote en workflows Ostrom | 3 | 0 | 3 | 0 |
 | OBS | Observabilité (traces, télémétrie opt-in) | 3 | 0 | 2 | 1 |
 | SRV | Socle du serveur (santé, instance, erreurs, en-têtes) | 4 | 2 | 2 | 0 |
 | BILL | Facturation (abonnement Stripe, limites du plan) | 7 | 0 | 6 | 1 |

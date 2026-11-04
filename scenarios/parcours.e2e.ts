@@ -5,11 +5,15 @@
 // (AUTH, LOGIN, YES, ISO, BILL, GATE) are not repeated here: the mapping is at the top of the PARC section of
 // SCENARIOS.md. Screens (web, app) are out of the bench's scope: each scenario proves the server route the screen reads.
 import { randomUUID } from 'node:crypto';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join as joinPath } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Caller } from '../src/isolation.ts';
+import { FakeExpo } from '../src/fake-expo.ts';
 import { invitationToken } from '../src/mail.ts';
+import { FakeTokens } from '../src/fake-tokens.ts';
 import { isServed } from '../src/probe.ts';
-import { MAIL_DIR, SERVER_URL } from './env.ts';
+import { FAKE_EXPO_PORT, FAKE_TOKENS_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
 import { type Org, type Person, call, email, invite, join, orgOf, orgsUnavailable, profileOf, signIn } from './org.ts';
 
 const ORGS = await orgsUnavailable();
@@ -24,6 +28,21 @@ async function needs(...routes: [string, string][]): Promise<string> {
   return missing.length ? `not served yet: ${missing.join(', ')}` : '';
 }
 const named = (title: string, why: string) => (why ? `${title} (skipped: ${why})` : title);
+
+/** The text of a mail the server wrote to OSTROM_MAIL_DIR for `to` that contains `marker`, waited for up to `ms`. */
+async function mailWith(to: string, marker: string, ms: number): Promise<string> {
+  const until = Date.now() + ms;
+  for (;;) {
+    for (const name of readdirSync(MAIL_DIR)) {
+      const path = joinPath(MAIL_DIR, name);
+      if (!statSync(path).isFile()) continue;
+      const text = readFileSync(path, 'utf8');
+      if (text.toLowerCase().startsWith(`to: ${to.toLowerCase()}\n`) && text.includes(marker)) return text;
+    }
+    if (Date.now() > until) throw new Error(`no mail to ${to} with ${marker} in ${MAIL_DIR} after ${ms} ms`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
 
 interface Owner {
   readonly person: Person;
@@ -45,6 +64,15 @@ function itemsOf(body: unknown, key = 'items'): Record<string, unknown>[] {
   const list = (body as Record<string, unknown> | undefined)?.[key];
   expect(Array.isArray(list), `no ${key} list in ${JSON.stringify(body)}`).toBe(true);
   return list as Record<string, unknown>[];
+}
+
+/** A new person invited into `a`'s organization with `role`, who accepted: signed in, a member. */
+async function invited(a: Owner, who: string, role = 'member'): Promise<Person> {
+  const address = email(who);
+  expect((await invite(a.person, a.org.id, [address], role)).status, `invite ${role}`).toBeLessThan(300);
+  const { person, accepted } = await join(address);
+  expect(accepted.status, JSON.stringify(accepted.body)).toBeLessThan(300);
+  return person;
 }
 
 /** Nothing of the owner comes back to `other`: a refusal, or a list without the marker. */
@@ -82,6 +110,10 @@ const W008 = (await needs(['POST', '/api/v1/mcp/servers'], ['PUT', '/api/v1/mcp/
 const W009 = (await needs(['POST', '/api/v1/secrets'], ['GET', '/api/v1/secrets'], ['PUT', '/api/v1/secrets/{id}'], ['DELETE', '/api/v1/secrets/{id}'])) || ORG64;
 const W010 = await needs(['POST', '/api/v1/tokens'], ['GET', '/api/v1/tokens'], ['POST', '/api/v1/tokens/{id}/rotate'], ['DELETE', '/api/v1/tokens/{id}']);
 const W011 = await needs(['GET', '/api/v1/service-keys'], ['POST', '/api/v1/service-keys'], ['GET', '/api/v1/devices'], ['GET', '/api/v1/auth/sessions']);
+const W039 = (await needs(['GET', '/api/v1/groups'], ['POST', '/api/v1/groups'], ['GET', '/api/v1/groups/{id}'], ['PATCH', '/api/v1/groups/{id}'], ['DELETE', '/api/v1/groups/{id}'], ['PUT', '/api/v1/groups/{id}/members/{id}'], ['DELETE', '/api/v1/groups/{id}/members/{id}'], ['POST', '/api/v1/groups/{id}/members/{id}/pause'])) || ORG64 || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
+const W043 = (await needs(['POST', '/api/v1/groups'], ['POST', '/api/v1/groups/{id}/members/{id}/pause'], ['POST', '/api/v1/secrets'], ['POST', '/api/v1/accounts'], ['PATCH', '/api/v1/accounts/{id}'], ['POST', '/api/v1/tokens'], ['POST', '/api/v1/inference/v1/messages'])) || ORG64 || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '') || (FAKE_TOKENS_PORT <= 0 ? 'no fake provider (OSTROM_E2E_FAKE_TOKENS_PORT)' : '');
+const W041 = (await needs(['GET', '/api/v1/orgs/{id}'], ['PATCH', '/api/v1/orgs/{id}'], ['POST', '/api/v1/orgs/{id}/members/invites'])) || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
+const W042 = (await needs(['DELETE', '/api/v1/orgs/{id}'], ['PATCH', '/api/v1/orgs/{id}'], ['GET', '/api/v1/orgs/{id}/members'], ['POST', '/api/v1/orgs/{id}/members/invites'], ['POST', '/api/v1/secrets'], ['POST', '/api/v1/tokens'])) || ORG64 || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
 
 describe('E2E-PARC: 2. organization setup', () => {
   it.skipIf(W001 !== '')(named('E2E-PARC-001 — 2.2 a new person creates an organization and reads it back, owner', W001), async () => {
@@ -245,6 +277,126 @@ describe('E2E-PARC: 2. organization setup', () => {
     await needsCredential('GET', '/api/v1/mcp/servers');
   }, T);
 
+  // The groups of 2.8: owners and admins make them and change their members, every member reads them, people are named
+  // by login, and another organization sees none (ostrom-server, groups pull request).
+  it.skipIf(W039 !== '')(named('E2E-PARC-039 — 2.8 an owner makes a group of members by login, pauses and removes one; members read it, another org sees nothing', W039), async () => {
+    const a = await owner('parc-039');
+    const invited = email('parc-039-m');
+    expect((await invite(a.person, a.org.id, [invited])).status).toBeLessThan(300);
+    const { person, accepted } = await join(invited);
+    expect(accepted.status, JSON.stringify(accepted.body)).toBeLessThan(300);
+    const login = (await profileOf(person.caller)).login;
+    const m: Caller = { ...person.caller, org: a.org.id };
+    const name = `Parc 039 ${randomUUID().slice(0, 6)}`;
+
+    const made = await call(a.c, 'POST', '/api/v1/groups', { name, members: [login] });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body).toMatchObject({ name, members: [login], accounts: [], paused: [] });
+    const id = made.body['id'] as string;
+    expect(itemsOf((await call(m, 'GET', '/api/v1/groups')).body).map((g) => g['id'])).toContain(id);
+    expect((await call(m, 'GET', `/api/v1/groups/${id}`)).body).toMatchObject({ id, name, members: [login] });
+    // A member reads only; a name is taken whatever its case; an account the organization does not share is refused.
+    expect((await call(m, 'POST', '/api/v1/groups', { name: `${name} m` })).status).toBe(403);
+    expect((await call(m, 'PUT', `/api/v1/groups/${id}/members/${login}`)).status).toBe(403);
+    expect((await call(a.c, 'POST', '/api/v1/groups', { name: name.toUpperCase() })).status).toBe(409);
+    expect((await call(a.c, 'POST', '/api/v1/groups', { name: `${name} x`, accounts: [randomUUID()] })).status).toBe(400);
+    expect((await call(a.c, 'POST', '/api/v1/groups', { name: `${name} y`, members: ['nobody-here'] })).status).toBe(400);
+
+    const until = '2099-01-01T00:00:00Z';
+    expect((await call(a.c, 'POST', `/api/v1/groups/${id}/members/${login}/pause`, { until })).status).toBe(204);
+    expect((await call(m, 'GET', `/api/v1/groups/${id}`)).body).toMatchObject({ paused: [{ login, until }] });
+    const renamed = await call(a.c, 'PATCH', `/api/v1/groups/${id}`, { name: `${name} b` });
+    expect(renamed.body, JSON.stringify(renamed.body)).toMatchObject({ id, name: `${name} b`, members: [login] });
+    expect((await call(a.c, 'DELETE', `/api/v1/groups/${id}/members/${login}`)).status).toBe(204);
+    expect((await call(a.c, 'GET', `/api/v1/groups/${id}`)).body).toMatchObject({ members: [], paused: [] });
+    expect((await call(a.c, 'DELETE', `/api/v1/groups/${id}/members/${login}`)).status).toBe(404);
+    expect((await call(a.c, 'PUT', `/api/v1/groups/${id}/members/${login}`)).status).toBe(204);
+
+    const b = await owner('parc-039-b');
+    expect((await call(b.c, 'GET', `/api/v1/groups/${id}`)).status).toBe(404);
+    expect((await call(b.c, 'PATCH', `/api/v1/groups/${id}`, { name: 'taken over' })).status).toBe(404);
+    expect((await call(b.c, 'DELETE', `/api/v1/groups/${id}`)).status).toBe(404);
+    await hidden(b.c, '/api/v1/groups', id);
+
+    expect((await call(a.c, 'DELETE', `/api/v1/groups/${id}`)).status).toBe(204);
+    expect((await call(a.c, 'GET', `/api/v1/groups/${id}`)).status).toBe(404);
+    await needsCredential('GET', '/api/v1/groups');
+    await needsCredential('POST', '/api/v1/groups', { name });
+  }, T);
+
+  // An account lent to a group (`sharedWith: group:<id>`, ostrom-server#245): the gateway serves it to the group's members
+  // who are not paused and to no one else, its owner included; a group of another organization is refused. The fake
+  // provider of src/fake-tokens.ts stands for Anthropic's API behind the gateway, so a served call is seen there.
+  it.skipIf(W043 !== '')(named('E2E-PARC-043 — 2.8 an account lent to a group serves its members who are not paused, and no one else, not even its owner', W043), async () => {
+    const provider = await new FakeTokens().start(FAKE_TOKENS_PORT);
+    try {
+      const a = await owner('parc-043');
+      const member = async (who: string) => {
+        const address = email(who);
+        expect((await invite(a.person, a.org.id, [address])).status).toBeLessThan(300);
+        const { person, accepted } = await join(address);
+        expect(accepted.status, JSON.stringify(accepted.body)).toBeLessThan(300);
+        return { c: { ...person.caller, org: a.org.id } as Caller, login: (await profileOf(person.caller)).login };
+      };
+      const inside = await member('parc-043-in');
+      const outside = await member('parc-043-out');
+      // Each person's agent reaches the gateway with a personal token of `inference:use`.
+      const tokenOf = async (c: Caller) => {
+        const pat = await call(c, 'POST', '/api/v1/tokens', { name: 'e2e parc-043', scopes: ['inference:use'], expiresInDays: 1 });
+        expect(pat.status, JSON.stringify(pat.body)).toBe(201);
+        return String(pat.body['secret']);
+      };
+      const [insideToken, outsideToken, ownerToken] = [await tokenOf(inside.c), await tokenOf(outside.c), await tokenOf(a.c)];
+      // Served: the call answers 200 and reaches the provider; refused: neither.
+      const served = async (token: string) => {
+        const before = provider.calls.length;
+        const r = await call({ token }, 'POST', '/api/v1/inference/v1/messages', { model: 'claude-sonnet-4-5', max_tokens: 16, messages: [{ role: 'user', content: 'hello' }] });
+        const reached = provider.calls.length > before;
+        expect(reached, `${r.status} ${JSON.stringify(r.body)}`).toBe(r.status === 200);
+        return reached ? (provider.calls.at(-1)?.authorization ?? '') : '';
+      };
+
+      const made = await call(a.c, 'POST', '/api/v1/groups', { name: `Parc 043 ${randomUUID().slice(0, 6)}`, members: [inside.login] });
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      const group = `group:${made.body['id'] as string}`;
+      const value = `sk-ant-oat01-parc043-${randomUUID()}`;
+      const secret = `PARC043_${randomUUID().slice(0, 8).toUpperCase()}`;
+      expect((await call(a.c, 'POST', '/api/v1/secrets', { name: secret, value })).status).toBeLessThan(300);
+      const lent = await call(a.c, 'POST', '/api/v1/accounts', { provider: 'anthropic', label: 'Max of parc-043', credentialSecret: secret, sharedWith: [group] });
+      expect(lent.status, JSON.stringify(lent.body)).toBe(201);
+      expect(lent.body['sharedWith']).toEqual([group]);
+      const account = lent.body['id'] as string;
+      expect((await call(a.c, 'GET', `/api/v1/groups/${made.body['id'] as string}`)).body['accounts']).toEqual([account]);
+
+      expect(await served(insideToken), 'a member of the group').toContain(value);
+      expect(await served(outsideToken), 'a member outside the group').toBe('');
+      expect(await served(ownerToken), 'its owner: lent to the group only').toBe('');
+
+      const pause = `/api/v1/groups/${made.body['id'] as string}/members/${inside.login}/pause`;
+      expect((await call(a.c, 'POST', pause, { until: '2099-01-01T00:00:00Z' })).status).toBe(204);
+      expect(await served(insideToken), 'paused in the group').toBe('');
+      // The pause is over: the member is served again.
+      expect((await call(a.c, 'POST', pause, { until: new Date(Date.now() - 1_000).toISOString() })).status).toBe(204);
+      expect(await served(insideToken), 'back from the pause').toContain(value);
+
+      // A group of another organization lends nothing: 400, and the account keeps its group.
+      const b = await owner('parc-043-b');
+      const theirs = await call(b.c, 'POST', '/api/v1/groups', { name: 'Parc 043 theirs' });
+      expect(theirs.status, JSON.stringify(theirs.body)).toBe(201);
+      const foreign = `group:${theirs.body['id'] as string}`;
+      expect((await call(a.c, 'PATCH', `/api/v1/accounts/${account}`, { sharedWith: [foreign] })).status).toBe(400);
+      expect((await call(a.c, 'POST', '/api/v1/accounts', { provider: 'anthropic', label: 'Max of parc-043 b', credentialSecret: secret, sharedWith: [foreign] })).status).toBe(400);
+      expect((await call(a.c, 'PATCH', `/api/v1/accounts/${account}`, { sharedWith: ['group:not-an-id'] })).status).toBe(400);
+      const kept = itemsOf((await call(a.c, 'GET', '/api/v1/accounts')).body).find((x) => x['id'] === account);
+      expect(kept?.['sharedWith']).toEqual([group]);
+      expect((await call(b.c, 'GET', `/api/v1/groups/${theirs.body['id'] as string}`)).body['accounts']).toEqual([]);
+      expect((await call(b.c, 'PATCH', `/api/v1/accounts/${account}`, { sharedWith: [foreign] })).status).toBe(404);
+      expect(await served(insideToken), 'still lent to its group').toContain(value);
+    } finally {
+      await provider.stop();
+    }
+  }, T);
+
   it.skipIf(W009 !== '')(named('E2E-PARC-009 — 2.10 a secret is written, rotated and deleted; its value is never read back', W009), async () => {
     const a = await owner('parc-009');
     const name = `PARC_${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -311,6 +463,108 @@ describe('E2E-PARC: 2. organization setup', () => {
     await hidden(b.c, '/api/v1/service-keys', key.body['id'] as string);
     for (const p of ['/api/v1/service-keys', '/api/v1/devices', '/api/v1/auth/sessions']) await needsCredential('GET', p);
   }, T);
+
+  it.skipIf(W041 !== '')(named('E2E-PARC-041 — 2.11 an admin renames the organization and sets its time zone; a member or an approver cannot, another org gets 404', W041), async () => {
+    const a = await owner('parc-041');
+    const admin = await invited(a, 'parc-041-admin', 'admin');
+    const member = await invited(a, 'parc-041-member');
+    const approver = await invited(a, 'parc-041-approver', 'approver');
+    const path = `/api/v1/orgs/${a.org.id}`;
+    // A new organization is in UTC until an owner or an admin sets its zone.
+    expect((await call(a.person.caller, 'GET', path)).body).toMatchObject({ id: a.org.id, timeZone: 'UTC' });
+
+    const name = `Parc 041 ${randomUUID().slice(0, 6)}`;
+    const changed = await call(admin.caller, 'PATCH', path, { name, timeZone: 'Europe/Paris' });
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    expect(changed.body).toMatchObject({ id: a.org.id, slug: a.org.slug, name, timeZone: 'Europe/Paris', role: 'admin' });
+    // Read back by the owner, by id and by short name, and in the owner's list.
+    for (const ref of [a.org.id, a.org.slug]) {
+      expect((await call(a.person.caller, 'GET', `/api/v1/orgs/${ref}`)).body).toMatchObject({ name, timeZone: 'Europe/Paris' });
+    }
+    expect(itemsOf((await call(a.person.caller, 'GET', '/api/v1/orgs')).body).find((o) => o['id'] === a.org.id)).toMatchObject({ name });
+    // A field left out stays as it is; the short name is accepted unchanged and never changes.
+    const zoneOnly = await call(a.person.caller, 'PATCH', path, { timeZone: 'America/New_York', slug: a.org.slug });
+    expect(zoneOnly.status, JSON.stringify(zoneOnly.body)).toBe(200);
+    expect(zoneOnly.body).toMatchObject({ name, slug: a.org.slug, timeZone: 'America/New_York' });
+    expect((await call(a.person.caller, 'PATCH', path, { slug: `${a.org.slug}-x` })).status).toBe(400);
+    expect((await call(a.person.caller, 'PATCH', path, { timeZone: 'Mars/Olympus' })).status).toBe(400);
+    expect((await call(a.person.caller, 'PATCH', path, { name: '' })).status).toBe(400);
+
+    // Neither a plain member nor an approver may change it: 403, and nothing changes.
+    for (const who of [member, approver]) {
+      const refused = await call(who.caller, 'PATCH', path, { name: 'by a non-manager' });
+      expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+      expect(refused.body?.['error']).toBeTruthy();
+    }
+    // Another organization's owner: 404, as for a missing organization, and the name stays.
+    const b = await owner('parc-041-b');
+    const foreign = await call(b.person.caller, 'PATCH', path, { name: 'by another org' });
+    expect(foreign.status, JSON.stringify(foreign.body)).toBe(404);
+    expect(JSON.stringify(foreign.body)).not.toContain(name);
+    expect((await call(b.person.caller, 'PATCH', `/api/v1/orgs/${randomUUID()}`, { name: 'nowhere' })).status).toBe(404);
+    expect((await call(a.person.caller, 'GET', path)).body).toMatchObject({ name, timeZone: 'America/New_York' });
+    await needsCredential('PATCH', path, { name: 'no credential' });
+  }, T);
+
+  it.skipIf(W042 !== '')(named('E2E-PARC-042 — 2.11 the owner deletes the organization from a browser: nothing of it reads any more, another org is untouched, a replay changes nothing', W042), async () => {
+    const a = await owner('parc-042');
+    const m = await invited(a, 'parc-042-member');
+    const admin = await invited(a, 'parc-042-admin', 'admin');
+    const path = `/api/v1/orgs/${a.org.id}`;
+    const secret = `PARC042_${randomUUID().slice(0, 8).toUpperCase()}`;
+    expect((await call(a.c, 'POST', '/api/v1/secrets', { name: secret, value: `v-${randomUUID()}` })).status).toBeLessThan(300);
+    // Another organization, with data of its own: the deletion never reaches it.
+    const b = await owner('parc-042-b');
+    const kept = `PARC042B_${randomUUID().slice(0, 8).toUpperCase()}`;
+    expect((await call(b.c, 'POST', '/api/v1/secrets', { name: kept, value: `v-${randomUUID()}` })).status).toBeLessThan(300);
+
+    // The contract: a browser session only, never a token, even the owner's with `orgs:write`.
+    const made = await call(a.c, 'POST', '/api/v1/tokens', { name: 'parc-042', scopes: ['orgs:write'], expiresInDays: 1 });
+    expect(made.status, JSON.stringify(made.body)).toBeLessThan(300);
+    const token = { token: made.body['secret'] as string };
+    // The same token does change the organization (PATCH takes tokens): its refusal below is the browser-only rule.
+    const renamed = await call(token, 'PATCH', path, { name: `Parc 042 ${randomUUID().slice(0, 6)}` });
+    expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
+    const byToken = await call(token, 'DELETE', path, { confirm: a.org.slug });
+    expect(byToken.status, JSON.stringify(byToken.body)).toBe(403);
+    expect(JSON.stringify(byToken.body)).toContain('browser session');
+    // The owner only: not a member, not even an admin (who may change the settings); another org's owner gets 404;
+    // the short name must be typed again.
+    for (const who of [m, admin]) expect((await call(who.caller, 'DELETE', path, { confirm: a.org.slug })).status).toBe(403);
+    expect((await call(b.person.caller, 'DELETE', path, { confirm: a.org.slug })).status).toBe(404);
+    expect((await call(a.person.caller, 'DELETE', `/api/v1/orgs/${b.org.id}`, { confirm: b.org.slug })).status).toBe(404);
+    const wrong = await call(a.person.caller, 'DELETE', path, { confirm: `${a.org.slug}-typo` });
+    expect(wrong.status, JSON.stringify(wrong.body)).toBe(400);
+    expect((await call(a.person.caller, 'GET', path)).status, 'still there after the refusals').toBe(200);
+    expect(itemsOf((await call(a.person.caller, 'GET', `${path}/members`)).body).length, 'its members read before').toBe(3);
+    await needsCredential('DELETE', path, { confirm: a.org.slug });
+
+    // Signed in a moment ago (under the 5 minutes the deletion asks): deleted.
+    const deleted = await call(a.person.caller, 'DELETE', path, { confirm: a.org.slug });
+    expect(deleted.status, JSON.stringify(deleted.body)).toBe(204);
+
+    // Nothing of it reads any more, for its owner as for its member: the organization, its members, its data.
+    for (const who of [a.person.caller, m.caller]) {
+      for (const ref of [a.org.id, a.org.slug]) expect((await call(who, 'GET', `/api/v1/orgs/${ref}`)).status).toBe(404);
+      expect((await call(who, 'GET', `${path}/members`)).status).toBe(404);
+      for (const list of ['/api/v1/me/organizations', '/api/v1/orgs']) {
+        const r = await call(who, 'GET', list);
+        expect(r.status, `${list} after the deletion`).toBe(200);
+        expect(itemsOf(r.body).map((o) => o['id'])).not.toContain(a.org.id);
+      }
+      const data = await call({ ...who, org: a.org.id }, 'GET', '/api/v1/secrets');
+      expect(data.status, `secrets of a deleted org → ${data.status}`).toBeGreaterThanOrEqual(400);
+      expect(data.status).toBeLessThan(500);
+      expect(JSON.stringify(data.body)).not.toContain(secret);
+    }
+    expect((await call(a.person.caller, 'PATCH', path, { name: 'after the deletion' })).status).toBe(404);
+    expect((await call(token, 'PATCH', path, { name: 'by its token, after the deletion' })).status).toBe(404);
+
+    // Replayed: no effect, and the other organization stays whole.
+    expect((await call(a.person.caller, 'DELETE', path, { confirm: a.org.slug })).status).toBe(404);
+    expect((await call(b.person.caller, 'GET', `/api/v1/orgs/${b.org.id}`)).body).toMatchObject({ id: b.org.id, role: 'owner' });
+    expect(itemsOf((await call(b.c, 'GET', '/api/v1/secrets')).body).map((x) => x['name'])).toContain(kept);
+  }, T);
 });
 
 // --------------------------------------------------------------------------------------------------------- 3. Rules
@@ -326,6 +580,7 @@ const W017 = await needs(['GET', '/api/v1/policy/agents']);
 const W018 = (await needs(['GET', '/api/v1/budgets'], ['PUT', '/api/v1/budgets'], ['GET', '/api/v1/budgets/me'])) || ORG64;
 const W019 = await needs(['GET', '/api/v1/spending']);
 const W020 = await needs(['GET', '/api/v1/decisions']);
+const W040 = (await needs(['GET', '/api/v1/audit'], ['PATCH', '/api/v1/orgs/{id}/members/{id}'])) || ORG64;
 
 describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
   it.skipIf(W012 !== '')(named('E2E-PARC-012 — 3.1 rules: a new org has no rule, the analysis state reads, a rule is edited and bulk-accepted', W012), async () => {
@@ -490,8 +745,19 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     if (me.body['limitMicros'] != null) expect(me.body['limitMicros'] as number).toBeLessThanOrEqual(42_000_000);
     const b = await owner('parc-018-b');
     expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toMatch(/"usdPerMonth":42\b/);
-    // Refused shapes: a daily budget, a soft budget, an unknown scope.
-    for (const bad of [{ scope: 'org', usdPerDay: 5 }, { scope: 'org', usdPerMonth: 5, hardStop: false }, { scope: 'team', usdPerMonth: 5 }]) expect((await call(a.c, 'PUT', '/api/v1/budgets', bad)).status).toBe(400);
+    // A person's budget (ostrom-server#230): by the day, that warns, named by the member's id from the members list.
+    const self = itemsOf((await call(a.c, 'GET', `/api/v1/orgs/${a.org.id}/members`)).body, 'items')[0]?.['id'];
+    expect(typeof self, 'the members list carries each member id').toBe('string');
+    const person = await call(a.c, 'PUT', '/api/v1/budgets', { scope: 'member', subject: self, usdPerDay: 20, hardStop: false });
+    expect(person.status, JSON.stringify(person.body)).toBe(200);
+    expect(person.body).toMatchObject({ scope: 'member', subject: self, usdPerDay: 20, hardStop: false });
+    const listed = itemsOf((await call(a.c, 'GET', '/api/v1/budgets')).body).filter((i) => i['subject'] === self);
+    expect(listed).toEqual([expect.objectContaining({ usdPerDay: 20, hardStop: false })]);
+    expect(listed[0]).not.toHaveProperty('usdPerMonth');
+    expect(JSON.stringify((await call(b.c, 'GET', '/api/v1/budgets')).body)).not.toContain(String(self));
+    // Refused: an unknown scope (400), and a budget on a workflow the org does not have (404, ostrom-server#337).
+    expect((await call(a.c, 'PUT', '/api/v1/budgets', { scope: 'team', usdPerMonth: 5 })).status).toBe(400);
+    expect((await call(a.c, 'PUT', '/api/v1/budgets', { scope: 'workflow', subject: 'wf', usdPerMonth: 5 })).status).toBe(404);
   }, T);
 
   it.skipIf(W019 !== '')(named('E2E-PARC-019 — 3.5 / 6.4 spending of the week and the month, by agent, repo, person and day, against the budget', W019), async () => {
@@ -514,17 +780,102 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     expect(itemsOf(r.body)).toEqual([]);
     await needsCredential('GET', '/api/v1/decisions');
   }, T);
+
+  it.skipIf(W040 !== '')(named('E2E-PARC-040 — 3.6 the audit log is read by an owner and an admin, refused to a member, and shows nothing of another org', W040), async () => {
+    const a = await owner('parc-040');
+    const invited = email('parc-040-m');
+    expect((await invite(a.person, a.org.id, [invited])).status).toBeLessThan(300);
+    const { person, accepted } = await join(invited);
+    expect(accepted.status).toBeLessThan(300);
+    const member: Caller = { ...person.caller, org: a.org.id };
+
+    // The owner reads the signed lines of the org (`AuditEvent`), newest first: its creation and the member who joined.
+    const read = await call(a.c, 'GET', '/api/v1/audit');
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    const items = itemsOf(read.body);
+    for (const i of items) {
+      for (const k of ['id', 'at', 'event', 'actor', 'subject']) expect(typeof i[k], k).toBe('string');
+      expect(typeof i['meta']).toBe('object');
+    }
+    const ats = items.map((i) => Date.parse(i['at'] as string));
+    expect([...ats].sort((x, y) => y - x)).toEqual(ats);
+    const subjects = items.map((i) => i['subject'] as string);
+    expect(subjects).toContain(`org:${a.org.id}`);
+    const joined = items.find((i) => (i['subject'] as string).startsWith('member:'));
+    expect(joined, JSON.stringify(items)).toBeDefined();
+    // Filtered by event name, only that event comes back.
+    const event = joined?.['event'] as string;
+    const filtered = itemsOf((await call(a.c, 'GET', `/api/v1/audit?event=${encodeURIComponent(event)}`)).body);
+    expect(filtered.length).toBeGreaterThanOrEqual(1);
+    for (const i of filtered) expect(i['event']).toBe(event);
+
+    // A plain member is refused (owners and admins only); made admin, the same person reads the same log.
+    expect((await call(member, 'GET', '/api/v1/audit')).status).toBe(403);
+    const login = (await profileOf(person.caller)).login;
+    const up = await call(a.person.caller, 'PATCH', `/api/v1/orgs/${a.org.id}/members/${encodeURIComponent(login)}`, { role: 'admin' });
+    expect(up.status, JSON.stringify(up.body)).toBe(200);
+    const asAdmin = await call(member, 'GET', '/api/v1/audit');
+    expect(asAdmin.status, JSON.stringify(asAdmin.body)).toBe(200);
+    expect(itemsOf(asAdmin.body).map((i) => i['subject'])).toContain(`org:${a.org.id}`);
+
+    // Another org's owner: 404 when naming the first org, and their own log names none of its lines.
+    const b = await owner('parc-040-b');
+    expect((await call({ ...b.person.caller, org: a.org.id }, 'GET', '/api/v1/audit')).status).toBe(404);
+    const theirs = await call(b.c, 'GET', '/api/v1/audit');
+    expect(theirs.status).toBe(200);
+    for (const marker of [a.org.id, ...subjects.filter((x) => x.startsWith('member:'))]) expect(JSON.stringify(theirs.body)).not.toContain(marker);
+    await needsCredential('GET', '/api/v1/audit');
+  }, T);
 });
 
 // --------------------------------------------------------------------------------------- 4. Workflows and automations
 
 const W021 = (await needs(['GET', '/api/v1/workflows'], ['POST', '/api/v1/workflows'], ['PUT', '/api/v1/workflows/{id}'], ['DELETE', '/api/v1/workflows/{id}'], ['GET', '/api/v1/packages/current'])) || ACTORS;
-const W022 = await needs(['GET', '/api/v1/workflows/{id}/runs'], ['POST', '/api/v1/workflows/{id}/runs'], ['GET', '/api/v1/runs']);
+// The runs of a workflow need the workflow engine: until the server serves their routes (`planned` in the contract),
+// PARC-022 is skipped by name with PARCOURS 4.1, never silently.
+const W022 = await needs(['GET', '/api/v1/workflows/{id}/runs'], ['POST', '/api/v1/workflows/{id}/runs'], ['GET', '/api/v1/runs']).then((why) =>
+  why ? `no workflow engine on the server yet, PARCOURS 4.1: ${why}` : '',
+);
+// The engine that plays a run comes with the run's own routes (ostrom-server, feat/workflow-run-engine): before them a
+// run stays queued; with them a lone trigger ends succeeded, and an agent then a gate are played to the end.
+const PLAYED = (await needs(['GET', '/api/v1/runs/{id}'], ['POST', '/api/v1/runs/{id}/cancel'])) === '';
+const W022P = W022 || (PLAYED ? '' : 'no workflow engine on the server yet, PARCOURS 4.1: not served yet: GET /api/v1/runs/{id}, POST /api/v1/runs/{id}/cancel') || ACTORS;
 const W023 = (await needs(['POST', '/api/v1/automations'], ['POST', '/api/v1/automations/{id}/enable'], ['PUT', '/api/v1/automations/{id}'], ['POST', '/api/v1/automations/{id}/run'], ['POST', '/api/v1/automations/{id}/webhook/rotate-secret'], ['DELETE', '/api/v1/automations/{id}'])) || ORG64;
 const W024 = (await needs(['POST', '/api/v1/waits'], ['GET', '/api/v1/waits/{id}'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/waits/{id}/cancel'])) || ORG64;
+const W044 = (await needs(['POST', '/api/v1/waits/mcp'], ['POST', '/api/v1/waits'], ['POST', '/api/v1/waits/{id}/answer'], ['POST', '/api/v1/launches'], ['POST', '/api/v1/sessions'])) || ACTORS || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
+
+/** One JSON-RPC message to the waits MCP server of `session` (`POST /api/v1/waits/mcp?session=`). */
+async function waitsMcp(caller: Caller, session: string, method: string, params: Record<string, unknown> = {}) {
+  const r = await call(caller, 'POST', `/api/v1/waits/mcp?session=${encodeURIComponent(session)}`, { jsonrpc: '2.0', id: randomUUID(), method, params });
+  expect(r.status, JSON.stringify(r.body)).toBe(200);
+  return r.body;
+}
+
+/** A tool of the waits MCP server: its text, and whether the server answered it as a tool error. */
+async function waitsTool(caller: Caller, session: string, name: string, args: Record<string, unknown> = {}) {
+  const body = await waitsMcp(caller, session, 'tools/call', { name, arguments: args });
+  const result = (body['result'] ?? {}) as { content?: { text?: string }[]; isError?: boolean };
+  expect(body['result'], JSON.stringify(body)).toBeDefined();
+  return { text: (result.content ?? []).map((c) => c.text ?? '').join('\n'), isError: result.isError === true };
+}
+
+/** The wait id of an `ask_human` text (« Asked: wait <id> is open, for member <member>. »). */
+const askedWait = (text: string) => /wait ([0-9a-f-]{36}) is open/.exec(text)?.[1] ?? '';
+
+/** The run `id` as `caller` reads it once `done` holds, read again every half second for up to `ms`. */
+async function runUntil(caller: Caller, id: string, done: (run: Record<string, unknown>) => boolean, ms = 60_000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const r = await call(caller, 'GET', `/api/v1/runs/${id}`);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    if (done(r.body)) return r.body;
+    if (Date.now() > until) throw new Error(`run ${id} after ${ms} ms: ${JSON.stringify(r.body)}`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
 
 /** A workflow of the contract (`Workflow`): one trigger node, no edge. */
-const workflow = (id: string, name: string) => ({ id, name, domain: 'git', nodes: [{ id: 'start', kind: 'trigger', label: 'Session start' }], edges: [], start: 'start', status: 'proposed', foundAt: new Date().toISOString() });
+const workflow = (id: string, name: string, status = 'proposed', extra: Record<string, unknown> = {}) => ({ id, name, domain: 'git', nodes: [{ id: 'start', kind: 'trigger', label: 'Session start' }], edges: [], start: 'start', status, foundAt: new Date().toISOString(), ...extra });
 
 describe('E2E-PARC: 4. workflows and automations', () => {
   it.skipIf(W021 !== '')(named('E2E-PARC-021 — 4.1 a workflow is created, edited with its version, listed, deleted; the current package reads', W021), async () => {
@@ -540,7 +891,13 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect(JSON.stringify(edited.body)).toContain('Parc 021 bis');
     const stale = await call(a.c, 'PUT', `/api/v1/workflows/${wid}`, { workflow: workflow(wid, 'stale'), expectedVersion: version });
     expect(stale.status).toBe(409);
+    // A PUT on an id the organization does not have is not found and creates nothing (contract: 200 or 404, no 201).
+    const unknown = `parc-${randomUUID().slice(0, 8)}`;
+    const notFound = await call(a.c, 'PUT', `/api/v1/workflows/${unknown}`, { workflow: workflow(unknown, 'Parc 021 ghost') });
+    expect(notFound.status, JSON.stringify(notFound.body)).toBe(404);
+    expect((await call(a.c, 'GET', `/api/v1/workflows/${unknown}`)).status).toBe(404);
     expect(JSON.stringify((await call(a.c, 'GET', '/api/v1/workflows')).body)).toContain('Parc 021 bis');
+    expect(JSON.stringify((await call(a.c, 'GET', '/api/v1/workflows')).body)).not.toContain(unknown);
     const b = await owner('parc-021-b');
     await hidden(b.c, '/api/v1/workflows', wid);
     // Deleted before the package is read: reading `packages/current` pins a package, and a workflow a pinned package
@@ -555,16 +912,206 @@ describe('E2E-PARC: 4. workflows and automations', () => {
   it.skipIf(W022 !== '')(named('E2E-PARC-022 — 4.1 a workflow run is started, listed under its workflow and among the runs', W022), async () => {
     const a = await owner('parc-022');
     const wid = `parc-${randomUUID().slice(0, 8)}`;
-    expect((await call(a.c, 'POST', '/api/v1/workflows', { workflow: workflow(wid, 'Parc 022') })).status).toBeLessThan(300);
-    const run = await call(a.c, 'POST', `/api/v1/workflows/${wid}/runs`, { inputs: {} });
+    // POST takes the workflow itself (as in PARC-021); an owner's console creates it accepted, which a run needs.
+    const inputs = [{ id: 'branch', label: 'Branch', required: true }, { id: 'note', label: 'Note', default: 'none', maxLength: 8 }];
+    const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(wid, 'Parc 022', 'accepted', { inputs }));
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const version = made.body['version'] as number;
+    const runs = `/api/v1/workflows/${wid}/runs`;
+    // What the workflow does not declare, a required input left out, a value too long: 400, nothing started.
+    expect((await call(a.c, 'POST', runs, { inputs: { branch: 'main', target: 'prod' } })).status).toBe(400);
+    expect((await call(a.c, 'POST', runs, { inputs: {} })).status).toBe(400);
+    expect((await call(a.c, 'POST', runs, { inputs: { branch: 'main', note: 'far too long' } })).status).toBe(400);
+    const run = await call(a.c, 'POST', runs, { inputs: { branch: 'main' } });
     expect(run.status, JSON.stringify(run.body)).toBe(201);
-    expect(run.body).toMatchObject({ workflowId: wid, workflowName: 'Parc 022' });
-    for (const k of ['id', 'status', 'startedBy', 'source', 'startedAt']) expect(run.body).toHaveProperty(k);
-    expect(itemsOf((await call(a.c, 'GET', `/api/v1/workflows/${wid}/runs`)).body).map((r) => r['id'])).toContain(run.body['id']);
-    expect(JSON.stringify((await call(a.c, 'GET', '/api/v1/runs')).body)).toContain(run.body['id'] as string);
+    // It is recorded queued, with the version it started from and its inputs (default taken).
+    expect(run.body).toMatchObject({ workflowId: wid, workflowName: 'Parc 022', workflowVersion: version, status: 'queued', source: 'manual', inputs: { branch: 'main', note: 'none' } });
+    for (const k of ['id', 'startedBy', 'startedAt']) expect(run.body).toHaveProperty(k);
+    const id = run.body['id'] as string;
+    expect(itemsOf((await call(a.c, 'GET', runs)).body).map((r) => r['id'])).toContain(id);
+    expect(itemsOf((await call(a.c, 'GET', '/api/v1/runs')).body).map((r) => r['id'])).toContain(id);
+    // Without the engine it stays queued; with it, its lone trigger has nothing after it and the run ends succeeded.
+    const status = PLAYED ? 'succeeded' : 'queued';
+    // A field without a value is left out of the answer (no null): an ended run has no current node.
+    if (PLAYED) expect((await runUntil(a.c, id, (r) => r['status'] === 'succeeded'))['currentNodeId']).toBeUndefined();
+    const ids = async (s: string) => itemsOf((await call(a.c, 'GET', `/api/v1/runs?status=${s}`)).body).map((r) => r['id']);
+    expect(await ids(status)).toContain(id);
+    expect(await ids(PLAYED ? 'queued' : 'succeeded')).not.toContain(id);
+    expect((await call(a.c, 'GET', '/api/v1/runs?status=lost')).status).toBe(400);
+    // A proposed workflow is accepted before it runs; an unknown one is not found.
+    const proposed = `parc-${randomUUID().slice(0, 8)}`;
+    expect((await call(a.c, 'POST', '/api/v1/workflows', workflow(proposed, 'Parc 022 proposed'))).status).toBe(201);
+    expect((await call(a.c, 'POST', `/api/v1/workflows/${proposed}/runs`, { inputs: {} })).status).toBe(409);
+    expect((await call(a.c, 'POST', `/api/v1/workflows/parc-absent-${ID.slice(0, 8)}/runs`, { inputs: {} })).status).toBe(404);
+    expect((await call(a.c, 'GET', `/api/v1/workflows/parc-absent-${ID.slice(0, 8)}/runs`)).status).toBe(404);
+    // A member reads the runs and starts none.
+    const member = await invited(a, 'parc-022-m');
+    const m: Caller = { ...member.caller, org: a.org.id };
+    expect(itemsOf((await call(m, 'GET', runs)).body).map((r) => r['id'])).toContain(id);
+    expect((await call(m, 'POST', runs, { inputs: { branch: 'main' } })).status).toBe(403);
+    // Another organization neither sees, reads nor starts them.
     const b = await owner('parc-022-b');
-    await hidden(b.c, '/api/v1/runs', run.body['id'] as string);
+    await hidden(b.c, '/api/v1/runs', id);
+    expect((await call(b.c, 'GET', runs)).status).toBe(404);
+    expect((await call(b.c, 'POST', runs, { inputs: { branch: 'main' } })).status).toBe(404);
+    expect(itemsOf((await call(a.c, 'GET', runs)).body)).toHaveLength(1);
+    await needsCredential('GET', '/api/v1/runs');
+    await needsCredential('POST', runs, { inputs: {} });
   }, T);
+
+  it.skipIf(W022P !== '')(named('E2E-PARC-022 — 4.1 a run is played: its agent node runs a cloud session, its gate waits for the yes, the run succeeds; another is cancelled', W022P), async () => {
+    const a = await owner('parc-022-p');
+    // The gate's approver is another member: whoever started the run never approves its gate alone (four eyes, the
+    // server's self-approval rule refuses the starter's yes when nobody else can answer).
+    const reviewer = await invited(a, 'parc-022-pr');
+    const login = (await profileOf(reviewer.caller)).login;
+    const wid = `parc-${randomUUID().slice(0, 8)}`;
+    const nodes = [
+      { id: 'build', kind: 'agent', label: 'Build', run: { instructions: 'Fix the build of {{inputs.branch}}', agent: 'claude' } },
+      { id: 'review', kind: 'gate', label: 'Review', approvers: [login] },
+    ];
+    const edges = [{ from: 'build', to: 'review' }, { from: 'review', to: null, on: 'approved' }];
+    const inputs = [{ id: 'branch', label: 'Branch', required: true }];
+    const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(wid, 'Parc 022 played', 'accepted', { nodes, edges, start: 'build', inputs }));
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const start = async () => {
+      const r = await call(a.c, 'POST', `/api/v1/workflows/${wid}/runs`, { inputs: { branch: 'main' } });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      return r.body['id'] as string;
+    };
+    const id = await start();
+
+    // 1. The agent node: a cloud session of the starter, with the node's prompt; the run is running on it.
+    const running = await runUntil(a.c, id, (r) => typeof r['sessionId'] === 'string');
+    expect(running).toMatchObject({ status: 'running', currentNodeId: 'build' });
+    const session = running['sessionId'] as string;
+    expect((running['visits'] as Record<string, unknown>[])[0]).toMatchObject({ seq: 1, nodeId: 'build', kind: 'agent', status: 'running', sessionId: session });
+    const cloud = await call(a.c, 'GET', `/api/v1/cloud/sessions/${session}`);
+    expect(cloud.status, JSON.stringify(cloud.body)).toBe(200);
+    expect(cloud.body).toMatchObject({ id: session, agent: 'claude', name: 'Parc 022 played · Build' });
+    // The session ends (no runner takes it on the bench): the node is done, and the gate opens for its approver.
+    expect((await call(a.c, 'DELETE', `/api/v1/cloud/sessions/${session}`)).status).toBeLessThan(300);
+    const waiting = await runUntil(a.c, id, (r) => r['status'] === 'waiting');
+    const [agent, review] = waiting['visits'] as Record<string, unknown>[];
+    expect(agent).toMatchObject({ nodeId: 'build', status: 'done', outcome: 'next' });
+    expect(review).toMatchObject({ seq: 2, nodeId: 'review', kind: 'gate', status: 'waiting' });
+    expect(waiting['currentNodeId']).toBe('review');
+
+    // 2. The gate node: its approver's pending approval; the yes ends the run succeeded.
+    const pending = await call(reviewer.caller, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
+    const mine = itemsOf(pending.body).find((x) => x['group'] === review?.['gateId']);
+    expect(mine, JSON.stringify({ run: waiting, pending: pending.body })).toBeDefined();
+    const yes = await call(reviewer.caller, 'POST', `/api/v1/approvals/${String(mine?.['id'])}/answer`, { answer: 'approve', shownDigest: mine?.['shownDigest'] });
+    expect(yes.status, JSON.stringify(yes.body)).toBe(200);
+    const ended = await runUntil(a.c, id, (r) => r['status'] !== 'waiting');
+    expect(ended['status'], JSON.stringify(ended)).toBe('succeeded');
+    expect(ended['currentNodeId']).toBeUndefined();
+    expect((ended['visits'] as Record<string, unknown>[]).map((v) => [v['nodeId'], v['status'], v['outcome']])).toEqual([
+      ['build', 'done', 'next'],
+      ['review', 'done', 'approved'],
+    ]);
+    expect(typeof ended['endedAt']).toBe('string');
+    // An ended run is not cancelled.
+    expect((await call(a.c, 'POST', `/api/v1/runs/${id}/cancel`)).status).toBe(409);
+
+    // 3. Another run is cancelled while its agent works: a member may not, the owner does, its session is ended.
+    const other = await start();
+    const second = (await runUntil(a.c, other, (r) => typeof r['sessionId'] === 'string'))['sessionId'] as string;
+    const member = await invited(a, 'parc-022-pm');
+    const m: Caller = { ...member.caller, org: a.org.id };
+    expect((await call(m, 'GET', `/api/v1/runs/${other}`)).status).toBe(200);
+    expect((await call(m, 'POST', `/api/v1/runs/${other}/cancel`)).status).toBe(403);
+    const b = await owner('parc-022-pb');
+    expect((await call(b.c, 'GET', `/api/v1/runs/${other}`)).status).toBe(404);
+    expect((await call(b.c, 'POST', `/api/v1/runs/${other}/cancel`)).status).toBe(404);
+    const cancelled = await call(a.c, 'POST', `/api/v1/runs/${other}/cancel`);
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    expect(cancelled.body).toMatchObject({ id: other, status: 'cancelled' });
+    expect((cancelled.body['visits'] as Record<string, unknown>[])[0]).toMatchObject({ nodeId: 'build', status: 'failed', outcome: 'cancelled' });
+    expect((await call(a.c, 'POST', `/api/v1/runs/${other}/cancel`)).status).toBe(409);
+    const until = Date.now() + 60_000;
+    for (;;) {
+      const s = await call(a.c, 'GET', `/api/v1/cloud/sessions/${second}`);
+      if (s.body['desiredStatus'] === 'terminated' || s.body['status'] === 'terminated' || s.status === 404) break;
+      if (Date.now() > until) throw new Error(`session ${second} of a cancelled run: ${JSON.stringify(s.body)}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    expect((await call(a.c, 'GET', `/api/v1/runs/${randomUUID()}`)).status).toBe(404);
+    await needsCredential('GET', `/api/v1/runs/${id}`);
+    await needsCredential('POST', `/api/v1/runs/${id}/cancel`);
+  }, 180_000);
+
+  it.skipIf(W022P !== '')(named('E2E-PARC-022 — 4.1 a run waits for its question, then a check follows its answer and a child run of another workflow plays to its end; a cancelled one withdraws its wait', W022P), async () => {
+    const a = await owner('parc-022-w');
+    // The wait's assignee is another member, who answers it from their own waits.
+    const reviewer = await invited(a, 'parc-022-wr');
+    const login = (await profileOf(reviewer.caller)).login;
+    const r: Caller = { ...reviewer.caller, org: a.org.id };
+    const tag = randomUUID().slice(0, 8);
+    const child = `parc-child-${tag}`;
+    const parent = `parc-parent-${tag}`;
+    const target = [{ id: 'target', label: 'Target', required: true }];
+    const built = await call(a.c, 'POST', '/api/v1/workflows', workflow(child, 'Parc 022 child', 'accepted', { inputs: target }));
+    expect(built.status, JSON.stringify(built.body)).toBe(201);
+    const question = { title: 'Ship it?', fields: [{ id: 'note', type: 'text', label: 'Note' }], actions: [{ id: 'ship', label: 'Ship' }, { id: 'hold', label: 'Hold' }] };
+    const nodes = [
+      { id: 'ask', kind: 'wait', label: 'Ask', approvers: [login], wait: question },
+      { id: 'verdict', kind: 'check', label: 'Shipped?', condition: { step: 'ask', path: 'outcome', op: 'equals', value: 'ship' } },
+      { id: 'call', kind: 'workflow', label: 'Build', workflowId: child, arguments: { target: '{{inputs.branch}}' } },
+    ];
+    const edges = [{ from: 'ask', to: 'verdict', on: 'ship' }, { from: 'verdict', to: 'call', on: 'true' }];
+    const inputs = [{ id: 'branch', label: 'Branch', required: true }];
+    const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(parent, 'Parc 022 waits', 'accepted', { nodes, edges, start: 'ask', inputs }));
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const start = async () => {
+      const s = await call(a.c, 'POST', `/api/v1/workflows/${parent}/runs`, { inputs: { branch: 'main' } });
+      expect(s.status, JSON.stringify(s.body)).toBe(201);
+      return s.body['id'] as string;
+    };
+    const id = await start();
+
+    // 1. The wait node asks its question of the reviewer, for the run; the run waits on it.
+    const asked = await runUntil(a.c, id, (x) => x['status'] !== 'queued' && x['status'] !== 'running');
+    expect(asked, JSON.stringify(asked)).toMatchObject({ status: 'waiting', currentNodeId: 'ask' });
+    const visit = (asked['visits'] as Record<string, unknown>[])[0];
+    expect(visit).toMatchObject({ seq: 1, nodeId: 'ask', kind: 'wait', status: 'waiting' });
+    const waitId = visit?.['waitId'] as string;
+    const wait = await call(r, 'GET', `/api/v1/waits/${waitId}`);
+    expect(wait.status, JSON.stringify(wait.body)).toBe(200);
+    expect(wait.body).toMatchObject({ id: waitId, status: 'open', runId: id, question: { title: 'Ship it?' } });
+
+    // 2. The reviewer answers `ship`: the workflow node starts a child run of the other workflow, which ends; so does the run.
+    const answered = await call(r, 'POST', `/api/v1/waits/${waitId}/answer`, { action: 'ship', values: { note: 'go' } });
+    expect(answered.status, JSON.stringify(answered.body)).toBeLessThan(300);
+    const ended = await runUntil(a.c, id, (x) => x['status'] !== 'waiting' && x['status'] !== 'running');
+    expect(ended['status'], JSON.stringify(ended)).toBe('succeeded');
+    const [ask, verdict, call1] = ended['visits'] as Record<string, unknown>[];
+    expect(ask).toMatchObject({ nodeId: 'ask', status: 'done', outcome: 'ship' });
+    expect(JSON.parse(String(ask?.['output']))).toEqual({ note: 'go' });
+    expect(verdict).toMatchObject({ seq: 2, nodeId: 'verdict', kind: 'check', status: 'done', outcome: 'true' });
+    expect(call1).toMatchObject({ seq: 3, nodeId: 'call', kind: 'workflow', status: 'done', outcome: 'next' });
+    const childId = call1?.['childRunId'] as string;
+    const sub = await call(a.c, 'GET', `/api/v1/runs/${childId}`);
+    expect(sub.status, JSON.stringify(sub.body)).toBe(200);
+    expect(sub.body).toMatchObject({ id: childId, workflowId: child, status: 'succeeded', source: 'workflow', parentRunId: id, inputs: { target: 'main' } });
+    const b = await owner('parc-022-wb');
+    expect((await call(b.c, 'GET', `/api/v1/runs/${childId}`)).status).toBe(404);
+    await hidden(b.c, `/api/v1/waits/${waitId}`, 'Ship it?');
+
+    // 3. Another run is cancelled while it waits: its wait is withdrawn.
+    const other = await start();
+    const held = await runUntil(a.c, other, (x) => x['status'] === 'waiting');
+    const otherWait = (held['visits'] as Record<string, unknown>[])[0]?.['waitId'] as string;
+    const cancelled = await call(a.c, 'POST', `/api/v1/runs/${other}/cancel`);
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    const until = Date.now() + 60_000;
+    for (;;) {
+      const w = await call(r, 'GET', `/api/v1/waits/${otherWait}`);
+      if (w.body?.['status'] === 'cancelled') break;
+      if (Date.now() > until) throw new Error(`wait ${otherWait} of a cancelled run: ${JSON.stringify(w.body)}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }, 180_000);
 
   it.skipIf(W023 !== '')(named('E2E-PARC-023 — 4.2 an automation is created, edited, disabled, dry-run, its webhook secret rotated, deleted', W023), async () => {
     const a = await owner('parc-023');
@@ -620,6 +1167,100 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect((await call(a.c, 'GET', `/api/v1/waits/${other.body['id'] as string}`)).body?.['status']).toBe('cancelled');
     const b = await owner('parc-024-b');
     await hidden(b.c, `/api/v1/waits/${id}`, 'Ship it?');
+  }, T);
+
+  it.skipIf(W044 !== '')(named('E2E-PARC-044 — 4.3 an agent token asks only its person, sees and cancels only the waits its person asked, never answers; a resumed segment asks too', W044), async () => {
+    const a = await owner('parc-044');
+    const repo = `acme/parc-${randomUUID().slice(0, 8)}`;
+    // A second person of the org, who asks the owner a question about the owner's session.
+    const otherEmail = email('parc-044-m');
+    expect((await invite(a.person, a.org.id, [otherEmail], 'member')).status).toBe(200);
+    const { person: other, accepted } = await join(otherEmail);
+    expect(accepted.status).toBe(200);
+    const m: Caller = { ...other.caller, org: a.org.id };
+
+    // The owner's launch hands an agent token; its first hook opens the session the waits server is bound to.
+    const launch = await call(a.c, 'POST', '/api/v1/launches', { agent: 'claude', repo });
+    expect(launch.status, JSON.stringify(launch.body)).toBe(201);
+    const agent: Caller = { token: launch.body['agentToken'] as string, org: a.org.id, ...(a.c.from ? { from: a.c.from } : {}) };
+    const sid = randomUUID();
+    const opened = await call(agent, 'POST', '/api/v1/sessions', { id: sid, launchId: launch.body['launchId'], repo, agent: 'claude' });
+    expect(opened.status, JSON.stringify(opened.body)).toBeLessThan(300);
+    const init = await waitsMcp(agent, sid, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } });
+    expect(JSON.stringify(init)).toContain('ostrom-waits');
+    const tools = JSON.stringify(await waitsMcp(agent, sid, 'tools/list'));
+    for (const t of ['ask_human', 'list_waits', 'get_wait', 'cancel_wait']) expect(tools).toContain(t);
+    expect(tools, 'the agent has no tool to answer').not.toMatch(/"name":"answer/);
+
+    // The agent asks its person: the wait is the owner's, in this session.
+    const asked = await waitsTool(agent, sid, 'ask_human', { title: 'Parc 044 own', actions: [{ id: 'yes', label: 'Yes' }] });
+    expect(asked.isError, asked.text).toBe(false);
+    const own = askedWait(asked.text);
+    expect(own, asked.text).not.toBe('');
+    const ownWait = await call(a.c, 'GET', `/api/v1/waits/${own}`);
+    expect(ownWait.body, JSON.stringify(ownWait.body)).toMatchObject({ status: 'open', sessionId: sid, question: { title: 'Parc 044 own' } });
+    const ownerMember = ownWait.body['assignee'] as string;
+
+    // Another person asks the owner about the same session: the agent neither lists, reads nor cancels that wait.
+    const theirs = await call(m, 'POST', '/api/v1/waits', { question: { title: 'Parc 044 theirs', actions: [{ id: 'ok', label: 'OK' }] }, sessionId: sid, assignee: ownerMember });
+    expect(theirs.status, JSON.stringify(theirs.body)).toBeLessThan(300);
+    const theirsId = theirs.body['id'] as string;
+    const listed = await waitsTool(agent, sid, 'list_waits', { status: 'all' });
+    expect(listed.text).toContain(own);
+    expect(listed.text).not.toContain(theirsId);
+    expect(listed.text).not.toContain('Parc 044 theirs');
+    for (const tool of ['get_wait', 'cancel_wait']) {
+      const r = await waitsTool(agent, sid, tool, { wait: theirsId });
+      expect(r.isError, `${tool}: ${r.text}`).toBe(true);
+      expect(r.text).not.toContain('Parc 044 theirs');
+    }
+    expect((await call(a.c, 'GET', `/api/v1/waits/${theirsId}`)).body?.['status'], 'still open').toBe('open');
+
+    // The agent asks only its person: naming the other member is a tool error, and no wait is opened.
+    // The other person's member id: the assignee of a wait they ask themselves.
+    const self = await call(m, 'POST', '/api/v1/waits', { question: { title: 'Parc 044 self', actions: [{ id: 'ok', label: 'OK' }] } });
+    expect(self.status, JSON.stringify(self.body)).toBeLessThan(300);
+    const otherMember = self.body['assignee'] as string;
+    expect(otherMember).not.toBe(ownerMember);
+    const elsewhere = await waitsTool(agent, sid, 'ask_human', { title: 'Parc 044 elsewhere', assignee: otherMember });
+    expect(elsewhere.isError, elsewhere.text).toBe(true);
+    expect((await waitsTool(agent, sid, 'list_waits', { status: 'all' })).text).not.toContain('Parc 044 elsewhere');
+
+    // It never answers, not even its own question: the waits API refuses an agent token whatever it asks.
+    const answer = await call(agent, 'POST', `/api/v1/waits/${own}/answer`, { action: 'yes' });
+    expect(answer.status, JSON.stringify(answer.body)).toBe(403);
+    expect((await call(agent, 'GET', `/api/v1/waits/${own}`)).status).toBe(403);
+    expect((await call(a.c, 'GET', `/api/v1/waits/${own}`)).body?.['status']).toBe('open');
+
+    // It reads and cancels its own.
+    const got = await waitsTool(agent, sid, 'get_wait', { wait: own });
+    expect(got.isError, got.text).toBe(false);
+    expect(got.text).toContain('Parc 044 own');
+    expect((await waitsTool(agent, sid, 'cancel_wait', { wait: own })).isError).toBe(false);
+    expect((await call(a.c, 'GET', `/api/v1/waits/${own}`)).body?.['status']).toBe('cancelled');
+
+    // Resumed by another launch (`claude --resume` keeps the id), the session is segment `<id>~r<n>`: its agent asks
+    // in that segment, and sees only what it asked there.
+    expect((await call(agent, 'POST', `/api/v1/sessions/${sid}/end`, {})).status).toBeLessThan(300);
+    const relaunch = await call(a.c, 'POST', '/api/v1/launches', { agent: 'claude', repo });
+    expect(relaunch.status, JSON.stringify(relaunch.body)).toBe(201);
+    const agent2: Caller = { ...agent, token: relaunch.body['agentToken'] as string };
+    const resumed = await call(agent2, 'POST', '/api/v1/sessions', { id: sid, launchId: relaunch.body['launchId'], repo, agent: 'claude' });
+    expect(resumed.status, JSON.stringify(resumed.body)).toBeLessThan(300);
+    const segment = String(resumed.body['id'] ?? (resumed.body['session'] as Record<string, unknown> | undefined)?.['id'] ?? '');
+    expect(segment, JSON.stringify(resumed.body)).toMatch(new RegExp(`^${sid}~r\\d+$`));
+    const again = await waitsTool(agent2, segment, 'ask_human', { title: 'Parc 044 resumed' });
+    expect(again.isError, again.text).toBe(false);
+    const resumedWait = askedWait(again.text);
+    expect((await call(a.c, 'GET', `/api/v1/waits/${resumedWait}`)).body).toMatchObject({ status: 'open', sessionId: segment });
+    const listed2 = await waitsTool(agent2, segment, 'list_waits', { status: 'all' });
+    expect(listed2.text).toContain(resumedWait);
+    expect(listed2.text).not.toContain(own);
+    expect(listed2.text).not.toContain(theirsId);
+
+    // Another org sees none of it.
+    const b = await owner('parc-044-b');
+    await hidden(b.c, `/api/v1/waits/${resumedWait}`, 'Parc 044');
   }, T);
 });
 
@@ -737,10 +1378,13 @@ describe('E2E-PARC: 5. the CLI, gates, receipts (server side)', () => {
 const W031 = (await needs(['GET', '/api/v1/sessions'], ['GET', '/api/v1/sessions/{id}'])) || ACTORS;
 const W032 = await needs(['GET', '/api/v1/cloud/sessions'], ['GET', '/api/v1/runners']);
 const W033 = await needs(['GET', '/api/v1/activity']);
+const W045 = (await needs(['GET', '/api/v1/activity'], ['POST', '/api/v1/rules'], ['POST', '/api/v1/gates'], ['POST', '/api/v1/tokens'])) || ORG64;
 const W034 = (await needs(['GET', '/api/v1/usage'], ['GET', '/api/v1/usage/summary'], ['GET', '/api/v1/usage/events'])) || ORG64;
 const W035 = (await needs(['POST', '/api/v1/import/teamcode'])) || ORG64;
 const W036 = (await needs(['POST', '/api/v1/auth/mobile/token'], ['GET', '/api/v1/approvals/queue'], ['GET', '/api/v1/approvals/{id}/view'], ['GET', '/api/v1/me/notifications'], ['PUT', '/api/v1/me/notifications'])) || ACTORS;
 const W037 = await needs(['POST', '/api/v1/push-devices'], ['DELETE', '/api/v1/push-devices/{id}']);
+// The sending itself has no route to probe: the bench says where the fake Expo listens once the server points at it.
+const W046 = (FAKE_EXPO_PORT === 0 ? 'no OSTROM_E2E_FAKE_EXPO_PORT (fake Expo, ostrom-server#228)' : '') || W013 || W037 || (await needs(['POST', '/api/v1/auth/logout']));
 
 describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => {
   it.skipIf(W031 !== '')(named('E2E-PARC-031 — 6.1 the sessions of a new org: an empty list, an unknown session 404, nothing for another org', W031), async () => {
@@ -782,6 +1426,50 @@ describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => 
     const b = await owner('parc-033-b');
     await hidden(b.c, '/api/v1/activity', a.org.id);
     await needsCredential('GET', '/api/v1/activity');
+  }, T);
+
+  it.skipIf(W045 !== '')(named('E2E-PARC-045 — 6.3 a gate line of the activity feed carries its repository, the real one first, none outside a repository, never another org', W045), async () => {
+    const a = await owner('parc-045');
+    const login = (await profileOf(a.person.caller)).login;
+    const repo = `acme/parc-${randomUUID().slice(0, 8)}`;
+    const real = `acme/real-${randomUUID().slice(0, 8)}`;
+    // A rule whose gate covers a push to main in every repository (an action without `repos`), asked by a token.
+    const rule = await call(a.c, 'POST', '/api/v1/rules', {
+      statement: 'A push to main waits for a yes', group: 'git', scope: [],
+      gate: { actions: [{ class: 'push-main', label: 'Push to main', patterns: [], repos: [] }], approvers: [login] },
+    });
+    expect(rule.status, JSON.stringify(rule.body)).toBe(201);
+    const token = await call(a.c, 'POST', '/api/v1/tokens', { name: 'parc-045 asker', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
+    expect(token.status, JSON.stringify(token.body)).toBeLessThan(300);
+    const asker: Caller = { token: String(token.body['secret']), org: a.org.id };
+    const sha = () => randomUUID().replaceAll('-', '').padEnd(40, '0').slice(0, 40);
+    const push = async (where: Record<string, string>) => {
+      const asked = await call(asker, 'POST', '/api/v1/gates', { ...where, class: 'push-main', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha: sha() }] } });
+      expect(asked.status, JSON.stringify(asked.body)).toBeLessThan(300);
+      const gate = asked.body['gate'] as Record<string, unknown>;
+      expect(gate['status'], JSON.stringify(asked.body)).toBe('pending');
+      return gate['id'] as string;
+    };
+    const declared = await push({ repo });
+    const moved = await push({ repo, realRepo: real });
+    const outside = await push({});
+
+    const feed = itemsOf((await call(a.c, 'GET', '/api/v1/activity?limit=50')).body);
+    const line = (gate: string) => {
+      const found = feed.find((i) => i['id'] === `gate.requested:${gate}`);
+      expect(found, JSON.stringify(feed)).toBeDefined();
+      return found as Record<string, unknown>;
+    };
+    expect(line(declared)['repo']).toBe(repo);
+    expect(line(moved)['repo'], 'the repository the command really ran in').toBe(real);
+    expect('repo' in line(outside), 'no repository: the field is not sent').toBe(false);
+
+    // Another org's feed names none of them, and carries only its own repositories.
+    const b = await owner('parc-045-b');
+    const theirs = await call(b.c, 'GET', '/api/v1/activity?limit=50');
+    expect(theirs.status).toBe(200);
+    for (const marker of [repo, real, declared, moved, outside]) expect(JSON.stringify(theirs.body)).not.toContain(marker);
+    expect((await call({ ...b.person.caller, org: a.org.id }, 'GET', '/api/v1/activity')).status).toBe(404);
   }, T);
 
   it.skipIf(W034 !== '')(named('E2E-PARC-034 — 6.4 usage of a new org: the report, the summary and the events read, for the org only', W034), async () => {
@@ -838,4 +1526,86 @@ describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => 
     expect((await call(a.c, 'DELETE', `/api/v1/push-devices/${made.body['id'] as string}`)).status).toBeLessThan(300);
     await needsCredential('POST', '/api/v1/push-devices', { pushToken, provider: 'expo', platform: 'ios' });
   }, T);
+
+  it.skipIf(W046 !== '')(named("E2E-PARC-046 — 6.7 a request for a yes reaches the approver's live phones of the org and their mailbox, no other phone, even when Expo fails", W046), async () => {
+    const expo = await new FakeExpo().start(FAKE_EXPO_PORT);
+    try {
+      const a = await owner('parc-038');
+      const reviewerEmail = email('parc-038-rev');
+      expect((await invite(a.person, a.org.id, [reviewerEmail], 'admin')).status).toBe(200);
+      const { person: reviewer, accepted } = await join(reviewerEmail);
+      expect(accepted.status).toBe(200);
+      const login = (await profileOf(reviewer.caller)).login;
+      const phone = (name: string) => `ExponentPushToken[parc-038-${name}-${randomUUID()}]`;
+      const register = async (c: Caller, pushToken: string) => {
+        const made = await call(c, 'POST', '/api/v1/push-devices', { pushToken, provider: 'expo', platform: 'ios' });
+        expect(made.status, JSON.stringify(made.body)).toBe(201);
+      };
+      // The reviewer's live phone in the gate's organization: the only one told.
+      const live = phone('live');
+      await register({ ...reviewer.caller, org: a.org.id }, live);
+      // A phone registered from another session of the reviewer, then signed out of: forgotten with the session.
+      const signedOut = phone('signed-out');
+      const other = await signIn(reviewerEmail);
+      await register({ ...other.caller, org: a.org.id }, signedOut);
+      expect((await call(other.caller, 'POST', '/api/v1/auth/logout')).status).toBeLessThan(300);
+      // The reviewer's phone in another organization they belong to: never read for this one's gates.
+      const b = await owner('parc-038-b');
+      expect((await invite(b.person, b.org.id, [reviewerEmail])).status).toBe(200);
+      const { person: inB, accepted: joinedB } = await join(reviewerEmail);
+      expect(joinedB.status).toBe(200);
+      const otherOrg = phone('other-org');
+      await register({ ...inB.caller, org: b.org.id }, otherOrg);
+      // The asker's own phone: the owner is no approver of the rule.
+      const owners = phone('owner');
+      await register(a.c, owners);
+      const ours = new Set([live, signedOut, otherOrg, owners]);
+
+      const repo = `acme/parc-${randomUUID().slice(0, 8)}`;
+      const made = await call(a.c, 'POST', '/api/v1/rules', {
+        statement: 'A push to main waits for a review', group: 'git', scope: [repo],
+        gate: { actions: [{ class: 'push-main', label: 'Push to main', patterns: [], repos: [repo] }], approvers: [login] },
+      });
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      const token = await call(a.c, 'POST', '/api/v1/tokens', { name: 'parc-038 asker', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
+      expect(token.status, JSON.stringify(token.body)).toBeLessThan(300);
+      const asker: Caller = { token: String(token.body['secret']), org: a.org.id };
+      /** Asks a push to main, answered at once (pending), and the reviewer's request for it. */
+      const ask = async (fill: string) => {
+        const sha = randomUUID().replaceAll('-', '').padEnd(40, fill).slice(0, 40);
+        const asked = await call(asker, 'POST', '/api/v1/gates', { repo, class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
+        expect(asked.status, JSON.stringify(asked.body)).toBeLessThan(300);
+        const gate = asked.body['gate'] as Record<string, unknown>;
+        expect(gate['status'], JSON.stringify(asked.body)).toBe('pending');
+        const pending = await call({ ...reviewer.caller, org: a.org.id }, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
+        const request = itemsOf(pending.body).find((x) => x['group'] === gate['id']);
+        expect(request, JSON.stringify({ gate: asked.body, pending: pending.body })).toBeDefined();
+        return String(request?.['id']);
+      };
+
+      const first = await ask('0');
+      const pushed = await expo.waitFor((m) => m.to === live, 30_000);
+      expect(pushed.data).toEqual({ kind: 'approval', approvalId: first });
+      // The lock screen shows the push to whoever holds the phone: the app's `requests` channel, and no word of the request.
+      expect(pushed.channelId).toBe('requests');
+      expect(`${pushed.title} ${pushed.body}`).not.toMatch(/acme|Push to main|ana/i);
+      const mailed = await mailWith(reviewerEmail, `/yes/${first}`, 30_000);
+      expect(mailed, 'the e-mail names no push token').not.toMatch(/ExponentPushToken/);
+      // The outbox sends a request's notices together: a moment more, and still no other phone of ours was told.
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      expect(expo.messages.filter((m) => m.to !== undefined && ours.has(m.to)).map((m) => m.to)).toEqual([live]);
+
+      // Expo down: the request is still pending at once, the e-mail still goes, and the push arrives on a later try.
+      expo.refuseNext = 1;
+      const second = await ask('1');
+      await mailWith(reviewerEmail, `/yes/${second}`, 30_000);
+      const retried = await expo.waitFor((m) => m.to === live && m.data['approvalId'] === second, 60_000);
+      expect(retried.data).toEqual({ kind: 'approval', approvalId: second });
+      expect(expo.refused).toBe(1);
+      expect(expo.messages.filter((m) => m.to !== undefined && ours.has(m.to) && m.to !== live)).toEqual([]);
+    } finally {
+      await expo.stop();
+    }
+    // Longer than T: two notices and one retry of the server's outbox (5 s) are awaited.
+  }, 3 * T);
 });
