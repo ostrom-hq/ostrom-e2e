@@ -253,6 +253,43 @@ describe('E2E-PARC: 2. organization setup', () => {
     await needsCredential('POST', '/api/v1/inference/v1/messages', { model: 'claude', messages: [] });
   }, T);
 
+  // The console's form sends the contract's `enrollSharedAccount` body: the token stays in a secret the server reads, and
+  // people are named by login. Before ostrom-server#201 the route read only the tokens' body and answered 400.
+  const W038 = W007 || W009 || (MAIL_DIR === '' ? 'no OSTROM_E2E_MAIL_DIR' : '');
+  it.skipIf(W038 !== '')(named('E2E-PARC-038 — 2.8 the console lends a subscription from a secret to a member by login; the token never comes back', W038), async () => {
+    const a = await owner('parc-038');
+    const invited = email('parc-038-m');
+    expect((await invite(a.person, a.org.id, [invited])).status).toBeLessThan(300);
+    const { person, accepted } = await join(invited);
+    expect(accepted.status, JSON.stringify(accepted.body)).toBeLessThan(300);
+    const member = (await profileOf(person.caller)).login;
+    const ownerLogin = (await profileOf(a.person.caller)).login;
+    const secret = `PARC_${randomUUID().slice(0, 8).toUpperCase()}`;
+    const token = `sk-ant-oat01-parc-${randomUUID()}`;
+    expect((await call(a.c, 'POST', '/api/v1/secrets', { name: secret, value: token })).status).toBeLessThan(300);
+
+    const body = { provider: 'anthropic', label: 'Parc 038', credentialSecret: secret, sharedWith: [member], dailyAllocationUsd: 25 };
+    const made = await call(a.c, 'POST', '/api/v1/accounts', body);
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body).toMatchObject({ provider: 'claude', label: 'Parc 038', owner: ownerLogin, sharedWith: [member], dailyAllocationUsd: 25, paused: false, status: 'ready' });
+    expect(JSON.stringify(made.body)).not.toContain(token);
+    const id = made.body['id'] as string;
+    const listed = await call(a.c, 'GET', '/api/v1/accounts');
+    expect(JSON.stringify(listed.body)).toContain(id);
+    expect(JSON.stringify(listed.body)).not.toContain(token);
+
+    const paused = await call(a.c, 'PATCH', `/api/v1/accounts/${id}`, { paused: true, sharedWith: [], dailyAllocationUsd: 10 });
+    expect(paused.body, JSON.stringify(paused.body)).toMatchObject({ id, paused: true, sharedWith: [], dailyAllocationUsd: 10 });
+    // Nobody outside the organization, no secret that is not there.
+    expect((await call(a.c, 'POST', '/api/v1/accounts', { ...body, sharedWith: ['nobody-here'] })).status).toBe(400);
+    expect((await call(a.c, 'POST', '/api/v1/accounts', { ...body, credentialSecret: 'NO_SUCH_SECRET' })).status).toBe(404);
+    const b = await owner('parc-038-b');
+    await hidden(b.c, '/api/v1/accounts', id);
+    expect((await call(a.c, 'DELETE', `/api/v1/accounts/${id}`)).status).toBeLessThan(300);
+    expect(JSON.stringify((await call(a.c, 'GET', '/api/v1/accounts')).body)).not.toContain(id);
+    await needsCredential('POST', '/api/v1/accounts', body);
+  }, T);
+
   it.skipIf(W008 !== '')(named('E2E-PARC-008 — 2.9 an MCP server is declared, edited and removed; calls and usage read back per org', W008), async () => {
     const a = await owner('parc-008');
     const name = `parc-${randomUUID().slice(0, 8)}`;
