@@ -3526,7 +3526,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 ### E2E-PARC-018 — 3.5 Budget de l'org : réglé, listé avec sa période, lu comme budget du membre
 
 - Étapes : Le propriétaire règle `PUT /api/v1/budgets` `{scope: org, usdPerMonth: 42, hardStop: true}`, lit `GET /budgets` et `GET /budgets/me` ; une autre org lit ses budgets ; il règle le budget d'une personne, la sienne, nommée par l'`id` de `GET /orgs/{org}/members`, par jour et qui prévient seulement (`{scope: member, subject: <id>, usdPerDay: 20, hardStop: false}`) ; deux formes refusées.
-- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; le budget de la personne : 200, listé sous son id avec `usdPerDay: 20`, `hardStop: false` et sans `usdPerMonth`, invisible de l'autre org (ostrom-server#230, 629ae71) ; budget de workflow et portée inconnue : 400.
+- Attendu : `{scope: organization, usdPerMonth: 42, hardStop: true}` (la portée est normalisée) ; la page porte la ligne, `orgSpentUsd`, `periodStart`, `resetsAt` ; `/me` rend `spentMicros: 0`, `exhausted: false` et une limite au plus de 42 $ ; l'autre org n'a pas ce budget ; le budget de la personne : 200, listé sous son id avec `usdPerDay: 20`, `hardStop: false` et sans `usdPerMonth`, invisible de l'autre org (ostrom-server#230, 629ae71) ; portée inconnue : 400 ; budget sur un workflow que l'org n'a pas : 404 (ostrom-server#337, 2869359).
 - Surfaces : serveur (l'écran `/spend` lit ces routes)
 - Source : `demo/PARCOURS.md` 3.5
 - Priorité : P1
@@ -3766,6 +3766,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Source : `demo/PARCOURS.md` 3.5 ; ostrom-server#230 (629ae71, budget d'une personne, jour, `warn`) ; ostrom-server#300 (4f50dd5) ; contrat core#86
 - Priorité : P1
 - Statut : codé : `scenarios/budget.e2e.ts` (s'allume avec le faux fournisseur et `OSTROM_E2E_MAIL_DIR`)
+
+### E2E-PARC-048 — 3.5 Budget d'un workflow par mois : « bloquer » ne refuse que les sessions qui le jouent, « prévenir » laisse passer, se lit dans `/spending` et s'écrit à l'audit
+
+- Étapes : le propriétaire crée deux workflows de l'org (`POST /api/v1/workflows`) et pose sur le premier un budget de 0,01 $ par mois qui bloque (`PUT /api/v1/budgets {scope: workflow, subject: <id du workflow>, usdPerMonth: 0.01, hardStop: true}`), qu'il relit dans `GET /api/v1/budgets` ; un compte Claude partagé ; il lance un agent qui joue ce workflow (`POST /api/v1/launches {workflowId}`). Le faux fournisseur facture 300 000 jetons d'entrée (1,50 $) : un appel `max_tokens` 1, la dépense lue jusqu'à 1 $, puis un second appel. Il lance un agent sans workflow et un agent de l'autre workflow, et fait un appel avec chacun, puis un de plus avec la session du workflow. Il repasse le budget en « prévenir » (`hardStop: false`, même 0,01 $) et refait un appel ; il lit `GET /api/v1/spending?period=month` et `GET /api/v1/audit?event=budget.exceeded`. Une autre org pose un budget sur ce workflow, puis lit ses budgets, sa dépense et son audit.
+- Attendu : le premier appel est servi (200) ; le second est refusé en 429, `rate_limit_error`, « Monthly budget reached: this workflow's limit of $0.01 is spent; it resets on <1er du mois suivant>. », `Retry-After` > 0, sans atteindre le fournisseur ; les appels de la session sans workflow et de celle de l'autre workflow sont servis (200, deux appels de plus au fournisseur), la session du workflow reste refusée (429). En « prévenir », la réponse au `PUT` porte `{scope: workflow, subject: <id>, usdPerMonth: 0.01, hardStop: false}` et l'appel est servi (200) ; `exceeded` de `/spending` porte `{scope: workflow, subject: <id>, period: month, usd: 0.01, hardStop: false}`, rien pour l'autre workflow ; la ligne d'audit `budget.exceeded` existe sous ce workflow, `meta` `{scope: workflow, period: month, action: warn, limit_usd: "0.01"}`. L'autre org reçoit 404 sur le budget (un workflow qu'elle n'a pas) et ne voit ni le budget, ni le dépassement, ni la ligne.
+- Surfaces : serveur (image), lanceur, gateway, budgets, rapports, audit
+- Source : `demo/PARCOURS.md` 3.5 (« un run de main qui joue un budget de workflow qui bloque ») ; ostrom-server#337 (2869359, budgets de workflow, image `sha-f031ec9` de main) ; ostrom-server#314 (7a4fbc5, `createLaunch.workflowId`) ; contrat core#116
+- Priorité : P1
+- Statut : codé : `scenarios/budget.e2e.ts` (s'allume avec le faux fournisseur ; sauté, avec son motif, si `POST /api/v1/workflows`, `GET /api/v1/spending` ou `GET /api/v1/audit` ne sont pas servies)
 
 ## ATT : Attestation des checks d'un reçu (décision du 30/10 13:23)
 
