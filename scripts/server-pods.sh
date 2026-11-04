@@ -4,8 +4,9 @@
 # phase's crash never passes for the next phase's result:
 #   server-pods.sh ready             waits until every server pod and the fakes are Ready again (3 min at most)
 #   server-pods.sh restarts          prints one `namespace/pod=restarts` word per pod (all its containers summed)
-#   server-pods.sh crashed <before>  fails when a pod of <before> restarted or is gone (replaced): prints each pod's
-#                                    restarts and last termination, and the previous server container's last lines
+#   server-pods.sh crashed <before>  after CRASH_GRACE seconds (20), fails when a pod of <before> restarted or is gone
+#                                    (replaced): prints each pod's restarts and last termination, and the previous
+#                                    server container's last lines
 # NS is the release's namespace; the fakes are in ostrom-fakes.
 set -euo pipefail
 selector=app.kubernetes.io/component=server
@@ -34,6 +35,9 @@ case "${1:-}" in
     ;;
   crashed)
     before="${2?the restarts before the phase}"
+    # A killed container counts as a restart only once the kubelet has created the next one: checked the second
+    # k6 ends, the race's 100 × 502 of run 41628103773 met pods that had just died and still counted 0 restarts.
+    sleep "${CRASH_GRACE:-20}"
     after=" $(restarts) "
     gone=""
     for entry in $before; do
