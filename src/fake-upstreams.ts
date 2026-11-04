@@ -6,10 +6,13 @@
 //   `chunks` text deltas, `gapMs` between two of them, `ttfbMs` before the first byte. The gateway passes unknown
 //   members through, so a k6 script shapes the same call made directly and through the gateway.
 // - `/mcp/fast`, `/mcp/slow` (every answer `slowMs` late), `/mcp/hang` (never answers): tools `echo` and `sleep`.
-// - `GET /stats`: calls open, done and cut by the client, for the provider and for MCP; `POST /stats/reset`.
+// - `GET /stats`: calls open, done and cut by the client, for the provider and for MCP; on the HTTPS port, the TCP
+//   connections, the TLS handshakes (full or resumed) and the requests they carried, which tell whether a client reuses
+//   its connections; `POST /stats/reset`.
 import { randomUUID } from 'node:crypto';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import { type Server as HttpsServer, createServer as createTlsServer } from 'node:https';
+import type { TLSSocket } from 'node:tls';
 import type { AddressInfo } from 'node:net';
 
 /** How the fake provider answers a call. */
@@ -81,6 +84,16 @@ export interface Counts {
 
 const zero = (): Counts => ({ open: 0, total: 0, completed: 0, aborted: 0 });
 
+/** What the HTTPS port saw: TCP connections, TLS handshakes (of which resumed sessions), and requests. */
+export interface TlsCounts {
+  connections: number;
+  handshakes: number;
+  resumed: number;
+  requests: number;
+}
+
+const zeroTls = (): TlsCounts => ({ connections: 0, handshakes: 0, resumed: 0, requests: 0 });
+
 /** The protocol versions the fake MCP servers speak (the relay's, newest first). */
 export const MCP_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 export const MCP_TOOLS = [
@@ -142,6 +155,7 @@ export class FakeUpstreams {
   // Replaced, not zeroed, by [reset]: a call still open keeps counting in the counts it started in.
   provider: Counts = zero();
   mcp: Counts = zero();
+  tls: TlsCounts = zeroTls();
   private readonly servers: (Server | HttpsServer)[] = [];
   private readonly slowMs: number;
 
@@ -155,7 +169,16 @@ export class FakeUpstreams {
     const handler = (req: IncomingMessage, res: ServerResponse) => void this.handle(req, res).catch(() => res.destroy());
     const plain = await this.listen(createServer(handler), port, host);
     if (!tls) return { http: `http://${host}:${plain}` };
-    const secure = await this.listen(createTlsServer({ key: tls.key, cert: tls.cert }, handler), tls.port ?? 0, host);
+    const server = createTlsServer({ key: tls.key, cert: tls.cert }, (req: IncomingMessage, res: ServerResponse) => {
+      this.tls.requests++;
+      handler(req, res);
+    });
+    server.on('connection', () => this.tls.connections++);
+    server.on('secureConnection', (socket: TLSSocket) => {
+      this.tls.handshakes++;
+      if (socket.isSessionReused()) this.tls.resumed++;
+    });
+    const secure = await this.listen(server, tls.port ?? 0, host);
     return { http: `http://${host}:${plain}`, https: `https://${host}:${secure}` };
   }
 
@@ -172,6 +195,7 @@ export class FakeUpstreams {
   reset(): void {
     this.provider = zero();
     this.mcp = zero();
+    this.tls = zeroTls();
   }
 
   private async listen(server: Server | HttpsServer, port: number, host: string): Promise<number> {
@@ -188,7 +212,7 @@ export class FakeUpstreams {
     const method = String(req.method);
     if (method === 'GET' && (path === '/health' || path === '/stats')) {
       res.writeHead(200, JSON_TYPE);
-      res.end(path === '/health' ? '{"ok":true}' : JSON.stringify({ provider: this.provider, mcp: this.mcp }));
+      res.end(path === '/health' ? '{"ok":true}' : JSON.stringify({ provider: this.provider, mcp: this.mcp, tls: this.tls }));
       return;
     }
     if (method === 'POST' && path === '/stats/reset') {
