@@ -3016,7 +3016,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Surfaces : serveur (image), identité, portes, base
 - Source : Q-APP-STEPUP-RISK (audit sécurité de l'app, A-S1) ; ostrom-core#121 ; ostrom-server `fix/stepup-bound-unlock`
 - Priorité : jalon
-- Statut : codé : `scenarios/phone-yes.e2e.ts`. Mise de côté **temporaire** : sur un serveur qui ne lie pas encore le déverrouillage, le premier oui passe. Le scénario se met alors de côté, avec un `::warning` et une ligne du résumé du run qui nomme PARCOURS 5.4. La PR qui suit la fusion du serveur retire cette mise de côté : ensuite, un serveur qui cesse de lier le déverrouillage fait échouer le scénario.
+- Statut : codé : `scenarios/phone-yes.e2e.ts`, sans mise de côté : un serveur qui accepte l'un des trois oui refusés fait échouer le scénario (le lien est posé par ostrom-server#330).
 
 ## LOAD : Charge (k6)
 
