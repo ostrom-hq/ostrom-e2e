@@ -3400,6 +3400,15 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
 
+### E2E-PARC-038 — 2.8 Compte partagé prêté depuis un secret : le corps du contrat, les membres par login
+
+- Étapes : Le propriétaire invite un membre, écrit un secret qui contient un jeton (`POST /api/v1/secrets`), puis envoie le corps `enrollSharedAccount` du contrat, celui du formulaire de la console (`POST /api/v1/accounts` : `provider: anthropic`, `label`, `credentialSecret`, `sharedWith: [login du membre]`, `dailyAllocationUsd: 25`) ; il relit la liste, met le compte en pause, l'ouvre à toute l'org et change sa part du jour (`PATCH`) ; il essaie un login hors de l'org et un secret absent ; une autre org lit la liste ; il supprime le compte.
+- Attendu : 201 `{provider: claude, label, owner: <son login>, sharedWith: [<login du membre>], dailyAllocationUsd: 25, paused: false, status: ready}` ; le jeton du secret ne revient jamais ; `PATCH` rend `{paused: true, sharedWith: [], dailyAllocationUsd: 10}` ; 400 pour un login hors de l'org, 404 pour un secret absent ; l'autre org ne voit pas l'id ; supprimé, il disparaît ; 401 sans identifiant.
+- Surfaces : serveur (la console envoie ce corps : `e2e-real/secrets.spec.ts` d'ostrom-web prouve l'écran)
+- Source : `demo/PARCOURS.md` 2.8 et 2.10 (prêt d'abonnement)
+- Priorité : P1
+- Statut : codé : `scenarios/parcours.e2e.ts` (vert sur une image qui contient ostrom-server#201 ; avant, 400)
+
 ### E2E-PARC-008 — 2.9 Serveur MCP : déclaration, édition, retrait ; appels et usage
 
 - Étapes : Le propriétaire déclare un serveur `http` (`POST /api/v1/mcp/servers`), le liste, le modifie (`PUT /mcp/servers/{name}`, désactivé), lit `GET /mcp/calls` et `GET /mcp/usage`, le supprime ; une autre org liste les serveurs.
