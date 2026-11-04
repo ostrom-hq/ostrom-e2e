@@ -8,6 +8,10 @@
 // E2E-PARC-047 : a person's budget by the day (ostrom-server#230), named by their member id. « block » refuses that
 // person, « Daily budget reached », and no other member; « warn » lets the call through, shows the budget past in
 // `/spending` (`exceeded`) and writes `budget.exceeded` to the org's audit log; another org sees none of it.
+// E2E-PARC-048 : a workflow's budget (ostrom-server#337), named by the workflow's id (`subject`), counts the model calls
+// of the launches that play it (`createLaunch.workflowId`, server#314). « block » refuses those calls only, « Monthly
+// budget reached: this workflow's limit », and no session without the workflow or of another one; « warn » lets the
+// call through, shows the budget past in `/spending` and writes `budget.exceeded` with `scope: workflow`.
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -38,6 +42,15 @@ async function unservedPerson(): Promise<string> {
   for (const [method, path] of needed) if (!(await isServed(SERVER_URL, path, method))) missing.push(`${method} ${path}`);
   return missing.length ? `not served yet: ${missing.join(', ')}` : '';
 }
+
+/** A workflow's budget needs the workflows, the spending and the audit log (ostrom-server#337, f031ec9 on main). */
+async function unservedWorkflow(): Promise<string> {
+  const needed: [string, string][] = [['POST', '/api/v1/workflows'], ['GET', '/api/v1/spending'], ['GET', '/api/v1/audit']];
+  const missing: string[] = [];
+  for (const [method, path] of needed) if (!(await isServed(SERVER_URL, path, method))) missing.push(`${method} ${path}`);
+  return missing.length ? `not served yet: ${missing.join(', ')}` : '';
+}
+const WHY_WORKFLOW = WHY_PROVIDER || (await unservedWorkflow());
 const named = (title: string, why: string) => (why === '' ? title : `${title} (skipped: ${why})`);
 
 /** An owner whose organization has a budget of $1 a month, hard stop, and the agent token of one of its launches. */
@@ -221,5 +234,89 @@ describe('E2E-BUDGET: the gateway keeps a model call within the monthly budget',
     const theirs = await call(b, 'GET', '/api/v1/audit?event=budget.exceeded');
     expect(theirs.status, JSON.stringify(theirs.body)).toBe(200);
     expect(JSON.stringify(theirs.body)).not.toContain(self);
+  }, 2 * T);
+
+  it.skipIf(WHY_WORKFLOW !== '')(named('E2E-PARC-048 3.5 a workflow\u2019s monthly budget: « block » refuses the calls of its sessions only, « warn » lets them through, shows it past in /spending and writes the audit line', WHY_WORKFLOW), async () => {
+    await listen();
+    const owner = await signIn(email('parc-048'));
+    const org = await orgOf(owner);
+    const c = { ...owner.caller, org: org.id };
+    // Two workflows of the org (contract `Workflow`: one trigger node); the budget names the first by its id.
+    const workflow = (id: string, name: string) => ({ id, name, domain: 'git', nodes: [{ id: 'start', kind: 'trigger', label: 'Session start' }], edges: [], start: 'start', status: 'proposed', foundAt: new Date().toISOString() });
+    const wid = `parc-048-${randomUUID().slice(0, 8)}`;
+    const otherWid = `parc-048-${randomUUID().slice(0, 8)}`;
+    for (const [id, name] of [[wid, 'Parc 048'], [otherWid, 'Parc 048 other']] as const) {
+      const made = await call(c, 'POST', '/api/v1/workflows', workflow(id, name));
+      expect(made.status, JSON.stringify(made.body)).toBeLessThan(300);
+    }
+    // A tiny monthly budget on that workflow, that stops: one cent.
+    const block = await call(c, 'PUT', '/api/v1/budgets', { scope: 'workflow', subject: wid, usdPerMonth: 0.01, hardStop: true });
+    expect(block.status, JSON.stringify(block.body)).toBe(200);
+    expect(block.body).toMatchObject({ scope: 'workflow', subject: wid, usdPerMonth: 0.01, hardStop: true });
+    const items = (b: Record<string, unknown>) => ((b['items'] ?? []) as Record<string, unknown>[]).filter((i) => i['subject'] === wid);
+    expect(items((await call(c, 'GET', '/api/v1/budgets')).body)).toEqual([expect.objectContaining({ scope: 'workflow', usdPerMonth: 0.01, hardStop: true })]);
+    await sharedAccount(c, 'Max of parc-048');
+    const launch = async (workflowId?: string) => {
+      const r = await call(c, 'POST', '/api/v1/launches', { agent: 'claude', repo: 'acme/parc-048', ...(workflowId ? { workflowId } : {}) });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      return String(r.body['agentToken']);
+    };
+    const token = await launch(wid);
+    const hello = [{ role: 'user', content: 'hello' }];
+
+    // « block »: $1.50 billed ($5 per million input tokens) to a session of the workflow spends its cent.
+    provider.usage = { input_tokens: 300_000, output_tokens: 1 };
+    const before = provider.calls.length;
+    const first = await infer(token, 1, hello);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    await readUntil(c, '/api/v1/spending?period=month', (b) => Number(b['totalUsd']) >= 1);
+    const refused = await infer(token, 1, hello);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(429);
+    expect(refused.error.type).toBe('rate_limit_error');
+    expect(refused.error.message ?? '').toMatch(/^Monthly budget reached: this workflow's limit of \$0\.01 is spent; it resets on \d{4}-\d{2}-01\.$/);
+    expect(Number(refused.retryAfter), `retry-after ${refused.retryAfter}`).toBeGreaterThan(0);
+    expect(provider.calls.length - before, 'the refused call never reached the provider').toBe(1);
+
+    // The workflow's budget holds its sessions only: the same person, in a session without a workflow or of another
+    // workflow, is served (no org nor member budget here).
+    provider.usage = { input_tokens: 10, output_tokens: 1 };
+    for (const [what, other] of [['without a workflow', await launch()], ['of another workflow', await launch(otherWid)]] as const) {
+      const passes = await infer(other, 1, hello);
+      expect(passes.status, `${what}: ${JSON.stringify(passes.body)}`).toBe(200);
+    }
+    expect(provider.calls.length - before, 'both served by the provider').toBe(3);
+    // And the workflow's own session is still refused.
+    expect((await infer(token, 1, hello)).status).toBe(429);
+
+    // « warn », the same cent a month: the call goes through although the month is past it.
+    const warn = await call(c, 'PUT', '/api/v1/budgets', { scope: 'workflow', subject: wid, usdPerMonth: 0.01, hardStop: false });
+    expect(warn.status, JSON.stringify(warn.body)).toBe(200);
+    expect(warn.body).toMatchObject({ scope: 'workflow', subject: wid, usdPerMonth: 0.01, hardStop: false });
+    const through = await infer(token, 1, hello);
+    expect(through.status, JSON.stringify(through.body)).toBe(200);
+    // /spending shows the workflow's budget past its limit, as one that warns.
+    const past = (b: Record<string, unknown>) => ((b['exceeded'] ?? []) as Record<string, unknown>[]).filter((e) => e['subject'] === wid);
+    const spending = await readUntil(c, '/api/v1/spending?period=month', (b) => past(b).some((e) => e['hardStop'] === false));
+    expect(past(spending).filter((e) => e['hardStop'] === false)).toEqual([
+      expect.objectContaining({ scope: 'workflow', subject: wid, period: 'month', usd: 0.01, hardStop: false }),
+    ]);
+    expect(((spending['exceeded'] ?? []) as Record<string, unknown>[]).some((e) => e['subject'] === otherWid), 'the other workflow has no budget').toBe(false);
+    // The audit line of the overrun, written by the budgets, under that workflow.
+    const audited = await readUntil(c, '/api/v1/audit?event=budget.exceeded', (b) => ((b['items'] ?? []) as unknown[]).length > 0);
+    const line = ((audited['items'] ?? []) as Record<string, unknown>[]).find((i) => String(i['subject']).includes(wid));
+    expect(line, JSON.stringify(audited)).toBeDefined();
+    expect(line?.['event']).toBe('budget.exceeded');
+    expect(line?.['meta']).toMatchObject({ scope: 'workflow', period: 'month', action: 'warn', limit_usd: '0.01' });
+
+    // Another organization cannot budget that workflow (404, as a workflow it does not have) and sees none of it.
+    const stranger = await signIn(email('parc-048-b'));
+    const b = { ...stranger.caller, org: (await orgOf(stranger)).id };
+    const foreign = await call(b, 'PUT', '/api/v1/budgets', { scope: 'workflow', subject: wid, usdPerMonth: 5, hardStop: true });
+    expect(foreign.status, JSON.stringify(foreign.body)).toBe(404);
+    expect(JSON.stringify((await call(b, 'GET', '/api/v1/budgets')).body)).not.toContain(wid);
+    expect(JSON.stringify((await call(b, 'GET', '/api/v1/spending?period=month')).body)).not.toContain(wid);
+    const theirs = await call(b, 'GET', '/api/v1/audit?event=budget.exceeded');
+    expect(theirs.status, JSON.stringify(theirs.body)).toBe(200);
+    expect(JSON.stringify(theirs.body)).not.toContain(wid);
   }, 2 * T);
 });
