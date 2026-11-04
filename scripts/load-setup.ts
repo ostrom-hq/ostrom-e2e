@@ -50,6 +50,8 @@ async function setup(): Promise<string> {
   out(process.env['GITHUB_ENV'], `OSTROM_LOAD_TOKEN=${secret}`);
   out(process.env['GITHUB_ENV'], `OSTROM_LOAD_APPROVER_COOKIE=${cookie}`);
   out(process.env['GITHUB_ENV'], `OSTROM_LOAD_APPROVER_CSRF=${csrf}`);
+  // scripts/load-approver-signin.ts signs rev-b in again right before the gates: a yes needs a sign-in of < 5 minutes.
+  out(process.env['GITHUB_ENV'], `OSTROM_LOAD_APPROVER_EMAIL=${revBEmail}`);
   return '';
 }
 

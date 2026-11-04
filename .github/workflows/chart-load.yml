@@ -401,6 +401,7 @@ jobs:
           fi
           [ -n "$mail" ] || echo "::warning title=mail directory::the sign-in mails of $pod are not readable from the runner"
           echo "OSTROM_LOAD_MAIL_DIR=$mail" >> "$GITHUB_ENV"
+          echo "OSTROM_LOAD_POD=$pod" >> "$GITHUB_ENV"
           OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="$mail" node scripts/load-setup.ts
       # Registered runners (`ostrom-runner machine`): 500 registered in 5 organizations of their own (100 at most each),
       # through the same pod and mail directory as the gate setup, then 100 and then 500 of them beating every 5 s with an
@@ -435,6 +436,26 @@ jobs:
             scripts/server-pods.sh crashed "$before" || rc=1
           done
           exit "$rc"
+      # A yes from the console needs a sign-in of less than five minutes (ostrom-server#41, #150): the approver's session
+      # of the gate setup is older than that once the registered runners' phase is over (run 41827441341: every yes after
+      # the first 15 s of the gates, and the whole race, got 403 step_up_required). The approver signs in again here,
+      # through the same pod and mail directory; the gates and the race take under two minutes. The port-forward is
+      # opened again if the runners' phase cost the pod its connection.
+      - name: Approver signs in again right before the yes (a yes needs a sign-in of less than 5 minutes)
+        if: steps.loadsetup.outputs.ready == 'true'
+        env:
+          OSTROM_E2E_CONSOLE_ORIGIN: http://app.ostrom.test
+        run: |
+          if ! curl -fsS --max-time 5 http://127.0.0.1:18080/health >/dev/null 2>&1; then
+            # The same pod: the mail directory bind-mounted on the runner is its own.
+            pod="$OSTROM_LOAD_POD"
+            echo "::warning title=port-forward::reopened to $pod before the approver's sign-in"
+            kill "$(cat "$RUNNER_TEMP/port-forward.pid")" 2>/dev/null || true
+            kubectl -n "$NS" port-forward "pod/$pod" 18080:8080 >> "$RUNNER_TEMP/port-forward.log" 2>&1 < /dev/null &
+            echo $! > "$RUNNER_TEMP/port-forward.pid"
+            for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:18080/health >/dev/null 2>&1 && break; sleep 1; done
+          fi
+          OSTROM_E2E_SERVER_URL=http://127.0.0.1:18080 OSTROM_E2E_MAIL_DIR="${OSTROM_LOAD_MAIL_DIR:-}" node scripts/load-approver-signin.ts
       - name: k6 gates (push to main + yes) and race (100 simultaneous yes → 1 × 200, 99 × 409)
         if: steps.loadsetup.outputs.ready == 'true'
         env:
