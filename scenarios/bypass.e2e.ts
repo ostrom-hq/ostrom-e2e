@@ -4,19 +4,25 @@
 // git sandbox; the assertion is on what reached the bare origin and on the hook's refusal, not on a message. They play
 // in the milestone's world (`realWorld()`: people signed in by their e-mailed link, the real `ostrom login`, the gate
 // « push to main » made by a workflow) and switch themselves on with jalon.e2e.ts: when the server or the CLI is
-// missing, the describe is skipped and its title names what is missing.
+// missing, the describe is skipped and its title names what is missing. E2E-BYPASS-034 follows a refusal made by the
+// hook alone into the organisation's audit log (`gate.denied_locally`, ostrom-server#333, ostrom-cli#125, audit A6).
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { commit, git, originSha, sandbox } from '../src/git.ts';
 import { type Approval, type RealWorld, answer, approvalFor, bash, gateIdIn, journeyUnavailable, realWorld } from './lib.ts';
-import { call } from './org.ts';
+import { call, email, orgOf, signIn } from './org.ts';
 
 const OFF = await journeyUnavailable().catch((error: unknown) => `probe failed: ${String(error)}`);
 const title = `bypass attempts on the gate « push to main »${OFF ? ` [skipped: ${OFF}; PARCOURS 5.3]` : ''}`;
 
 /** One agent session: SessionStart (the session the gate asks in), then each command, run for real unless blocked. */
 const session = (...commands: string[]) => ({ steps: [{ event: 'SessionStart', source: 'startup' }, ...commands.flatMap((c) => bash(c).steps)] });
+
+/** A line of an organisation's audit log (`GET /api/v1/audit`, contract `AuditEvent`). */
+type AuditLine = { event: string; actor: string; subject: string; meta: Record<string, string>; integrity: string; hash: string; signature: string } & Record<string, unknown>;
+
+const linesOf = (body: Record<string, unknown>) => (body['items'] as AuditLine[] | undefined) ?? [];
 
 describe.skipIf(OFF !== '')(title, () => {
   let w: RealWorld;
@@ -119,5 +125,68 @@ describe.skipIf(OFF !== '')(title, () => {
     const results = await attempts(sb.work, ['git push origin HEAD', 'git push', 'git -c push.default=matching push origin', 'git -c remote.origin.push=refs/heads/main:refs/heads/main push origin']);
     for (const r of results) expect(r.blocked, r.why).toBe(true);
     expect(originSha(sb, 'main')).toBe(before);
+  }, 180_000);
+
+  it('E2E-BYPASS-034 — a push the hook refuses on the workstation is written to its organisation’s audit log as gate.denied_locally, and to no other', async () => {
+    const sb = sandbox('api', w.repo);
+    const before = originSha(sb, 'main');
+    commit(sb.work, 'a.txt', 'a\n', 'feat: a');
+    // `--git-dir` changes where git reads: the hook cannot tie a yes to what git would send, so it refuses outright,
+    // without asking Ostrom (GateTexts.redirected), then tells Ostrom once (POST /api/v1/gates/local-denials).
+    const command = `git --git-dir ${sb.work}/.git push origin main`;
+    const [refused] = await attempts(sb.work, [command]);
+    expect(refused?.blocked, refused?.why).toBe(true);
+    expect(refused?.gate, refused?.why).toBeUndefined();
+    expect(refused?.why).toMatch(/Ostrom: denied/);
+    expect(originSha(sb, 'main')).toBe(before);
+
+    // The owner reads the organisation's audit log: one signed line for this very command (other scenarios of the
+    // file refuse pushes of their own sandboxes in the same organisation). The hook does not wait for the answer:
+    // the line is read until it is there, for 15 s at most.
+    const mine = (body: Record<string, unknown>) => linesOf(body).filter((l) => (l.meta?.['command'] ?? '').includes(`${sb.work}/.git`));
+    const path = '/api/v1/audit?event=gate.denied_locally';
+    let log = await call(w.dev.browser.caller, 'GET', path);
+    for (let i = 0; i < 30 && log.status === 200 && mine(log.body).length === 0; i++) {
+      await new Promise((done) => setTimeout(done, 500));
+      log = await call(w.dev.browser.caller, 'GET', path);
+    }
+    expect(log.status, JSON.stringify(log.body)).toBe(200);
+    const found = mine(log.body);
+    expect(found.length, `a gate.denied_locally line for « ${command} » in ${JSON.stringify(log.body)}`).toBe(1);
+    const line = found[0] as AuditLine;
+    const id = line.meta['session'] ?? '';
+    expect(line.event).toBe('gate.denied_locally');
+    expect(id, JSON.stringify(line)).not.toBe('');
+    expect(line.subject).toBe(`session:${id}`);
+    expect(line.meta['class'], JSON.stringify(line)).toBe('push-main');
+    expect(line.meta['reason'], JSON.stringify(line)).toBe('redirected');
+    expect(line.meta['repo'], JSON.stringify(line)).toBe(w.repo);
+    expect(line.meta['command'], JSON.stringify(line)).toContain('--git-dir');
+    expect(line.meta['command'], JSON.stringify(line)).toContain('push origin main');
+    // Written by the session's credential (the launch's agent token, or dev-a's own), signed in the org's chain.
+    expect(line.actor === w.dev.login || /^agent:/.test(line.actor), JSON.stringify(line)).toBe(true);
+    expect(line.integrity, JSON.stringify(line)).toBe('verified');
+    expect(line.hash, JSON.stringify(line)).toMatch(/^[0-9a-f]{64}$/);
+    expect(line.signature, JSON.stringify(line)).not.toBe('');
+    // The session it names is dev-a's, in this organisation.
+    const theSession = await call(w.dev.browser.caller, 'GET', `/api/v1/sessions/${encodeURIComponent(id)}`);
+    expect(theSession.status, JSON.stringify(theSession.body)).toBe(200);
+
+    // Another organisation sees none of it: nothing in its own log, a 404 when it names the first one, and a 404 on
+    // the session.
+    const zoe = await signIn(email('zoe'));
+    const theirOrg = await orgOf(zoe);
+    expect(theirOrg.id).not.toBe(w.orgId);
+    const theirs = await call(zoe.caller, 'GET', path);
+    expect(theirs.status, JSON.stringify(theirs.body)).toBe(200);
+    expect(linesOf(theirs.body)).toEqual([]);
+    const everything = await call(zoe.caller, 'GET', '/api/v1/audit');
+    expect(everything.status, JSON.stringify(everything.body)).toBe(200);
+    expect(JSON.stringify(everything.body)).not.toContain(id);
+    expect(JSON.stringify(everything.body)).not.toContain(sb.work);
+    const naming = await call({ ...zoe.caller, org: w.orgId }, 'GET', path);
+    expect(naming.status, JSON.stringify(naming.body)).toBe(404);
+    expect(JSON.stringify(naming.body ?? '')).not.toContain(id);
+    expect((await call(zoe.caller, 'GET', `/api/v1/sessions/${encodeURIComponent(id)}`)).status).toBe(404);
   }, 180_000);
 });
