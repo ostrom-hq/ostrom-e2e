@@ -997,6 +997,15 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P1
 - Statut : bloqué : ostrom-server (GATES)
 
+### E2E-BYPASS-034 — A6 : un refus fait par le hook seul s'écrit à l'audit de son organisation (`gate.denied_locally`), et d'aucune autre
+
+- Étapes : dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), une session `ostrom claude` de dev-a joue `git --git-dir <dépôt>/.git push origin main`. Le propriétaire lit `GET /api/v1/audit?event=gate.denied_locally`, puis `GET /api/v1/sessions/{id}` de la session que la ligne nomme. Une personne d'une autre organisation lit son propre journal (filtré et entier), celui de la première en la nommant (`Ostrom-Org`), et la session.
+- Attendu : le hook refuse d'emblée, sans demande (« Ostrom: denied », aucune porte nommée), rien n'atteint l'origine. Le hook le dit au serveur (`POST /api/v1/gates/local-denials`, contrat `reportLocalGateDenial`) : une seule ligne `gate.denied_locally` pour cette commande, `subject` `session:<id>`, `meta` `{session: <id>, class: push-main, reason: redirected, repo: <dépôt de la session>, command: la commande (masquée)}`, écrite par l'identifiant de la session (jeton d'agent du lancement ou dev-a), `integrity` `verified`, haché et signé ; la session nommée est celle de l'organisation (200). L'autre organisation ne voit rien : son journal n'a aucune ligne `gate.denied_locally` ni rien de cette session ou de ce dépôt, elle reçoit 404 en nommant la première, et 404 sur la session. Rouge sur une image d'avant ostrom-server#333 : la route n'existe pas, le hook n'est pas entendu, aucune ligne.
+- Surfaces : CLI (hook), serveur (portes, audit), faux agent
+- Source : `demo/PARCOURS.md` 5.3 (« qu'un refus d'emblée laisse une trace d'audit côté serveur ») ; ostrom-server#333 (360ece6a, `ReportLocalDenialUseCase`, `LocalDenialAuditPostgresTest`) ; ostrom-cli#125 (8e8636e, `LocalRefusals`) ; contrat core#123 (`GateLocalDenial`) ; audit A6
+- Priorité : jalon
+- Statut : codé : `scenarios/bypass.e2e.ts`, dans le monde du jalon, joué dès que serveur et CLI servent le jalon (sinon sauté, le manque et PARCOURS 5.3 dans le titre)
+
 ## YES : Oui lié au SHA, au dépôt, aux commits montrés ; auteur et approbateurs
 
 ### E2E-YES-001 — Un oui sur un SHA ne vaut pas pour un autre
