@@ -135,6 +135,34 @@ describe('FakeUpstreams provider', () => {
   });
 });
 
+describe('FakeUpstreams behind the ingress', () => {
+  // ingress-nginx keeps an idle connection to an upstream for 60 s (upstream-keepalive-timeout) and reuses it for the
+  // next request; Node closes an idle connection after 5 s by default. A POST nginx sends on a connection the fake is
+  // closing at that moment comes back as nginx's 502, never retried: the chart load's lone failed `direct sse` (run
+  // 42002845759, 1 request of 4 802, answered in 0.9 ms). The fakes keep an idle connection longer than nginx does.
+  it('keeps an idle keep-alive connection open past Node\'s 5 s, and serves the next request on it', async () => {
+    const target = new URL(url);
+    const socket = connect(Number(target.port), target.hostname);
+    let closed = false;
+    socket.on('close', () => (closed = true));
+    socket.on('error', () => undefined);
+    let seen = '';
+    socket.on('data', (c: Buffer) => (seen += c.toString('utf8')));
+    const answers = async (n: number) => {
+      for (let i = 0; i < 200 && (seen.match(/HTTP\/1\.1 200/g) ?? []).length < n; i++) await new Promise((r) => setTimeout(r, 10));
+      return (seen.match(/HTTP\/1\.1 200/g) ?? []).length;
+    };
+    const health = 'GET /health HTTP/1.1\r\nHost: fake\r\nConnection: keep-alive\r\n\r\n';
+    socket.write(health);
+    expect(await answers(1)).toBe(1);
+    await new Promise((r) => setTimeout(r, 6_000));
+    expect(closed).toBe(false);
+    socket.write(health);
+    expect(await answers(2)).toBe(2);
+    socket.destroy();
+  }, 15_000);
+});
+
 describe('FakeUpstreams MCP', () => {
   it('initializes in the version asked, or a version it speaks, with a session id', async () => {
     const asked = await rpc('fast', 'initialize', { protocolVersion: MCP_VERSIONS[0] });
