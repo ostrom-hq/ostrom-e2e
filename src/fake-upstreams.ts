@@ -149,6 +149,8 @@ class Exchange {
 }
 
 const JSON_TYPE = { 'content-type': 'application/json' };
+/** How long the fakes keep an idle connection: past ingress-nginx's 60 s upstream keep-alive. */
+const KEEP_ALIVE_MS = 65_000;
 
 /** The fake provider and the fake MCP servers, on one plain HTTP port and, given a key and a certificate, one HTTPS port. */
 export class FakeUpstreams {
@@ -199,6 +201,11 @@ export class FakeUpstreams {
   }
 
   private async listen(server: Server | HttpsServer, port: number, host: string): Promise<number> {
+    // Behind ingress-nginx (the chart load pass), an idle connection is kept by nginx for 60 s and reused for the next
+    // request. Node's 5 s default closed it under nginx's feet: the POST sent on it at that moment got nginx's 502
+    // (run 42002845759). The fakes keep it 65 s; the headers' timeout stays above it, as Node requires.
+    server.keepAliveTimeout = KEEP_ALIVE_MS;
+    server.headersTimeout = KEEP_ALIVE_MS + 1_000;
     this.servers.push(server);
     await new Promise<void>((resolve) => server.listen(port, host, resolve));
     return (server.address() as AddressInfo).port;
