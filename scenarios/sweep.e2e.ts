@@ -39,6 +39,8 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/auth/sessions/{id}': 'authSession',
   '/api/v1/auth/{provider}': 'provider',
   '/api/v1/automations/{id}': 'automation',
+  '/api/v1/automations/{}/runs/{runId}': 'automationRun',
+  '/api/v1/automations/{}/v/{version}': 'automationVersion',
   '/api/v1/cloud/sessions/{id}': 'cloudSession',
   '/api/v1/confirmations/{id}': 'confirmation',
   '/api/v1/devices/{id}': 'device',
@@ -73,7 +75,7 @@ const PARAM_KINDS: Record<string, string> = {
 };
 
 /** Values that are not A's: the same in both calls (a provider name, a file of the artifact, its first version). */
-const FIXED: Record<string, string> = { provider: 'github', filePath: 'index.md', artifactVersion: '1' };
+const FIXED: Record<string, string> = { provider: 'github', filePath: 'index.md', artifactVersion: '1', automationVersion: '1' };
 /** Secrets B never holds (an artifact's ticket, its public link): a missing one in both calls. */
 const CAPABILITIES = new Set(['artifactTicket', 'artifactLink']);
 
@@ -350,6 +352,19 @@ async function makeWorld(): Promise<World> {
   await make('group', () => post('/api/v1/groups', { name: `Sweep ${tag}`, members: [login] }, 'createGroup', ['id']));
   await make('rule', () => post('/api/v1/rules', { statement: `Sweep rule ${tag}`, group: 'git' }, 'createRule', ['id']));
   await make('automation', () => post('/api/v1/automations', { name: `sweep ${tag}`, trigger: { kind: 'cron', cron: '0 21 * * *', timezone: 'Europe/Paris' }, action: { prompt: `Sweep ${tag} {{run.date}}` } }, 'createAutomation', ['id']));
+  // A test run of that automation (a run of A's own, kept 14 days): the run the cancel route names.
+  await make('automationRun', async () => {
+    if (!values['automation']) throw new Error('no automation');
+    const r = await fetch(url(`/api/v1/automations/${values['automation']}/run`), {
+      method: 'POST',
+      headers: { ...headersOf(c, 'POST', true), 'Idempotency-Key': `sweep-${tag}` },
+      body: JSON.stringify({}),
+    });
+    const body = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+    const id = field(body, 'id');
+    if (r.status >= 300 || !id) throw new Error(`run → ${r.status} ${JSON.stringify(body).slice(0, 200)}`);
+    return id;
+  });
   await make('wait', () => post('/api/v1/waits', { question: `Sweep question ${tag}` }, 'createWait', ['id']));
   await make('mcpServer', () => post('/api/v1/mcp/servers', { name: `sweep-${tag}`, url: 'https://mcp.example.test/mcp', transport: 'http', tools: ['search'] }, 'createMcpServer', ['name']));
   await make('mcpPolicy', async () => {
