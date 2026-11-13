@@ -132,6 +132,7 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   requestTodoDrop: { refers: true, make: (v) => ({ body: { sessionId: v['session'], reason: 'Sweep intruder' } }) },
   stopTodoSession: { refers: true, make: (v) => ({ body: { sessionId: v['session'], phase: 'begin' } }) },
   recordTodoHookError: { refers: true, make: (v) => ({ body: { sessionId: v['session'], text: 'Sweep intruder' } }) },
+  resetTodo: { refers: true, make: (v) => ({ body: { sessionId: v['session'] } }) },
   setMemberTodoStopHook: { make: () => ({ body: { enabled: false } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
   transferOrg: { make: (v) => ({ body: { login: v['login'] } }) },
