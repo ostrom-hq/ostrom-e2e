@@ -193,9 +193,10 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   pendingWorkflowSession: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['cloudSession'])}` }) },
   workflowsMcp: { refers: true, make: (v) => ({ query: `session=${enc(v['cloudSession'])}`, body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'deliver', arguments: { output: 'Sweep intruder delivery' } } } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
-  // An organization's cloud profile (cloud.admin.v1): B's names A's cluster, which B's organization may not use.
-  createCloudProfile: { refers: true, make: (v) => ({ body: cloudProfile(v['cloudCluster'] ?? 'none', 0) }) },
-  updateCloudProfile: { refers: true, make: (v) => ({ body: cloudProfile(v['cloudCluster'] ?? 'none', 1) }) },
+  // An organization's cloud profile (cloud.admin.v1). Clusters are the instance's, any organization's profile may name
+  // one: B's names none, so an answer quoting A's cluster id is a leak.
+  createCloudProfile: { make: () => ({ body: cloudProfile('none', 0) }) },
+  updateCloudProfile: { make: () => ({ body: cloudProfile('none', 1) }) },
   transferOrg: { make: (v) => ({ body: { login: v['login'] } }) },
   deleteOrg: { make: (v) => ({ body: { confirm: v['slug'] } }) },
   inviteOrgMembers: { make: () => ({ body: { invites: [{ email: email('sweep-intruder'), role: 'admin' }] } }) },
