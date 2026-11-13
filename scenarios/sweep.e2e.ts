@@ -36,6 +36,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/admin/settings/{section}': 'settingsSection',
   '/api/v1/approvals/{id}': 'approval',
   '/api/v1/artifacts/{id}': 'artifact',
+  '/api/v1/cloud/profiles/{id}': 'cloudProfile',
   '/api/v1/artifacts/{}/members/{memberId}': 'member',
   '/api/v1/artifacts/{}/versions/{number}': 'artifactVersion',
   '/api/v1/artifacts/uploads/{upload}': 'artifactUpload',
@@ -125,7 +126,20 @@ const SKIPPED: Record<string, string> = {
   // the instance passes, never a key (ostrom-server AdminRoutesPostgresTest).
   'POST /api/v1/admin/instance-admins': "adds an administrator of the instance; nothing of an organization in it",
   'PUT /api/v1/admin/settings/{}': "saves a settings section of the instance; nothing of an organization in it",
+  // The instance's cloud runtime and clusters (cloud.admin.v1), as its administration: no organization in them.
+  'PUT /api/v1/cloud/runtime': "saves the instance's cloud runtime; nothing of an organization in it",
+  'POST /api/v1/cloud/clusters': 'connects a cluster to the instance; nothing of an organization in it',
+  'PUT /api/v1/cloud/clusters/{}': "changes a cluster of the instance; nothing of an organization in it",
 };
+
+/** A PEM bundle the server only checks the shape of: the sweep's cluster is never called. */
+const SWEEP_CA = '-----BEGIN CERTIFICATE-----\nc3dlZXA=\n-----END CERTIFICATE-----';
+
+/** A cloud profile on `clusterId`, replacing `version`. */
+const cloudProfile = (clusterId: string, version: number) => ({
+  name: `Sweep ${version}`, version, assignedMemberIds: [],
+  spec: { clusterId, namespace: 'sweep', image: 'ghcr.io/ostrom-hq/sweep:1' },
+});
 
 /** Leaks already written to the JOURNAL for their module's owner (key `caller | route | variant` → where). */
 const KNOWN: Record<string, string> = {};
@@ -179,6 +193,9 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   pendingWorkflowSession: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['cloudSession'])}` }) },
   workflowsMcp: { refers: true, make: (v) => ({ query: `session=${enc(v['cloudSession'])}`, body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'deliver', arguments: { output: 'Sweep intruder delivery' } } } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
+  // An organization's cloud profile (cloud.admin.v1): B's names A's cluster, which B's organization may not use.
+  createCloudProfile: { refers: true, make: (v) => ({ body: cloudProfile(v['cloudCluster'] ?? 'none', 0) }) },
+  updateCloudProfile: { refers: true, make: (v) => ({ body: cloudProfile(v['cloudCluster'] ?? 'none', 1) }) },
   transferOrg: { make: (v) => ({ body: { login: v['login'] } }) },
   deleteOrg: { make: (v) => ({ body: { confirm: v['slug'] } }) },
   inviteOrgMembers: { make: () => ({ body: { invites: [{ email: email('sweep-intruder'), role: 'admin' }] } }) },
@@ -314,6 +331,15 @@ async function makeWorld(): Promise<World> {
     if (!id) throw new Error(`no member id in ${JSON.stringify(mine)}`);
     return id;
   });
+  // A cloud profile of A's organization, on a cluster A connects (cloud.admin.v1): only when A administers the instance.
+  await make('cloudCluster', async () => {
+    const r = await call(c, 'POST', '/api/v1/cloud/clusters', {
+      name: `sweep-${tag}`, apiUrl: 'https://kubernetes.sweep.invalid', caCertificate: SWEEP_CA, serviceAccountToken: 'sweep.token',
+      allowedNamespaces: ['sweep'], maxRunningPods: 1, version: 0,
+    });
+    return made(r, ['id']);
+  });
+  await make('cloudProfile', async () => made(await call(c, 'POST', '/api/v1/cloud/profiles', cloudProfile(values['cloudCluster'] ?? 'none', 0)), ['id']));
   // A's own account id, which an administrator of the instance names to remove one (admin.settings.v1).
   await make('user', async () => made(await call(c, 'GET', '/api/v1/auth/me/account'), ['id']));
   await make('authSession', async () => {
