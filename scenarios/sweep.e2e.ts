@@ -65,6 +65,8 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/secrets/{name}': 'secret',
   '/api/v1/service-keys/{id}': 'serviceKey',
   '/api/v1/sessions/{id}': 'session',
+  '/api/v1/todos/session/items/{item}': 'todoItem',
+  '/api/v1/todos/stop-hook/members/{memberId}': 'member',
   '/api/v1/tokens/{id}': 'token',
   '/api/v1/waits/{id}': 'wait',
   '/api/v1/workflows/{id}': 'workflow',
@@ -118,6 +120,19 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   fetchRunnerGithubToken: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1 } }) },
   setCloudSessionGithubAccess: { make: () => ({ body: { access: 'shared' } }) },
   reportRunnerCheck: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1, check: { name: 'tests', outcome: 'passed' } } }) },
+  // The session todo (todos.v1): every route names its session, in the query or the body.
+  getSessionTodo: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['session'])}` }) },
+  readTodoContext: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['session'])}` }) },
+  createSessionTodo: { refers: true, make: (v) => ({ body: { sessionId: v['session'], reference: 'Sweep intruder plan', items: [todoItem('intruder')] } }) },
+  addTodoItem: { refers: true, make: (v) => ({ body: { sessionId: v['session'], item: todoItem('intruder'), reason: 'Sweep intruder' } }) },
+  startTodoItem: { refers: true, make: (v) => ({ body: { sessionId: v['session'] } }) },
+  noteTodoItem: { refers: true, make: (v) => ({ body: { sessionId: v['session'], text: 'Sweep intruder note' } }) },
+  completeTodoItem: { refers: true, make: (v) => ({ body: { sessionId: v['session'], checks: [{ index: 0, passed: true, observed: 'Sweep intruder' }] } }) },
+  linkTodoItem: { refers: true, make: (v) => ({ body: { sessionId: v['session'], kind: 'pr', ref: 'https://github.com/acme/sweep/pull/1' } }) },
+  requestTodoDrop: { refers: true, make: (v) => ({ body: { sessionId: v['session'], reason: 'Sweep intruder' } }) },
+  stopTodoSession: { refers: true, make: (v) => ({ body: { sessionId: v['session'], phase: 'begin' } }) },
+  recordTodoHookError: { refers: true, make: (v) => ({ body: { sessionId: v['session'], text: 'Sweep intruder' } }) },
+  setMemberTodoStopHook: { make: () => ({ body: { enabled: false } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
   transferOrg: { make: (v) => ({ body: { login: v['login'] } }) },
   deleteOrg: { make: (v) => ({ body: { confirm: v['slug'] } }) },
@@ -127,6 +142,14 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
 };
 
 const enc = (v: string | undefined) => encodeURIComponent(v ?? '');
+
+/** An item of a session todo: a complete description and one typed check (todos.v1). */
+const todoItem = (id: string) => ({
+  id,
+  name: `Sweep item ${id}`,
+  description: `Sweep item ${id}: what, where, why and what is out of scope, enough for a new agent to do it alone.`,
+  doneWhen: { text: 'Its pull request is merged', checks: [{ type: 'pr_merged', repo: 'acme/sweep' }] },
+});
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The contract
@@ -293,6 +316,13 @@ async function makeWorld(): Promise<World> {
     const opened = await call(agent, 'POST', '/api/v1/sessions', { id, launchId: launch.body['launchId'], repo: 'acme/sweep', agent: 'claude', ...(values['package'] ? { packageDigest: values['package'] } : {}) });
     if (opened.status >= 300) throw new Error(`session → ${text(opened)}`);
     return field(opened.body, 'id') ?? id;
+  });
+  // A's todo on that session, made by A in the console (its person): the item the item routes name.
+  await make('todoItem', async () => {
+    if (!values['session']) throw new Error('no session');
+    const r = await call(c, 'POST', '/api/v1/todos/session', { sessionId: values['session'], reference: `Sweep plan ${tag}`, items: [todoItem('sweep-item')] });
+    if (r.status >= 300) throw new Error(`todo → ${text(r)}`);
+    return 'sweep-item';
   });
   // A governance write waits for a confirmation in the console (ostrom-server#146): A's pending one, by its id.
   await make('confirmation', () => post('/api/v1/rules/bulk', {}, 'bulkUpdateRules', ['confirmationId']));
