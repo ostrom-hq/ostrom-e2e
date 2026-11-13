@@ -389,7 +389,10 @@ async function makeWorld(): Promise<World> {
   await make('environmentVariant', async () => {
     const variable = `SWEEP_${tag.toUpperCase().replace(/[^A-Z0-9]/g, 'X')}`;
     const id = await post('/api/v1/environment/variants', { variable, name: `sweep-${tag}`, value: `sweep-env-${tag}` }, 'createEnvironmentVariant', ['id']);
-    if (values['member']) await call(c, 'PUT', `/api/v1/environment/assignments/${values['member']}/${variable}`, { variantId: id });
+    if (!values['member']) throw new Error('no member');
+    const assigned = await call(c, 'PUT', `/api/v1/environment/assignments/${values['member']}/${variable}`, { variantId: id });
+    if (assigned.status >= 300) throw new Error(`environment assignment → ${text(assigned)}`);
+    values['environmentVariable'] = variable;
     return id;
   });
   await make('personalEnvironmentVariant', () =>
