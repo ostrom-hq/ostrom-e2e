@@ -1040,7 +1040,9 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect(mine, JSON.stringify({ run: waiting, pending: pending.body })).toBeDefined();
     const yes = await call(reviewer.caller, 'POST', `/api/v1/approvals/${String(mine?.['id'])}/answer`, { answer: 'approve', shownDigest: mine?.['shownDigest'] });
     expect(yes.status, JSON.stringify(yes.body)).toBe(200);
-    const ended = await runUntil(a.c, id, (r) => r['status'] !== 'waiting');
+    // The engine writes one change per transaction: the gate's visit closes, then the run follows its edge, so a
+    // read in between sees it running. Wait for the end, as the question variant below does.
+    const ended = await runUntil(a.c, id, (r) => r['status'] !== 'waiting' && r['status'] !== 'running');
     expect(ended['status'], JSON.stringify(ended)).toBe('succeeded');
     expect(ended['currentNodeId']).toBeUndefined();
     expect((ended['visits'] as Record<string, unknown>[]).map((v) => [v['nodeId'], v['status'], v['outcome']])).toEqual([
