@@ -304,6 +304,9 @@ jobs:
           server:
             image: { repository: ostrom-server, tag: e2e-load }
             replicas: 2
+            # The JVM server's memory (ostrom-server docs/decisions/0001), until ostrom-helm main requests it itself
+            # (ostrom-helm#47): the chart's native 192Mi/256Mi would get the JVM OOM-killed under load.
+            resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 1Gi } }
             trustedProxies: 10.244.0.0/16
             config:
               OSTROM_MAIL_DIR: /var/lib/ostrom/mail
