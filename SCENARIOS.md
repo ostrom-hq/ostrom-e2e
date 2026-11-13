@@ -23,7 +23,7 @@ Ligne `- Statut :` de chaque scénario, à mettre à jour par `sed`.
 - `vert` : vert en CI, avec le lien du run.
 - `bloqué : <quoi>` : la fonction n'existe pas encore dans la réécriture. Au départ, tout est `bloqué : <dépôt/fonction manquante>`.
 
-Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push + oui lié au SHA + reçu vérifié hors ligne, plus ce qui les rend possibles : identité de l'approbateur, contournements de la porte du premier jalon) ; `P1` ; `P2`.
+Priorités : `jalon` = premier jalon (`ostrom run claude` + porte qui bloque un push + oui lié au SHA + reçu vérifié hors ligne, plus ce qui les rend possibles : identité de l'approbateur, contournements de la porte du premier jalon) ; `P1` ; `P2`.
 
 ## Abréviations des sources
 
@@ -73,8 +73,8 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-LOGIN-004 — `logout` efface le jeton
 
-- Étapes : `ostrom logout` puis `ostrom claude`.
-- Attendu : Le fichier d'identifiants disparaît, `ostrom claude` sort en 65 sans lancer l'agent ; le jeton est révoqué côté serveur (appareil).
+- Étapes : `ostrom logout` puis `ostrom run claude`.
+- Attendu : Le fichier d'identifiants disparaît, `ostrom run claude` sort en 65 sans lancer l'agent ; le jeton est révoqué côté serveur (appareil).
 - Surfaces : CLI, serveur
 - Source : proto/COORD/VERIF-LANCEUR.md §2 (Connexion : pas de `logout`) ; cli/COORD/CLI.md §1a « Manques », §2.2
 - Priorité : P2
@@ -82,7 +82,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-LOGIN-005 — Dev non invité ou dépôt hors organisation
 
-- Étapes : Un login GitHub inconnu de l'organisation lance `ostrom claude` ; puis un dev invité dans un dépôt d'une autre organisation.
+- Étapes : Un login GitHub inconnu de l'organisation lance `ostrom run claude` ; puis un dev invité dans un dépôt d'une autre organisation.
 - Attendu : Refus 77 avec le message qui dit quoi faire (`Ask an admin ... ostrom invite`, `... is not in <org>'s GitHub organisation`) ; l'agent n'est pas lancé.
 - Surfaces : CLI, serveur
 - Source : cli/COORD/CLI.md §3.1 « Ce qui peut rater » ; §2.3 (77)
@@ -91,7 +91,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-LOGIN-006 — Serveur injoignable au lancement
 
-- Étapes : `ostrom claude --server http://localhost:1` (port fermé).
+- Étapes : `ostrom run claude --server http://localhost:1` (port fermé).
 - Attendu : Code 69, message clair, aucun repli silencieux sur un harnais fixe ni sur un paquet périmé (fail-closed).
 - Surfaces : CLI
 - Source : cli/COORD/CLI.md §2.3 (69), §0 point 4 ; proto/COORD/VERIF-LANCEUR.md §3 bug 9
@@ -100,7 +100,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-LOGIN-007 — Premier lancement d'un dev invité en moins de 2 minutes
 
-- Étapes : Installation, `ostrom login`, `cd` dans un dépôt, `ostrom claude` ; mesure du temps de chaque étape avec faux GitHub et faux agent.
+- Étapes : Installation, `ostrom login`, `cd` dans un dépôt, `ostrom run claude` ; mesure du temps de chaque étape avec faux GitHub et faux agent.
 - Attendu : Les trois étapes réussissent ; la clé de l'instance est épinglée à la première utilisation (`Pinned ... key`) ; durée totale sous 2 min (seuil de la maquette, à mesurer).
 - Surfaces : CLI, serveur, faux agent
 - Source : cli/COORD/CLI.md §3.1 (écrans 2 à 4)
@@ -282,11 +282,11 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P1
 - Statut : codé
 
-## CLAUDE : `ostrom claude` : lancement, hooks, budget du hook
+## CLAUDE : `ostrom run claude` : lancement, hooks, budget du hook
 
 ### E2E-CLAUDE-001 — Lancement sous le paquet signé, rien d'écrit chez le dev
 
-- Étapes : `ostrom claude` dans une copie de dépôt, faux agent rejouant les hooks de Claude Code (SessionStart, PreToolUse, PostToolUse, SessionEnd).
+- Étapes : `ostrom run claude` dans une copie de dépôt, faux agent rejouant les hooks de Claude Code (SessionStart, PreToolUse, PostToolUse, SessionEnd).
 - Attendu : Le plugin de session est posé dans un dossier temporaire 0700 ; ni le dépôt ni `~/.claude` ne changent ; le dossier est supprimé à la sortie ; le contexte « Workflows compiled into this session » est injecté.
 - Surfaces : CLI, serveur, faux agent
 - Source : proto/COORD/VERIF-LANCEUR.md §1 (c1) et §2 « Isolation » ; proto/COORD/PONT.md « Le parcours »
@@ -385,7 +385,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-CLAUDE-012 — Politique au lancement : modèle hors liste refusé, fail-closed
 
-- Étapes : `ostrom claude -- --model opus` quand la liste dit sonnet et haiku ; puis la politique ne répond pas ; puis `/api/compiler/package` répond 404.
+- Étapes : `ostrom run claude -- --model opus` quand la liste dit sonnet et haiku ; puis la politique ne répond pas ; puis `/api/compiler/package` répond 404.
 - Attendu : Modèle hors liste : 77, agent non lancé. Politique muette ou 404 du paquet : refus, jamais lancement avec le harnais fixe ni sans workflows.
 - Surfaces : CLI, serveur
 - Source : proto/COORD/PONT.md tableau « Politique au lancement » ; proto/COORD/VERIF-LANCEUR.md §3 bug 9 (fail-open, repli sur 404) ; fusion/COORD/FUSION-TEAMCODE.md 1b « Politique au lancement : Jeter »
@@ -412,7 +412,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-CLAUDE-015 — Erreurs de lancement : usage, agent absent, hors dépôt
 
-- Étapes : `ostrom bogus`, `ostrom claude` sans `claude` installé, `ostrom claude` hors dépôt git.
+- Étapes : `ostrom bogus`, `ostrom run claude` sans `claude` installé, `ostrom run claude` hors dépôt git.
 - Attendu : 64 (agent inconnu), 127 (agent absent, avec où l'installer), 66 (pas un dépôt git) ; aucun appel d'inférence.
 - Surfaces : CLI
 - Source : cli/COORD/CLI.md §2.3 et §3.1 « Ce qui peut rater » ; §1a (« tout autre mot » : 64)
@@ -421,7 +421,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-CLAUDE-016 — Lancement local par défaut, `--cloud` à la demande
 
-- Étapes : `ostrom claude` sans option, puis `ostrom claude --cloud`.
+- Étapes : `ostrom run claude` sans option, puis `ostrom run claude --cloud`.
 - Attendu : Sans option : sur le poste ; `--cloud` : session cloud créée et rattachée au terminal (voir E2E-CLOUD-001).
 - Surfaces : CLI, serveur
 - Source : cli/COORD/CLI.md §0 point 6
@@ -430,7 +430,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-CLAUDE-017 — Mode interactif (TUI) sous un pseudo-terminal
 
-- Étapes : Lancer `ostrom claude` dans un pty avec un faux agent interactif.
+- Étapes : Lancer `ostrom run claude` dans un pty avec un faux agent interactif.
 - Attendu : Le faux agent reçoit le terminal, les hooks fonctionnent comme en mode `-p` (trou de VERIF-LANCEUR : mode interactif non testé).
 - Surfaces : CLI, faux agent
 - Source : proto/COORD/VERIF-LANCEUR.md §4 « Pas fait : le mode interactif (TUI) »
@@ -448,7 +448,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-CLAUDE-019 — Identité du dev et variables assignées dans la session
 
-- Étapes : `ostrom claude` par un membre avec une variable d'équipe assignée.
+- Étapes : `ostrom run claude` par un membre avec une variable d'équipe assignée.
 - Attendu : Le prompt système dit qui est le dev (login GitHub) ; la variable arrive à l'agent et est relue périodiquement ; les clés personnelles sont retirées.
 - Surfaces : CLI, serveur, faux agent
 - Source : proto/COORD/VERIF-LANCEUR.md §2 (Identité, Variables d'environnement assignées)
@@ -457,7 +457,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-CLAUDE-020 — Sans `--repo`, le dépôt est lu sur `origin`
 
-- Étapes : `ostrom claude` sans `--repo`, dans un clone de `https://github.com/acme/<nom>.git` rangé dans un dossier `api`.
+- Étapes : `ostrom run claude` sans `--repo`, dans un clone de `https://github.com/acme/<nom>.git` rangé dans un dossier `api`.
 - Attendu : la session est enregistrée pour `acme/<nom>` (propriétaire/nom lus sur `origin`, comme le dit l'aide de `--repo`), et le paquet servi est celui de ce dépôt : une porte posée sur `acme/<nom>` s'y applique.
 - Surfaces : CLI réelle, serveur (image), faux agent
 - Source : run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41480063393 (session enregistrée pour `api`, paquet à 0 workflow) ; `AgentLaunchUseCase.kt` prend `folderName(top)` ; JOURNAL 02/11 → CLI-AGENTS
@@ -465,11 +465,11 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Statut : vert : `scenarios/jalon.e2e.ts`, depuis ostrom-cli#65 (b82f327), run https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41494850752
 
 
-## CODEX : `ostrom codex` et les autres agents
+## CODEX : `ostrom run codex` et les autres agents
 
 ### E2E-CODEX-001 — Codex : identifiant de lancement, MCP approuvés, hook de fin à 3 s
 
-- Étapes : `ostrom codex exec` avec un faux `codex` qui enregistre ses arguments.
+- Étapes : `ostrom run codex exec` avec un faux `codex` qui enregistre ses arguments.
 - Attendu : `OSTROM_LAUNCH_ID` posé ; `-c mcp_servers.ostrom` et `ostrom-workflow` avec `default_tools_approval_mode="approve"` ; `SessionEnd` demandé à 3 s ; le lanceur donne signe de vie et envoie le code de sortie.
 - Surfaces : CLI, faux agent
 - Source : proto/launcher/tests/codex_launch.rs `codex_gets_the_launch_id_approved_mcp_tools_a_3s_end_hook_and_the_launcher_reports_life_and_exit` ; proto/COORD/VERIF-LANCEUR.md §3 bug 7
@@ -541,7 +541,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-CODEX-009 — `ostrom agents` et inférence par OpenRouter pour les quatre autres agents
 
-- Étapes : `ostrom agents`, puis `ostrom grok` avec le relais OpenRouter.
+- Étapes : `ostrom agents`, puis `ostrom run grok` avec le relais OpenRouter.
 - Attendu : La liste dit ce qu'Ostrom sait lancer et ce que la politique autorise ; le relais envoie `zdr` et `data_collection: deny`.
 - Surfaces : CLI, faux fournisseur
 - Source : proto/COORD/PONT.md « Ce que le dev tape » ; fusion/COORD/FUSION-TEAMCODE.md 1b « Relais OpenRouter »
@@ -553,7 +553,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-GATE-001 — Boucle complète : push bloqué, oui d'un second compte, push passé, reçu vérifié
 
-- Étapes : Copie neuve d'un dépôt avec `origin` nu local et régression plantée ; `ostrom claude` ; le faux agent corrige, commite, tente `git push origin main` ; le dev ne peut pas se dire oui ; `rev-b` dit oui ; le faux agent relance.
+- Étapes : Copie neuve d'un dépôt avec `origin` nu local et régression plantée ; `ostrom run claude` ; le faux agent corrige, commite, tente `git push origin main` ; le dev ne peut pas se dire oui ; `rev-b` dit oui ; le faux agent relance.
 - Attendu : 1re tentative : refus `waiting for a yes` + consigne `ostrom wait <id>` ; après le oui : push accepté, `main` distant = le commit ; reçu de porte et de session signés ; `ostrom verify` hors ligne sort 0.
 - Surfaces : CLI, serveur, web (oui), faux agent
 - Source : proto/COORD/VERIF-LANCEUR.md §1 (passage c1) ; proto/COORD/APPROBATION.md §5 (film à deux personnes) ; cli/COORD/CLI.md §3.3
@@ -999,7 +999,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-BYPASS-034 — A6 : un refus fait par le hook seul s'écrit à l'audit de son organisation (`gate.denied_locally`), et d'aucune autre
 
-- Étapes : dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), une session `ostrom claude` de dev-a joue `git --git-dir <dépôt>/.git push origin main`. Le propriétaire lit `GET /api/v1/audit?event=gate.denied_locally`, puis `GET /api/v1/sessions/{id}` de la session que la ligne nomme. Une personne d'une autre organisation lit son propre journal (filtré et entier), celui de la première en la nommant (`Ostrom-Org`), et la session.
+- Étapes : dans le monde du jalon (`realWorld()` : vrai `ostrom login`, porte « push sur main » faite par un workflow), une session `ostrom run claude` de dev-a joue `git --git-dir <dépôt>/.git push origin main`. Le propriétaire lit `GET /api/v1/audit?event=gate.denied_locally`, puis `GET /api/v1/sessions/{id}` de la session que la ligne nomme. Une personne d'une autre organisation lit son propre journal (filtré et entier), celui de la première en la nommant (`Ostrom-Org`), et la session.
 - Attendu : le hook refuse d'emblée, sans demande (« Ostrom: denied », aucune porte nommée), rien n'atteint l'origine. Le hook le dit au serveur (`POST /api/v1/gates/local-denials`, contrat `reportLocalGateDenial`) : une seule ligne `gate.denied_locally` pour cette commande, `subject` `session:<id>`, `meta` `{session: <id>, class: push-main, reason: redirected, repo: <dépôt de la session>, command: la commande (masquée)}`, écrite par l'identifiant de la session (jeton d'agent du lancement ou dev-a), `integrity` `verified`, haché et signé ; la session nommée est celle de l'organisation (200). L'autre organisation ne voit rien : son journal n'a aucune ligne `gate.denied_locally` ni rien de cette session ou de ce dépôt, elle reçoit 404 en nommant la première, et 404 sur la session. Rouge sur une image d'avant ostrom-server#333 : la route n'existe pas, le hook n'est pas entendu, aucune ligne.
 - Surfaces : CLI (hook), serveur (portes, audit), faux agent
 - Source : `demo/PARCOURS.md` 5.3 (« qu'un refus d'emblée laisse une trace d'audit côté serveur ») ; ostrom-server#333 (360ece6a, `ReportLocalDenialUseCase`, `LocalDenialAuditPostgresTest`) ; ostrom-cli#125 (8e8636e, `LocalRefusals`) ; contrat core#123 (`GateLocalDenial`) ; audit A6
@@ -1967,7 +1967,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-MCP-003 — MCP d'équipe relayés avec un jeton éphémère par run
 
-- Étapes : Un serveur MCP d'équipe configuré ; `ostrom claude` ; le faux agent appelle un outil du serveur.
+- Étapes : Un serveur MCP d'équipe configuré ; `ostrom run claude` ; le faux agent appelle un outil du serveur.
 - Attendu : L'outil répond par le relais du serveur ; aucun secret du serveur MCP n'arrive sur le poste ; le jeton est propre au run et rien n'est écrit en clair.
 - Surfaces : CLI, serveur, faux agent
 - Source : proto/COORD/VERIF-LANCEUR.md §2 « MCP de l'équipe » ; fusion/COORD/FUSION-TEAMCODE.md 1a (Passerelle MCP)
@@ -2060,7 +2060,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-SECRETS-007 — Variables d'équipe sans fichier en clair
 
-- Étapes : Variante ENV avec une variable sensible ; `ostrom claude`.
+- Étapes : Variante ENV avec une variable sensible ; `ostrom run claude`.
 - Attendu : La variable arrive à l'agent par l'environnement du run, relue périodiquement ; rien en clair dans un fichier du plugin.
 - Surfaces : CLI, serveur
 - Source : proto/COORD/VERIF-LANCEUR.md §2 (Variables d'environnement assignées) ; proto/COORD/PLATEFORME.md #11
@@ -2081,7 +2081,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-GW-001 — Inférence par la passerelle de l'équipe, clés du dev retirées
 
-- Étapes : `ostrom claude` ; le faux agent appelle `ANTHROPIC_BASE_URL` ; faux fournisseur Anthropic en SSE.
+- Étapes : `ostrom run claude` ; le faux agent appelle `ANTHROPIC_BASE_URL` ; faux fournisseur Anthropic en SSE.
 - Attendu : Les requêtes passent par la passerelle avec un jeton propre au run ; les clés Anthropic/OpenAI du dev sont retirées de l'environnement ; le flux SSE arrive intact.
 - Surfaces : CLI, serveur, faux fournisseur
 - Source : proto/COORD/VERIF-LANCEUR.md §2 « Inférence, comptes, quotas » ; fusion/COORD/FUSION-TEAMCODE.md 1a (Passerelle d'inférence) et J1
@@ -2135,7 +2135,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-GW-007 — Codex via la passerelle (fournisseur `-c`)
 
-- Étapes : `ostrom codex` ; faux fournisseur OpenAI.
+- Étapes : `ostrom run codex` ; faux fournisseur OpenAI.
 - Attendu : Codex passe par le fournisseur de l'équipe ; mêmes règles de politique et de budget.
 - Surfaces : CLI, serveur, faux fournisseur
 - Source : proto/COORD/VERIF-LANCEUR.md §2 (Codex : « tout par -c ») ; fusion/COORD/FUSION-TEAMCODE.md 1a (OpenAI)
@@ -2165,7 +2165,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-SHARE-001 — Un membre lance sans login Claude : le serveur choisit un compte du pool
 
-- Étapes : Pool de deux comptes d'abonnement simulés ; `ostrom claude` sans identifiants Claude.
+- Étapes : Pool de deux comptes d'abonnement simulés ; `ostrom run claude` sans identifiants Claude.
 - Attendu : La requête part avec un compte choisi par le serveur ; le dev ne voit jamais les identifiants. (À arbitrer : PLATEFORME disait « ne refait pas » ; FUSION du 29/10 garde la mise en commun.)
 - Surfaces : CLI, serveur, faux fournisseur
 - Source : fusion/COORD/FUSION-TEAMCODE.md 1a (Routage des comptes, SelectPoolAccountUseCase) ; proto/COORD/PLATEFORME.md #13 et #16 (contradiction à lever) ; proto/COORD/VERIF-LANCEUR.md §4
@@ -2222,7 +2222,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-CLOUD-001 — Session cloud lancée depuis le terminal et rattachée
 
-- Étapes : `ostrom claude --cloud`, `ostrom attach <session>` ; faux orchestrateur de pods.
+- Étapes : `ostrom run claude --cloud`, `ostrom attach <session>` ; faux orchestrateur de pods.
 - Attendu : La session tourne dans un conteneur, le terminal affiche flux, `send`, `interrupt`, `answer` ; fermer le terminal ne tue pas la session.
 - Surfaces : CLI, serveur
 - Source : cli/COORD/CLI.md §0 point 6 et §1c (cloud, attach) ; fusion/COORD/FUSION-TEAMCODE.md 1a (Sessions cloud Kubernetes)
@@ -2576,7 +2576,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-ARTIFACT-004 — MCP artefacts et outils natifs interdits dans le run
 
-- Étapes : `ostrom claude` ; le faux agent liste ses outils.
+- Étapes : `ostrom run claude` ; le faux agent liste ses outils.
 - Attendu : `teamcode_artifacts` (nom réglable par la marque) en stdio présent ; `Artifact*` natifs interdits (`--disallowedTools`).
 - Surfaces : CLI, faux agent
 - Source : proto/COORD/VERIF-LANCEUR.md §2 (MCP artefacts) ; fusion/COORD/FUSION-TEAMCODE.md T8
@@ -2849,7 +2849,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-HARNESS-006 — Sans réseau : refus par défaut, délai de grâce par réglage
 
-- Étapes : `ostrom claude` hors ligne, avec et sans `offline_grace`.
+- Étapes : `ostrom run claude` hors ligne, avec et sans `offline_grace`.
 - Attendu : Par défaut 69 ; avec le réglage : dernier paquet vérifié non expiré/révoqué, portes qui refusent, journal signé au retour (« recorded offline »).
 - Surfaces : CLI
 - Source : cli/COORD/CLI.md §0 point 4
@@ -3152,7 +3152,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-DOGFOOD-002 — `behave.mjs` porté : chaque hook du harnais pilote rejoué par le faux agent donne la décision attendue
 
-- Étapes : sur des dépôts jetables, le faux agent rejoue les actions de `behave.mjs` (push, deploy, merge, appels MCP gardés…) sous `ostrom claude` avec les paquets du dogfood.
+- Étapes : sur des dépôts jetables, le faux agent rejoue les actions de `behave.mjs` (push, deploy, merge, appels MCP gardés…) sous `ostrom run claude` avec les paquets du dogfood.
 - Attendu : les 27 cas de `out/behave.json` donnent la même décision qu'au prototype ; puis la cible de la réécriture : 85 % des hooks du harnais pilote appliqués (contre 40 % au prototype), mesurée et publiée dans RAPPORT.md.
 - Surfaces : CLI, serveur, faux agent
 - Source : dogfood/examples/pilote/behave.mjs, COUVERTURE.md § « Ce que le hook fait vraiment » et § 4 (5 extensions)
@@ -3181,7 +3181,7 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 
 ### E2E-OBS-002 — Rien ne part sans configuration
 
-- Étapes : serveur sans `OTEL_*`, `OSTROM_LANGFUSE_*` ni `OSTROM_POSTHOG_*` ; CLI sans `ostrom telemetry enable` ; un parcours complet (login, `ostrom claude`, porte, oui).
+- Étapes : serveur sans `OTEL_*`, `OSTROM_LANGFUSE_*` ni `OSTROM_POSTHOG_*` ; CLI sans `ostrom telemetry enable` ; un parcours complet (login, `ostrom run claude`, porte, oui).
 - Attendu : zéro connexion sortante (faux DNS ou proxy qui compte les connexions).
 - Surfaces : CLI, serveur
 - Source : JOURNAL du 30/10 04:20 (OBS)
@@ -3532,7 +3532,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Priorité : P1
 - Statut : codé : `scenarios/parcours.e2e.ts` (s'allume par sondes : routes servies sur main ; rouge sur main 96a647d tant que ostrom-server#67 n'y est pas, `POST /api/v1/orgs` → 500 sous `ostrom_app`)
 
-### E2E-PARC-017 — 3.4 Politique des agents que lit `ostrom claude`
+### E2E-PARC-017 — 3.4 Politique des agents que lit `ostrom run claude`
 
 - Étapes : Le propriétaire lit `GET /api/v1/policy/agents?agent=claude`.
 - Attendu : `{allowed: bool}`, avec `reason` quand c'est non ; 401 sans identifiant.
@@ -3626,7 +3626,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 - Étapes : Le propriétaire fait `POST /api/v1/launches` `{agent: claude, repo}` ; avec le jeton d'agent, `alive`, `seen`, `end`, `reopen` sur la session ouverte ; une autre org liste les sessions ; sans identifiant.
 - Attendu : 201 `{launchId, agentToken, expiresAt}` ; la session apparaît dans `GET /sessions` ; `end` rend `{session, receipt}` ; `reopen` rend `reopened: true` ; l'autre org ne voit pas la session ; 401 sans identifiant. La boucle complète par la vraie CLI reste à E2E-CLAUDE-001.
-- Surfaces : serveur (la CLI `ostrom claude` s'arrête sur « launch not created » sans cette route)
+- Surfaces : serveur (la CLI `ostrom run claude` s'arrête sur « launch not created » sans cette route)
 - Source : `demo/PARCOURS.md` 5.2
 - Priorité : jalon
 - Statut : codé : `scenarios/parcours.e2e.ts` (bloqué : aucune PR pour `POST /launches` ; `/sessions` : ostrom-server#26 et #43)
@@ -3679,7 +3679,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 ### E2E-PARC-031 — 6.1 Sessions en cours d'une org neuve
 
 - Étapes : Une org neuve lit `GET /api/v1/sessions` et une session inconnue.
-- Attendu : `{items: []}` ; 404 ; 401 sans identifiant. `ostrom logs` (en attente) non couvert.
+- Attendu : `{items: []}` ; 404 ; 401 sans identifiant. `ostrom sessions show` (en attente) non couvert.
 - Surfaces : serveur
 - Source : `demo/PARCOURS.md` 6.1
 - Priorité : P1
@@ -3933,8 +3933,8 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 |---|---|---|---|---|---|
 | LOGIN | Login et premier lancement | 9 | 1 | 7 | 1 |
 | CONN | Connexion GitHub et Slack (onboarding) | 15 | 0 | 7 | 8 |
-| CLAUDE | `ostrom claude` : lancement, hooks, budget du hook | 20 | 4 | 10 | 6 |
-| CODEX | `ostrom codex` et les autres agents | 9 | 0 | 4 | 5 |
+| CLAUDE | `ostrom run claude` : lancement, hooks, budget du hook | 20 | 4 | 10 | 6 |
+| CODEX | `ostrom run codex` et les autres agents | 9 | 0 | 4 | 5 |
 | GATE | Porte qui bloque un push | 15 | 5 | 9 | 1 |
 | BYPASS | Contournements de la porte (audit du 30/10 et trous connus) | 33 | 12 | 18 | 3 |
 | YES | Oui lié au SHA, au dépôt, aux commits montrés ; auteur et approbateurs | 13 | 5 | 6 | 2 |

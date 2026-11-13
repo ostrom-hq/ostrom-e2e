@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The milestone journeys (SCENARIOS.md, priority « jalon »), against the real server image and the real `ostrom`
-// binary: a real `ostrom login` approved from the browser, `ostrom claude` under the fake agent and the signed session
+// binary: a real `ostrom login` approved from the browser, `ostrom run claude` under the fake agent and the signed session
 // package, a gate that blocks a push to main, a yes from a second account's browser bound to the SHA, the receipt.
 // No switch to set: each describe probes the server and switches itself on the day its pieces are on main
 // (login: ostrom-server#62 on top of ostrom-cli#40; journey: ostrom-server#43 and #26). Until then it is skipped, and
@@ -116,7 +116,7 @@ describe.skipIf(LOGIN_OFF !== '')(`jalon: real ostrom login${skipped(LOGIN_OFF)}
   }, 180_000);
 });
 
-describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes from the browser bound to the SHA, receipt${skipped(JOURNEY_OFF)}`, () => {
+describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom run claude, gate on push, yes from the browser bound to the SHA, receipt${skipped(JOURNEY_OFF)}`, () => {
   let w: RealWorld;
   let receipt: string | undefined;
   let receiptJson: string | undefined;
@@ -126,7 +126,7 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     w = await realWorld();
   }, 240_000);
 
-  it('E2E-CLAUDE-001 — ostrom claude launches the agent under the session package, writing nothing in the repo or ~/.claude', async () => {
+  it('E2E-CLAUDE-001 — ostrom run claude launches the agent under the session package, writing nothing in the repo or ~/.claude', async () => {
     const sb = sandbox('api', w.repo);
     const before = git(sb.work, 'status', '--porcelain', '--ignored');
     const { run, log } = await w.dev.cli.claude(sb.work, { steps: [{ event: 'SessionStart', source: 'startup' }, { event: 'tool', tool: 'Bash', input: { command: 'ls' }, run: true }, { event: 'SessionEnd' }] }, ['--repo', w.repo]);
@@ -153,7 +153,7 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
     // One agent session, as Claude Code lives it: SessionStart opens the session the gate asks in (without it the
     // server answers « Session not found », run 41483058195); the push is refused and waits for a yes; the agent then
     // waits, as `ostrom wait` would, and runs the exact same push again. A yes holds for its session only
-    // (AskGateUseCase `scope = session:<id>`, run 41485630703): a new `ostrom claude` would ask again.
+    // (AskGateUseCase `scope = session:<id>`, run 41485630703): a new `ostrom run claude` would ask again.
     const go = join(sb.root, 'go');
     const push = bash('git push origin main').steps;
     const script = { steps: [{ event: 'SessionStart', source: 'startup' }, ...push, ...bash(`while [ ! -f '${go}' ]; do sleep 1; done`).steps, ...push] };
@@ -264,7 +264,7 @@ describe.skipIf(JOURNEY_OFF !== '')(`jalon: ostrom claude, gate on push, yes fro
 
   // Run 41480063393 found the repository named after the folder; ostrom-cli#65 (b82f327) names it owner/name from
   // origin, as `--repo`'s help says.
-  it('E2E-CLAUDE-020 — without --repo, ostrom claude names the repository from origin (owner/name), not from the folder', async () => {
+  it('E2E-CLAUDE-020 — without --repo, ostrom run claude names the repository from origin (owner/name), not from the folder', async () => {
     const slug = `acme/from-origin-${Date.now().toString(36)}`;
     const sb = sandbox('api', slug);
     const { run } = await w.dev.cli.claude(sb.work, { steps: [{ event: 'SessionStart', source: 'startup' }, { event: 'SessionEnd' }] });
