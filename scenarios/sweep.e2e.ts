@@ -60,6 +60,11 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/github/links/{memberId}': 'member',
   '/api/v1/groups/{id}': 'group',
   '/api/v1/groups/{}/members/{login}': 'login',
+  '/api/v1/hook-delivery/{name}': 'hook',
+  '/api/v1/hook-delivery/{}/{version}': 'hookVersion',
+  '/api/v1/hooks/{name}': 'hook',
+  '/api/v1/hooks/{}/assignments/{memberId}': 'member',
+  '/api/v1/hooks/{}/versions/{version}': 'hookVersion',
   '/api/v1/inference/requests/{id}': 'inferenceRequest',
   '/api/v1/launches/{launchId}': 'launch',
   '/api/v1/me/environment/variants/{id}': 'personalEnvironmentVariant',
@@ -111,6 +116,8 @@ const FIXED: Record<string, string> = {
   settingsSection: 'mail',
   // The version label of A's skill (skills.v1).
   skillVersion: '1.0.0',
+  // The version label of A's hook (hooks.v1).
+  hookVersion: '1.0.0',
 };
 /** Secrets B never holds (an artifact's ticket, its public link): a missing one in both calls. */
 const CAPABILITIES = new Set(['artifactTicket', 'artifactLink']);
@@ -484,6 +491,15 @@ async function makeWorld(): Promise<World> {
   await make('mySkill', async () => {
     const r = await call(c, 'POST', `/api/v1/me/skills/mine-${skillName}/versions`, { version: '1.0.0', files: skillFiles, pin: true });
     return made(r, ['skill', 'name']);
+  });
+  // A team hook (hooks.v1): published, which never pins, then pinned for all members from the console.
+  await make('hook', async () => {
+    const script = { path: 'run.sh', mode: 'executable', contentBase64: Buffer.from('#!/bin/sh\n').toString('base64') };
+    const body = { version: '1.0.0', definition: { events: ['Stop'], command: 'run.sh' }, files: [script], allMembers: true };
+    const r = await call(c, 'POST', `/api/v1/hooks/hook-${skillName}/versions`, body);
+    const name = made(r, ['hook', 'name']);
+    made(await call(c, 'PUT', `/api/v1/hooks/${name}/pin`, { version: '1.0.0' }), ['pinnedVersion']);
+    return name;
   });
   await make('account', () =>
     post(
