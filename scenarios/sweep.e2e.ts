@@ -77,6 +77,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/todos/stop-hook/members/{memberId}': 'member',
   '/api/v1/tokens/{id}': 'token',
   '/api/v1/waits/{id}': 'wait',
+  '/api/v1/webhooks/{id}': 'webhook',
   '/api/v1/workflows/{id}': 'workflow',
 };
 
@@ -379,6 +380,8 @@ async function makeWorld(): Promise<World> {
     return id;
   });
   await make('wait', () => post('/api/v1/waits', { question: `Sweep question ${tag}` }, 'createWait', ['id']));
+  // An outgoing webhook (webhooks.v1) on a public host; it starts at the newest event, so the sweep sends it nothing.
+  await make('webhook', () => post('/api/v1/webhooks', { url: `https://example.com/ostrom-sweep-${tag}`, types: ['cloud.wait.created'], description: `Sweep ${tag}` }, 'createWebhook', ['webhook', 'id']));
   await make('mcpServer', () => post('/api/v1/mcp/servers', { name: `sweep-${tag}`, url: 'https://mcp.example.test/mcp', transport: 'http', tools: ['search'] }, 'createMcpServer', ['name']));
   await make('mcpPolicy', async () => {
     if (!values['mcpServer']) throw new Error('no MCP server');
