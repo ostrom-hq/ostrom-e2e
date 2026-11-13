@@ -20,15 +20,21 @@ async function json<T>(path: string, init?: RequestInit): Promise<{ status: numb
 }
 
 describe.skipIf(SERVER_URL === '')('E2E-SRV: server foundation', () => {
-  it('E2E-SRV-001 /health and /api/v1/health: 200, status ok, version, database check', async () => {
+  it('E2E-SRV-001 /health and /api/v1/health: 200, status ok, version; /ready checks the database', async () => {
     for (const path of ['/health', '/api/v1/health']) {
       const r = await json<Health>(path);
       expect(r.status, path).toBe(200);
       expect(r.headers.get('content-type'), path).toMatch(JSON_TYPE);
       expect(r.body.status, path).toBe('ok');
       expect(r.body.version, path).toMatch(/^\d+\.\d+\.\d+/);
-      expect(r.body.checks, path).toEqual({ database: 'ok' });
+      // Liveness checks only the process (audit SD-04, as TeamCode): a database blip never restarts every pod. A
+      // server from before that change still lists its database check here.
+      expect([{}, { database: 'ok' }], path).toContainEqual(r.body.checks);
     }
+    const ready = await json<Health>('/ready');
+    expect(ready.status).toBe(200);
+    expect(ready.body.status).toBe('ready');
+    expect(ready.body.checks).toEqual({ database: 'ok' });
   });
 
   it('E2E-SRV-002 /api/v1/instance: stable id, Ed25519 key in SPKI PEM, listed in /api/v1/instance/keys', async () => {
