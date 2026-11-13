@@ -54,6 +54,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/github/links/{memberId}': 'member',
   '/api/v1/groups/{id}': 'group',
   '/api/v1/groups/{}/members/{login}': 'login',
+  '/api/v1/inference/requests/{id}': 'inferenceRequest',
   '/api/v1/launches/{launchId}': 'launch',
   '/api/v1/me/environment/variants/{id}': 'personalEnvironmentVariant',
   '/api/v1/mcp/servers/{name}': 'mcpServer',
@@ -81,7 +82,15 @@ const PARAM_KINDS: Record<string, string> = {
 };
 
 /** Values that are not A's: the same in both calls (a provider name, a file of the artifact, its first version). */
-const FIXED: Record<string, string> = { provider: 'github', filePath: 'index.md', artifactVersion: '1', automationVersion: '1' };
+// An inference call's own id (`x-ostrom-client-request-id`): a cancel names any id and answers 204 for every one, so
+// nothing of A's is named; that B's marker never stops A's call is the server's test (GatewayPostgresTest).
+const FIXED: Record<string, string> = {
+  provider: 'github',
+  filePath: 'index.md',
+  artifactVersion: '1',
+  automationVersion: '1',
+  inferenceRequest: '6f1c2b0e-9a4d-4c3e-8b7a-2d5e1f0a9c41',
+};
 /** Secrets B never holds (an artifact's ticket, its public link): a missing one in both calls. */
 const CAPABILITIES = new Set(['artifactTicket', 'artifactLink']);
 
