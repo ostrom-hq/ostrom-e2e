@@ -30,7 +30,7 @@ export interface Person {
    * must keep answering while the CLI (and the server it calls) talk to it.
    */
   ostrom(args: readonly string[], opts?: { cwd?: string; input?: string; env?: Record<string, string> }): Promise<Run>;
-  /** `ostrom claude` with the fake agent playing `script`; returns the CLI run and the agent's log. */
+  /** `ostrom run claude` with the fake agent playing `script`; returns the CLI run and the agent's log. */
   claude(cwd: string, script: Script, args?: readonly string[]): Promise<{ run: Run; log: AgentLog | undefined }>;
 }
 
@@ -44,7 +44,7 @@ export const CONSOLE_URL = process.env['OSTROM_E2E_CONSOLE_URL'] ?? 'http://127.
 /** A person with a clean home, pointed at the bench's server (and the fake GitHub when given). Not logged in yet. */
 export function person(login: string, github?: FakeGitHub): Person {
   const home = mkdtempSync(join(tmpdir(), `ostrom-e2e-${login}-`));
-  // The real `ostrom claude` finds its agent on PATH only (`finder.find(agent.executable)`, AgentLaunchUseCase.kt):
+  // The real `ostrom run claude` finds its agent on PATH only (`finder.find(agent.executable)`, AgentLaunchUseCase.kt):
   // the fake agents go first on this person's PATH under the names `claude` and `codex` (run 41474679433). A wrapper,
   // not a link: bin/fake-claude finds fake-agent.ts next to its own path (run 41477443350).
   const agents = join(home, 'agents');
@@ -85,7 +85,7 @@ export function person(login: string, github?: FakeGitHub): Person {
     async claude(cwd, script, args = []) {
       const dir = mkdtempSync(join(tmpdir(), 'ostrom-e2e-agent-'));
       writeFileSync(join(dir, 'script.json'), JSON.stringify(script));
-      const run = await ostrom(['claude', ...args], { cwd, env: { FAKE_AGENT_SCRIPT: join(dir, 'script.json'), FAKE_AGENT_LOG: join(dir, 'log.json') } });
+      const run = await ostrom(['run', 'claude', ...args], { cwd, env: { FAKE_AGENT_SCRIPT: join(dir, 'script.json'), FAKE_AGENT_LOG: join(dir, 'log.json') } });
       let log: AgentLog | undefined;
       try {
         log = JSON.parse(readFileSync(join(dir, 'log.json'), 'utf8')) as AgentLog;

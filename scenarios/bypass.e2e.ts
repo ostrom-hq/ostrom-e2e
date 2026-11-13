@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Bypass attempts from the audit of the gate (SCENARIOS.md, family BYPASS, priority « jalon »; PARCOURS 5.3 « Action
-// protégée : la porte s'ouvre »): each one is a real command the fake agent runs, under the real `ostrom claude`, in a
+// protégée : la porte s'ouvre »): each one is a real command the fake agent runs, under the real `ostrom run claude`, in a
 // git sandbox; the assertion is on what reached the bare origin and on the hook's refusal, not on a message. They play
 // in the milestone's world (`realWorld()`: people signed in by their e-mailed link, the real `ostrom login`, the gate
 // « push to main » made by a workflow) and switch themselves on with jalon.e2e.ts: when the server or the CLI is

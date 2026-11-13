@@ -760,7 +760,7 @@ describe('E2E-PARC: 3. rules, gates, approvers, budgets', () => {
     await needsCredential('PUT', '/api/v1/policy/models', policy);
   }, T);
 
-  it.skipIf(W017 !== '')(named('E2E-PARC-017 — 3.4 the agent policy `ostrom claude` reads: allowed or not, with its reason', W017), async () => {
+  it.skipIf(W017 !== '')(named('E2E-PARC-017 — 3.4 the agent policy `ostrom run claude` reads: allowed or not, with its reason', W017), async () => {
     const a = await owner('parc-017');
     const r = await call(a.c, 'GET', '/api/v1/policy/agents?agent=claude');
     expect(r.status).toBe(200);
