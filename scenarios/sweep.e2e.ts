@@ -158,6 +158,10 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   listEnvironmentAssignments: { refers: true, make: (v) => ({ query: `member=${enc(v['member'])}` }) },
   createMyEnvironmentVariant: { make: () => ({ body: { variable: 'SWEEP_INTRUDER', name: 'intruder', value: 'sweep-intruder' } }) },
   updateMyEnvironmentVariant: { make: () => ({ body: { expectedVersion: 1, name: 'intruder' } }) },
+  // The delivery of a workflow step by its session (workflows.deliver.v1): the cloud session an agent node runs in.
+  deliverWorkflowSession: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], output: 'Sweep intruder delivery' } }) },
+  pendingWorkflowSession: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['cloudSession'])}` }) },
+  workflowsMcp: { refers: true, make: (v) => ({ query: `session=${enc(v['cloudSession'])}`, body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'deliver', arguments: { output: 'Sweep intruder delivery' } } } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
   transferOrg: { make: (v) => ({ body: { login: v['login'] } }) },
   deleteOrg: { make: (v) => ({ body: { confirm: v['slug'] } }) },
