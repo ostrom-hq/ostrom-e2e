@@ -67,6 +67,8 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/mcp/servers/{}/assignments/{member}': 'member',
   '/api/v1/mcp/servers/{}/policies/{policyId}': 'mcpPolicy',
   '/api/v1/mcp/{server}': 'mcpServer',
+  '/api/v1/me/skills/{name}': 'mySkill',
+  '/api/v1/members/{memberId}': 'member',
   '/api/v1/orgs/{org}': 'org',
   '/api/v1/orgs/{orgId}': 'org',
   '/api/v1/orgs/{}/invitations/{id}': 'invitation',
@@ -80,6 +82,11 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/secrets/{name}': 'secret',
   '/api/v1/service-keys/{id}': 'serviceKey',
   '/api/v1/sessions/{id}': 'session',
+  '/api/v1/skill-delivery/{name}': 'skill',
+  '/api/v1/skill-delivery/{}/{version}': 'skillVersion',
+  '/api/v1/skills/{name}': 'skill',
+  '/api/v1/skills/{}/assignments/{memberId}': 'member',
+  '/api/v1/skills/{}/versions/{version}': 'skillVersion',
   '/api/v1/todos/session/items/{item}': 'todoItem',
   '/api/v1/todos/stop-hook/members/{memberId}': 'member',
   '/api/v1/tokens/{id}': 'token',
@@ -102,6 +109,8 @@ const FIXED: Record<string, string> = {
   inferenceRequest: '6f1c2b0e-9a4d-4c3e-8b7a-2d5e1f0a9c41',
   // The instance's settings sections are the instance's, not an organization's: the same section in both calls.
   settingsSection: 'mail',
+  // The version label of A's skill (skills.v1).
+  skillVersion: '1.0.0',
 };
 /** Secrets B never holds (an artifact's ticket, its public link): a missing one in both calls. */
 const CAPABILITIES = new Set(['artifactTicket', 'artifactLink']);
@@ -197,6 +206,8 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   // one: B's names none, so an answer quoting A's cluster id is a leak.
   createCloudProfile: { make: () => ({ body: cloudProfile('none', 0) }) },
   updateCloudProfile: { make: () => ({ body: cloudProfile('none', 1) }) },
+  // A workstation's report names A's skill in its body (skills.v1).
+  reportSkillInstallations: { refers: true, make: (v) => ({ body: { installations: [{ name: v['skill'], status: 'installed' }] } }) },
   transferOrg: { make: (v) => ({ body: { login: v['login'] } }) },
   deleteOrg: { make: (v) => ({ body: { confirm: v['slug'] } }) },
   inviteOrgMembers: { make: () => ({ body: { invites: [{ email: email('sweep-intruder'), role: 'admin' }] } }) },
@@ -463,6 +474,17 @@ async function makeWorld(): Promise<World> {
   await make('artifact', () => post('/api/v1/artifacts', { title: `Sweep artifact ${tag}`, access: 'team', files: [{ path: 'index.md', content: `# sweep ${tag}` }] }, 'publishArtifact', ['id'], ['artifact', 'id']));
   // An upload of A's, its one chunk never sent: only the credential that opened it sends to it.
   await make('artifactUpload', () => post('/api/v1/artifacts/uploads', { files: [{ sha256: 'a'.repeat(64), size: 1 }] }, 'createArtifactUpload', ['uploadId']));
+  // A team skill pinned for all members, and a personal one of A's (skills.v1): the names the skill routes take.
+  const skillFiles = [{ path: 'SKILL.md', contentBase64: Buffer.from(`# Sweep ${tag}`).toString('base64') }];
+  const skillName = `sweep-${tag.replace(/[^0-9a-z]/g, '0')}`;
+  await make('skill', async () => {
+    const r = await call(c, 'POST', `/api/v1/skills/${skillName}/versions`, { version: '1.0.0', files: skillFiles, pin: true, allMembers: true });
+    return made(r, ['skill', 'name']);
+  });
+  await make('mySkill', async () => {
+    const r = await call(c, 'POST', `/api/v1/me/skills/mine-${skillName}/versions`, { version: '1.0.0', files: skillFiles, pin: true });
+    return made(r, ['skill', 'name']);
+  });
   await make('account', () =>
     post(
       '/api/v1/accounts',
