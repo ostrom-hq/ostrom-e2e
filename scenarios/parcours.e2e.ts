@@ -1096,7 +1096,13 @@ describe('E2E-PARC: 4. workflows and automations', () => {
       { id: 'verdict', kind: 'check', label: 'Shipped?', condition: { step: 'ask', path: 'outcome', op: 'equals', value: 'ship' } },
       { id: 'call', kind: 'workflow', label: 'Build', workflowId: child, arguments: { target: '{{inputs.branch}}' } },
     ];
-    const edges = [{ from: 'ask', to: 'verdict', on: 'ship' }, { from: 'verdict', to: 'call', on: 'true' }];
+    // Every outcome of a node the server plays goes somewhere (the save refuses a workflow that leaves one out).
+    const edges = [
+      { from: 'ask', to: 'verdict', on: 'ship' },
+      { from: 'ask', to: null, on: 'hold' },
+      { from: 'verdict', to: 'call', on: 'true' },
+      { from: 'verdict', to: null, on: 'false' },
+    ];
     const inputs = [{ id: 'branch', label: 'Branch', required: true }];
     const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(parent, 'Parc 022 waits', 'accepted', { nodes, edges, start: 'ask', inputs }));
     expect(made.status, JSON.stringify(made.body)).toBe(201);
