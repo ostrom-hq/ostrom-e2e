@@ -2941,7 +2941,7 @@ Priorités : `jalon` = premier jalon (`ostrom run claude` + porte qui bloque un 
 - Surfaces : CLI, serveur
 - Source : ostrom-server#28, #80, #86 et #388 (RELAY) ; ostrom-cli#24, #55, #62, #63 et #140 ; parité TC-CAP-48 ; JOURNAL 30/10 15:10 RELAY
 - Priorité : P1
-- Statut : à rejouer après ostrom-server#388 et ostrom-cli#140 (précédent vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41484214036), `scenarios/import.e2e.ts`
+- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/43455438966 (ostrom-server et ostrom-cli main, avec ostrom-server#388 et ostrom-cli#140), `scenarios/import.e2e.ts`
 
 ### E2E-TC-004 — Bascule (cutover) de l'owner : comptes ranimés, refus, audit à son nom
 
