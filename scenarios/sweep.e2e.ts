@@ -32,6 +32,8 @@ const PARAM_KINDS: Record<string, string> = {
   '/l/{slug}': 'artifactLink',
   '/l/{}/{path}': 'filePath',
   '/api/v1/accounts/{id}': 'account',
+  '/api/v1/admin/instance-admins/{userId}': 'user',
+  '/api/v1/admin/settings/{section}': 'settingsSection',
   '/api/v1/approvals/{id}': 'approval',
   '/api/v1/artifacts/{id}': 'artifact',
   '/api/v1/artifacts/{}/members/{memberId}': 'member',
@@ -91,6 +93,8 @@ const FIXED: Record<string, string> = {
   artifactVersion: '1',
   automationVersion: '1',
   inferenceRequest: '6f1c2b0e-9a4d-4c3e-8b7a-2d5e1f0a9c41',
+  // The instance's settings sections are the instance's, not an organization's: the same section in both calls.
+  settingsSection: 'mail',
 };
 /** Secrets B never holds (an artifact's ticket, its public link): a missing one in both calls. */
 const CAPABILITIES = new Set(['artifactTicket', 'artifactLink']);
@@ -164,6 +168,9 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   pendingWorkflowSession: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['cloudSession'])}` }) },
   workflowsMcp: { refers: true, make: (v) => ({ query: `session=${enc(v['cloudSession'])}`, body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'deliver', arguments: { output: 'Sweep intruder delivery' } } } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
+  // The instance's administration (admin.settings.v1): only an administrator of the instance, never an organization's.
+  addInstanceAdmin: { make: () => ({ body: { email: email('sweep-intruder') } }) },
+  saveInstanceSettings: { make: () => ({ body: { version: 0, values: {}, secrets: {} } }) },
   transferOrg: { make: (v) => ({ body: { login: v['login'] } }) },
   deleteOrg: { make: (v) => ({ body: { confirm: v['slug'] } }) },
   inviteOrgMembers: { make: () => ({ body: { invites: [{ email: email('sweep-intruder'), role: 'admin' }] } }) },
@@ -299,6 +306,8 @@ async function makeWorld(): Promise<World> {
     if (!id) throw new Error(`no member id in ${JSON.stringify(mine)}`);
     return id;
   });
+  // A's own account id, which an administrator of the instance names to remove one (admin.settings.v1).
+  await make('user', async () => made(await call(c, 'GET', '/api/v1/auth/me/account'), ['id']));
   await make('authSession', async () => {
     const id = field(itemsOf((await call(c, 'GET', '/api/v1/auth/sessions')).body)[0], 'id');
     if (!id) throw new Error('no session listed');
