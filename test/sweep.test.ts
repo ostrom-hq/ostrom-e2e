@@ -136,6 +136,7 @@ describe('plan', () => {
     op({ method: 'POST', path: '/api/v1/auth/logout' }),
     op({ method: 'POST', path: '/api/v1/tokens' }),
     op({ method: 'GET', path: '/api/v1/waits/{id}', orgScoped: true }),
+    op({ method: 'POST', path: '/api/v1/inference/requests/{id}/cancel', orgScoped: true }),
   ];
   const kinds = { '/a/{id}': 'artifact', '/a/{}/{ticket}': 'ticket', '/api/v1/orgs/{org}': 'org', '/api/v1/orgs/{}/members/{login}': 'login' };
 
@@ -162,6 +163,13 @@ describe('plan', () => {
       'GET /api/v1/waits/{}: no resource kind for {id} (/api/v1/waits/{id})',
       'GET /api/v1/ghost: no operation in the contract',
     ]);
+  });
+
+  it('sweeps a route that names only fixed values as a route of the organization', () => {
+    const served = parseServed('POST /api/v1/inference/requests/{}/cancel');
+    const named = { ...kinds, '/api/v1/inference/requests/{id}': 'inferenceRequest' };
+    expect(plan(served, ops, named, {}).cases.map((c) => c.kind)).toEqual(['strict']);
+    expect(plan(served, ops, named, {}, new Set(['inferenceRequest'])).cases.map((c) => c.kind)).toEqual(['org']);
   });
 
   it('fills a path with URL-encoded values', () => {

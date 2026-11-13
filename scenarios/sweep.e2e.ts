@@ -86,8 +86,9 @@ const PARAM_KINDS: Record<string, string> = {
 };
 
 /** Values that are not A's: the same in both calls (a provider name, a file of the artifact, its first version). */
-// An inference call's own id (`x-ostrom-client-request-id`): a cancel names any id and answers 204 for every one, so
-// nothing of A's is named; that B's marker never stops A's call is the server's test (GatewayPostgresTest).
+// An inference call's own id (`x-ostrom-client-request-id`): a cancel names any id and answers 204 for every one, as
+// TeamCode's, so nothing of A's is named and the route is swept as the organization's (B may not act in A's); that
+// B's marker never stops A's call is the server's test (RequestCancellationPostgresTest).
 const FIXED: Record<string, string> = {
   provider: 'github',
   filePath: 'index.md',
@@ -202,7 +203,7 @@ function contract(): Contract {
   const doc: unknown = JSON.parse(readFileSync(OPENAPI_FILE, 'utf8'));
   // The served list and the scan of the server, then every operation the contract marks served (a route the scan missed).
   const served = mergeServed(parseServed(readFileSync(SERVED_FILE, 'utf8')), servedInContract(doc));
-  return { doc, ...plan(served, operations(doc), PARAM_KINDS, SKIPPED) };
+  return { doc, ...plan(served, operations(doc), PARAM_KINDS, SKIPPED, new Set(Object.keys(FIXED))) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

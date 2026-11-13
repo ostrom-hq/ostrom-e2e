@@ -218,8 +218,16 @@ export function paramPrefix(path: string, param: string): string {
 /**
  * The case of every served route: from its operation, the kind of resource of each path parameter (`paramKinds`, by
  * prefix), and the routes not called on purpose (`skipped`, label → why). What has no case is in `uncovered`, with why.
+ * A route whose every path parameter is of a `fixed` kind (a value that is nobody's, the same in both calls) names no
+ * resource of A: it is swept as a route of the organization, not as A's resource.
  */
-export function plan(served: readonly Served[], ops: readonly Operation[], paramKinds: Readonly<Record<string, string>>, skipped: Readonly<Record<string, string>>): { cases: Case[]; uncovered: string[] } {
+export function plan(
+  served: readonly Served[],
+  ops: readonly Operation[],
+  paramKinds: Readonly<Record<string, string>>,
+  skipped: Readonly<Record<string, string>>,
+  fixed: ReadonlySet<string> = new Set(),
+): { cases: Case[]; uncovered: string[] } {
   const cases: Case[] = [];
   const uncovered: string[] = [];
   for (const route of served) {
@@ -246,7 +254,7 @@ export function plan(served: readonly Served[], ops: readonly Operation[], param
       continue;
     }
     if (op.public) cases.push({ label, op, kind: 'public', kinds });
-    else if (op.params.length > 0) cases.push({ label, op, kind: 'strict', kinds });
+    else if (op.params.some((p) => !fixed.has(kinds[p] as string))) cases.push({ label, op, kind: 'strict', kinds });
     else if (op.orgScoped) cases.push({ label, op, kind: 'org', kinds });
     else if (op.method === 'GET') cases.push({ label, op, kind: 'own', kinds });
     else uncovered.push(`${label}: a write on the caller's own account, without an organization: say why it is not called`);
