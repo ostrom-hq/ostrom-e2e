@@ -1206,7 +1206,7 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     await hidden(b.c, `/api/v1/waits/${id}`, 'Ship it?');
   }, T);
 
-  it.skipIf(W044 !== '')(named('E2E-PARC-044 — 4.3 an agent token asks only its person, sees and cancels only the waits its person asked, never answers; a resumed segment asks too', W044), async () => {
+  it.skipIf(W044 !== '')(named('E2E-PARC-044 — 4.3 an agent token asks its person or a colleague, sees and cancels only the waits its person asked, never answers; a resumed segment asks too', W044), async () => {
     const a = await owner('parc-044');
     const repo = `acme/parc-${randomUUID().slice(0, 8)}`;
     // A second person of the org, who asks the owner a question about the owner's session.
@@ -1238,8 +1238,16 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect(ownWait.body, JSON.stringify(ownWait.body)).toMatchObject({ status: 'open', sessionId: sid, question: { title: 'Parc 044 own' } });
     const ownerMember = ownWait.body['assignee'] as string;
 
-    // Another person asks the owner about the same session: the agent neither lists, reads nor cancels that wait.
-    const theirs = await call(m, 'POST', '/api/v1/waits', { question: { title: 'Parc 044 theirs', actions: [{ id: 'ok', label: 'OK' }] }, sessionId: sid, assignee: ownerMember });
+    // Another person asks the owner: the agent neither lists, reads nor cancels that wait. Only the session's person
+    // asks in the session (403 wait_session_owner_only, TeamCode 675a5307): an answer there would reach their agent.
+    // A server before that change took it in the session; both are played until it is deployed everywhere.
+    const theirsQuestion = { title: 'Parc 044 theirs', actions: [{ id: 'ok', label: 'OK' }] };
+    let theirs = await call(m, 'POST', '/api/v1/waits', { question: theirsQuestion, sessionId: sid, assignee: ownerMember });
+    const ownerOnly = theirs.status === 403;
+    if (ownerOnly) {
+      expect(theirs.body, JSON.stringify(theirs.body)).toMatchObject({ error: { type: 'wait_session_owner_only' } });
+      theirs = await call(m, 'POST', '/api/v1/waits', { question: theirsQuestion, assignee: ownerMember });
+    }
     expect(theirs.status, JSON.stringify(theirs.body)).toBeLessThan(300);
     const theirsId = theirs.body['id'] as string;
     const listed = await waitsTool(agent, sid, 'list_waits', { status: 'all' });
@@ -1253,15 +1261,24 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     }
     expect((await call(a.c, 'GET', `/api/v1/waits/${theirsId}`)).body?.['status'], 'still open').toBe('open');
 
-    // The agent asks only its person: naming the other member is a tool error, and no wait is opened.
+    // The agent asks any member of the organization (TeamCode 2d567f2a), by id: the wait is asked of them, in the
+    // session. A server before that change refused it as a tool error, and opened no wait.
     // The other person's member id: the assignee of a wait they ask themselves.
     const self = await call(m, 'POST', '/api/v1/waits', { question: { title: 'Parc 044 self', actions: [{ id: 'ok', label: 'OK' }] } });
     expect(self.status, JSON.stringify(self.body)).toBeLessThan(300);
     const otherMember = self.body['assignee'] as string;
     expect(otherMember).not.toBe(ownerMember);
     const elsewhere = await waitsTool(agent, sid, 'ask_human', { title: 'Parc 044 elsewhere', assignee: otherMember });
-    expect(elsewhere.isError, elsewhere.text).toBe(true);
-    expect((await waitsTool(agent, sid, 'list_waits', { status: 'all' })).text).not.toContain('Parc 044 elsewhere');
+    if (ownerOnly) {
+      expect(elsewhere.isError, elsewhere.text).toBe(false);
+      const colleague = askedWait(elsewhere.text);
+      expect((await call(m, 'GET', `/api/v1/waits/${colleague}`)).body).toMatchObject({ status: 'open', sessionId: sid, assignee: otherMember });
+      expect((await waitsTool(agent, sid, 'list_waits', { status: 'all' })).text).toContain('Parc 044 elsewhere');
+      expect((await waitsTool(agent, sid, 'cancel_wait', { wait: colleague })).isError).toBe(false);
+    } else {
+      expect(elsewhere.isError, elsewhere.text).toBe(true);
+      expect((await waitsTool(agent, sid, 'list_waits', { status: 'all' })).text).not.toContain('Parc 044 elsewhere');
+    }
 
     // It never answers, not even its own question: the waits API refuses an agent token whatever it asks.
     const answer = await call(agent, 'POST', `/api/v1/waits/${own}/answer`, { action: 'yes' });
