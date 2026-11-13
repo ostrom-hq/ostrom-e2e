@@ -12,7 +12,7 @@ on:
       server_image:
         description: >
           A published image of ostrom-server to run the scenarios against, instead of building main
-          (ghcr.io/ostrom-hq/ostrom-server:sha-<7>): the run a PARCOURS cell cites (JOURNAL 03/11 00:06).
+          (ostromhq/ostrom-server:sha-<commit> on Docker Hub): the run a PARCOURS cell cites (JOURNAL 03/11 00:06).
         required: false
         default: ""
 # One run per workflow and ref; a new push cancels the previous run, except on main (every main commit is checked).
@@ -67,7 +67,7 @@ jobs:
       - name: Unit tests of the bench, 100 % thresholds
         run: pnpm test:coverage
       # Full stack: the real server and the real `ostrom` built from the main branches of ostrom-server and ostrom-cli.
-      # The server runs as its own distroless image (its Dockerfile on main), the artefact that ships.
+      # The server runs as its own image (built by jib on main, the JVM server of decision 0001), the artefact that ships.
       # Both now meet the contract on main: a server or CLI that does not build fails the job, it never leaves the
       # scenarios silently skipped (run 41028221230 was green with neither, ostrom-core unreadable).
       - name: Sign-in mail directory (written by the server's non-root user, read by the scenarios)

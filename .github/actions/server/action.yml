@@ -1,13 +1,15 @@
-name: Ostrom server (real native binary)
+name: Ostrom server (real image or binary)
 description: >
-  Builds the native linuxX64 binary of ostrom-server at a given ref (cached by commit), starts it against the given
-  PostgreSQL and waits for GET /health. Used by the CI of ostrom-web, ostrom-app, ostrom-cli and ostrom-e2e.
-  With `image: "true"`, runs the server's own distroless image instead (its Dockerfile at that ref, around the same
-  binary), in a container named `ostrom-e2e-server` on the host network: what the bench tests is what ships.
-  Contract (ostrom-e2e/templates/README.md): the binary comes from `ci/build-linux.sh` (→ `dist/ostrom-server`) when
-  the repository has it, else from `./gradlew :app:linkReleaseExecutableLinuxX64`; it reads OSTROM_DATABASE_URL,
-  OSTROM_DATABASE_USER, OSTROM_DATABASE_PASSWORD and OSTROM_PORT, applies its migrations at start and answers
-  GET /health.
+  Builds ostrom-server at a given ref, starts it against the given PostgreSQL and waits for GET /health. Used by the
+  CI of ostrom-web, ostrom-app, ostrom-cli and ostrom-e2e.
+  A JVM server (ostrom-server decision 0001: the sources have `image/build.gradle.kts` and no `ci/build-linux.sh`) is
+  always run as its own image, built by jib (`./gradlew :image:publishImageToLocalRegistry`), in a container named
+  `ostrom-e2e-server` on the host network: what the bench tests is what ships.
+  A native server (older refs): the binary comes from `ci/build-linux.sh` (→ `dist/ostrom-server`) when the
+  repository has it, else from `./gradlew :app:linkReleaseExecutableLinuxX64` (cached by commit); with
+  `image: "true"`, its distroless image (its Dockerfile at that ref, around the same binary) runs instead.
+  Contract (ostrom-e2e/templates/README.md): the server reads OSTROM_DATABASE_URL, OSTROM_DATABASE_USER,
+  OSTROM_DATABASE_PASSWORD and OSTROM_PORT, its `migrate` command applies the migrations, and it answers GET /health.
 inputs:
   deploy-key:
     description: Read-only deploy key of ostrom-server (org secret DEPLOY_KEY_SERVER). Empty when called from ostrom-server itself.
@@ -15,7 +17,8 @@ inputs:
     default: ""
   published-image:
     description: >
-      A published image of ostrom-server to run instead of building one (`ghcr.io/ostrom-hq/ostrom-server:sha-<7>`):
+      A published image of ostrom-server to run instead of building one (`ostromhq/ostrom-server:sha-<commit>` on
+      Docker Hub, or an older `ghcr.io/ostrom-hq/ostrom-server:sha-<7>`):
       the proof a PARCOURS cell asks for (JOURNAL 03/11 00:06). The sources are checked out at the commit of its
       `org.opencontainers.image.revision` label, for their database roles. The job needs `packages: read`.
     required: false
@@ -63,7 +66,7 @@ inputs:
     required: false
     default: ""
   image:
-    description: '"true": build the Docker image of ostrom-server (its Dockerfile) and run it, instead of the bare binary.'
+    description: '"true": build the Docker image of a native ostrom-server (its Dockerfile) and run it, instead of the bare binary. A JVM server always runs as its image.'
     required: false
     default: "false"
   docker-args:
@@ -92,7 +95,7 @@ outputs:
     value: ${{ steps.src.outputs.bin }}
   mode:
     description: "`image` (the server's Docker image, container `ostrom-e2e-server`) or `binary`."
-    value: ${{ (inputs.image == 'true' || inputs.published-image != '') && 'image' || 'binary' }}
+    value: ${{ (inputs.image == 'true' || inputs.published-image != '' || steps.src.outputs.jvm == 'true') && 'image' || 'binary' }}
 runs:
   using: composite
   steps:
@@ -104,7 +107,8 @@ runs:
         IMAGE: ${{ inputs.published-image }}
         GHCR_TOKEN: ${{ github.token }}
       run: |
-        printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        # ghcr.io is private (an older native image); Docker Hub's ostromhq/ostrom-server is pulled anonymously.
+        case "$IMAGE" in ghcr.io/*) printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin ;; esac
         docker pull --quiet "$IMAGE" || { echo "::error title=ostrom-server image::$IMAGE cannot be pulled from this repository (published? package Actions access?)"; exit 1; }
         revision=$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")
         [ -n "$revision" ] || { echo "::error title=ostrom-server image::$IMAGE carries no org.opencontainers.image.revision label"; exit 1; }
@@ -128,6 +132,8 @@ runs:
         echo "dir=$dir" >> "$GITHUB_OUTPUT"
         echo "sha=$(git -C "$dir" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
         echo "bin=$RUNNER_TEMP/ostrom-bin/ostrom-server" >> "$GITHUB_OUTPUT"
+        # The JVM server (decision 0001): its image, built by jib, is the only artefact; no native binary to build.
+        if [ ! -e "$dir/ci/build-linux.sh" ] && [ -f "$dir/image/build.gradle.kts" ]; then echo "jvm=true" >> "$GITHUB_OUTPUT"; fi
         if [ ! -x "$dir/ci/build-linux.sh" ] && [ ! -f "$dir/app/build.gradle.kts" ]; then
           echo "::${{ inputs.required == 'true' && 'error' || 'warning' }} title=ostrom-server contract::ostrom-server@$(git -C "$dir" rev-parse --short HEAD) has neither ci/build-linux.sh nor the :app module yet (contract in ostrom-e2e/templates/README.md)"
           if [ "${{ inputs.required }}" = "true" ]; then exit 1; fi
@@ -136,7 +142,7 @@ runs:
           echo "available=true" >> "$GITHUB_OUTPUT"
         fi
     - name: Cache the server binary by commit
-      if: steps.src.outputs.available == 'true' && inputs.published-image == ''
+      if: steps.src.outputs.available == 'true' && inputs.published-image == '' && steps.src.outputs.jvm != 'true'
       id: cache
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
@@ -181,7 +187,7 @@ runs:
       with:
         build-root-directory: ${{ steps.src.outputs.dir }}
     - name: Cache ~/.konan (build only)
-      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true' && inputs.published-image == ''
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true' && inputs.published-image == '' && steps.src.outputs.jvm != 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.konan
@@ -189,7 +195,7 @@ runs:
         restore-keys: konan-${{ runner.os }}-
     - name: Build the native server
       id: build
-      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true' && inputs.published-image == ''
+      if: steps.src.outputs.available == 'true' && steps.cache.outputs.cache-hit != 'true' && inputs.published-image == '' && steps.src.outputs.jvm != 'true'
       shell: bash
       working-directory: ${{ steps.src.outputs.dir }}
       env:
@@ -217,15 +223,28 @@ runs:
         echo "::$LEVEL title=ostrom-server contract::the build failed or did not produce $out (contract in ostrom-e2e/templates/README.md)"
         echo "built=false" >> "$GITHUB_OUTPUT"
         [ "$REQUIRED" = "true" ] && exit 1 || exit 0
-    - name: Build the server image (its own Dockerfile, around the same binary)
+    - name: Build the server image (jib for the JVM server; else its own Dockerfile, around the same binary)
       id: image
-      if: inputs.image == 'true' && inputs.published-image == '' && steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false'
+      if: (inputs.image == 'true' || steps.src.outputs.jvm == 'true') && inputs.published-image == '' && steps.src.outputs.available == 'true' && steps.build.outputs.built != 'false'
       shell: bash
       working-directory: ${{ steps.src.outputs.dir }}
       env:
         LEVEL: ${{ inputs.required == 'true' && 'error' || 'warning' }}
         REQUIRED: ${{ inputs.required }}
+        JVM: ${{ steps.src.outputs.jvm }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
+        if [ "$JVM" = true ]; then
+          # Into the local Docker daemon as ostrom-server:e2e, for this runner's architecture only.
+          if ./gradlew --no-daemon :image:publishImageToLocalRegistry -PimageTags=e2e -PimagePlatforms=amd64; then
+            ./gradlew --stop >/dev/null 2>&1 || true
+            docker images ostrom-server:e2e --format 'image ostrom-server:e2e {{.Size}}'
+            echo "built=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "::$LEVEL title=ostrom-server image::jib could not build the image"
+          echo "built=false" >> "$GITHUB_OUTPUT"
+          [ "$REQUIRED" = "true" ] && exit 1 || exit 0
+        fi
         mkdir -p dist && cp "${{ steps.src.outputs.bin }}" dist/ostrom-server && chmod 755 dist/ostrom-server
         if [ -f Dockerfile ] && docker build -q -t ostrom-server:e2e .; then
           docker images ostrom-server:e2e --format 'image ostrom-server:e2e {{.Size}}'
@@ -242,7 +261,7 @@ runs:
         DIR: ${{ steps.src.outputs.dir }}
         ADMIN_URL: ${{ inputs.database-admin-url }}
         DATABASE_URL: ${{ inputs.database-url }}
-        IMAGE: ${{ inputs.image == 'true' || inputs.published-image != '' }}
+        IMAGE: ${{ inputs.image == 'true' || inputs.published-image != '' || steps.src.outputs.jvm == 'true' }}
         BIN: ${{ steps.src.outputs.bin }}
       run: |
         if [ ! -f "$DIR/ci/database-roles.sql" ]; then echo "no ci/database-roles.sql: the server serves as the given user"; exit 0; fi
@@ -267,7 +286,7 @@ runs:
         OSTROM_PORT: ${{ inputs.port }}
         KEY_FILE: ${{ runner.temp }}/ostrom-instance-key-${{ inputs.port }}.pem
         EXTRA_ENV: ${{ inputs.extra-env }}
-        IMAGE: ${{ inputs.image == 'true' || inputs.published-image != '' }}
+        IMAGE: ${{ inputs.image == 'true' || inputs.published-image != '' || steps.src.outputs.jvm == 'true' }}
         DOCKER_ARGS: ${{ inputs.docker-args }}
         LEVEL: ${{ inputs.required == 'true' && 'error' || 'warning' }}
         REQUIRED: ${{ inputs.required }}

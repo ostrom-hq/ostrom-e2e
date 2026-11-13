@@ -89,7 +89,7 @@ jobs:
         run: printf '\nostrom.core.local=true\n' >> .ostrom/server/gradle.properties
       # The action builds the image and then starts it against `database-url`; only the image is wanted here, so the
       # start is let fail (nothing listens there, `required: "false"`) and the next step checks the image.
-      - name: Server image (that ostrom-server checkout, its own Dockerfile)
+      - name: Server image (that ostrom-server checkout, its own build)
         id: server
         uses: ./.github/actions/server
         with:
@@ -108,7 +108,7 @@ jobs:
           fi
           docker images ostrom-server:e2e --format 'ostrom-server:e2e {{.Size}} (ostrom-server@'"$SHA"')'
       # The MCP relay reaches HTTPS servers only: the fake MCP servers get a certificate of a CA made for this run, and
-      # the bench runs the server image with that CA appended to its system bundle (the binary is the same).
+      # the bench runs the server image with that CA added to its trust store (the server is the same).
       # It never stops the job: on a failure the bench runs the server image as built, and the relay setup skips the MCP
       # passes with the reason (the server does not trust the fakes' certificate).
       - name: Bench CA, the fake MCP servers' certificate, and the server image that trusts it
@@ -125,12 +125,21 @@ jobs:
           openssl req -newkey rsa:2048 -nodes -subj "/CN=fakes.ostrom-fakes.svc" -keyout tls.key -out tls.csr
           printf 'subjectAltName=DNS:fakes.ostrom-fakes.svc,DNS:fakes.ostrom-fakes.svc.cluster.local\nextendedKeyUsage=serverAuth\n' > ext.cnf
           openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 1 -out tls.crt -extfile ext.cnf
-          id=$(docker create ostrom-server:e2e)
-          # Copied out read-only, as in the image: the bench's bundle is a new file.
-          docker cp "$id:/etc/ssl/certs/ca-certificates.crt" system.crt
-          docker rm "$id" >/dev/null
-          mkdir -p image && cat system.crt ca.crt > image/bundle.crt
-          printf 'FROM ostrom-server:e2e\nCOPY bundle.crt /etc/ssl/certs/ca-certificates.crt\n' > image/Dockerfile
+          mkdir -p image
+          if docker run --rm --entrypoint sh ostrom-server:e2e -c 'command -v keytool' >/dev/null 2>&1; then
+            # The JVM server (ostrom-server decision 0001) trusts the JRE's cacerts, not the system bundle: the bench's
+            # CA is added there, then the image runs as its own user again.
+            user=$(docker inspect -f '{{.Config.User}}' ostrom-server:e2e)
+            cp ca.crt image/bench-ca.crt
+            printf 'FROM ostrom-server:e2e\nUSER root\nCOPY bench-ca.crt /tmp/bench-ca.crt\nRUN keytool -importcert -noprompt -cacerts -storepass changeit -alias ostrom-bench-ca -file /tmp/bench-ca.crt && rm /tmp/bench-ca.crt\nUSER %s\n' "${user:-65532:65532}" > image/Dockerfile
+          else
+            id=$(docker create ostrom-server:e2e)
+            # Copied out read-only, as in the image: the bench's bundle is a new file.
+            docker cp "$id:/etc/ssl/certs/ca-certificates.crt" system.crt
+            docker rm "$id" >/dev/null
+            cat system.crt ca.crt > image/bundle.crt
+            printf 'FROM ostrom-server:e2e\nCOPY bundle.crt /etc/ssl/certs/ca-certificates.crt\n' > image/Dockerfile
+          fi
           docker build -q -t ostrom-server:e2e-load image
       - name: Checkout ostrom-helm (main, or the dispatch's helm_ref)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

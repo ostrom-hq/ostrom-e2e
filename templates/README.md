@@ -55,12 +55,14 @@ fusion, pas de force-push ni de suppression de `main`.
 ## Contrat du banc full-stack
 
 Les actions composites `ostrom-hq/ostrom-e2e/.github/actions/server@main` et `.../cli@main` (ouvertes aux dépôts de
-l'organisation) construisent les vrais binaires natifs linuxX64, en cache par commit, depuis le dépôt lui-même
+l'organisation) construisent le vrai serveur (son image JVM, par jib) et le vrai binaire natif linuxX64 de la CLI, en cache par commit, depuis le dépôt lui-même
 (`path: .`) ou depuis `main` d'un autre dépôt (clé de déploiement en lecture seule, secrets d'org `DEPLOY_KEY_*`).
 
-- **ostrom-server** : `ci/build-linux.sh` (exécutable) laisse `dist/ostrom-server`, sinon `./gradlew :app:linkReleaseExecutableLinuxX64` ; le binaire lit
-  `OSTROM_DATABASE_URL`, `OSTROM_DATABASE_USER`, `OSTROM_DATABASE_PASSWORD` et `OSTROM_PORT`, applique ses migrations au démarrage, répond `GET /health` → 200 quand il
-  est prêt ; un moyen de semer des comptes de test (`dev-a`, `rev-b`, `rev-c`, un admin) pour le banc.
+- **ostrom-server** : `./gradlew :image:publishImageToLocalRegistry -PimageTags=e2e -PimagePlatforms=amd64` laisse l'image
+  `ostrom-server:e2e` dans le démon Docker (serveur JVM, décision 0001) ; un serveur natif plus ancien : `ci/build-linux.sh` laisse
+  `dist/ostrom-server`, sinon `./gradlew :app:linkReleaseExecutableLinuxX64`. Le serveur lit
+  `OSTROM_DATABASE_URL`, `OSTROM_DATABASE_USER`, `OSTROM_DATABASE_PASSWORD` et `OSTROM_PORT`, sa commande `migrate` applique les migrations, il répond `GET /health` → 200 quand il
+  est vivant et `GET /ready` → 200 quand il est prêt ; un moyen de semer des comptes de test (`dev-a`, `rev-b`, `rev-c`, un admin) pour le banc.
 - **ostrom-cli** : `ci/build-linux.sh` laisse `dist/ostrom` ; `OSTROM_URL`, `OSTROM_TOKEN`, `OSTROM_HOME`,
   `OSTROM_CLAUDE_BIN`, `OSTROM_CODEX_BIN` honorés (le banc remplace l'agent par `bin/fake-claude` / `bin/fake-codex`).
 - **ostrom-web** : l'URL de l'API par `VITE_OSTROM_API_URL`.

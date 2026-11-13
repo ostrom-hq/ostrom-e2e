@@ -3199,12 +3199,12 @@ Priorités : `jalon` = premier jalon (`ostrom run claude` + porte qui bloque un 
 
 ## SRV : Socle du serveur (santé, instance, erreurs, en-têtes)
 
-Servi par ostrom-server#1 (4fe38dd). Testé de l'extérieur sur l'image distroless du serveur (son `Dockerfile` sur main, autour du binaire natif `linuxX64`) et un vrai PostgreSQL 18, dans le job `ci` du banc : `scenarios/server.e2e.ts`.
+Servi par ostrom-server#1 (4fe38dd). Testé de l'extérieur sur l'image du serveur (depuis la décision 0001 d'ostrom-server, l'image JVM construite par jib ; avant, l'image distroless autour du binaire natif `linuxX64`) et un vrai PostgreSQL 18, dans le job `ci` du banc : `scenarios/server.e2e.ts`.
 
 ### E2E-SRV-001 — Santé : `/health` et `/api/v1/health`
 
-- Étapes : `GET /health`, puis `GET /api/v1/health` (chemin du contrat), sur l'image fraîchement démarrée.
-- Attendu : 200, `application/json`, `{"status":"ok","version":"<semver>","checks":{"database":"ok"}}` sur les deux chemins.
+- Étapes : `GET /health`, puis `GET /api/v1/health` (chemin du contrat), puis `GET /ready`, sur l'image fraîchement démarrée.
+- Attendu : 200, `application/json`, `{"status":"ok","version":"<semver>","checks":{}}` sur les deux chemins : la vivacité ne regarde que le processus (audit SD-04, comme TeamCode ; `{"database":"ok"}` accepté tant qu'un serveur plus ancien tourne). `GET /ready` répond 200 avec `{"database":"ok"}` : c'est lui qui regarde la base.
 - Surfaces : serveur (image), PostgreSQL
 - Source : ostrom-server `kernel/http/Health.kt` ; JOURNAL du 30/10 04:40 (SERVER-SOCLE)
 - Priorité : jalon
