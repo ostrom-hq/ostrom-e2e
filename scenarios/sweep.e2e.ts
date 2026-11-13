@@ -44,12 +44,18 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/cloud/sessions/{id}': 'cloudSession',
   '/api/v1/confirmations/{id}': 'confirmation',
   '/api/v1/devices/{id}': 'device',
+  '/api/v1/environment/assignments/{member}': 'member',
+  '/api/v1/environment/assignments/{}/{variable}': 'environmentVariable',
+  '/api/v1/environment/exclusions/{member}': 'member',
+  '/api/v1/environment/exclusions/{}/{variable}': 'environmentVariable',
+  '/api/v1/environment/variants/{id}': 'environmentVariant',
   '/api/v1/gates/{id}': 'gate',
   '/api/v1/github/link/device/{id}': 'githubDeviceLink',
   '/api/v1/github/links/{memberId}': 'member',
   '/api/v1/groups/{id}': 'group',
   '/api/v1/groups/{}/members/{login}': 'login',
   '/api/v1/launches/{launchId}': 'launch',
+  '/api/v1/me/environment/variants/{id}': 'personalEnvironmentVariant',
   '/api/v1/mcp/servers/{name}': 'mcpServer',
   '/api/v1/mcp/servers/{}/assignments/{member}': 'member',
   '/api/v1/mcp/servers/{}/policies/{policyId}': 'mcpPolicy',
@@ -136,6 +142,13 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   recordTodoHookError: { refers: true, make: (v) => ({ body: { sessionId: v['session'], text: 'Sweep intruder' } }) },
   resetTodo: { refers: true, make: (v) => ({ body: { sessionId: v['session'] } }) },
   setMemberTodoStopHook: { make: () => ({ body: { enabled: false } }) },
+  // Environment variants (environment.v1): an assignment names A's variant in its body.
+  createEnvironmentVariant: { make: () => ({ body: { variable: 'SWEEP_INTRUDER', name: 'intruder', value: 'sweep-intruder' } }) },
+  updateEnvironmentVariant: { make: () => ({ body: { expectedVersion: 1, name: 'intruder' } }) },
+  assignEnvironmentVariant: { refers: true, make: (v) => ({ body: { variantId: v['environmentVariant'] } }) },
+  listEnvironmentAssignments: { refers: true, make: (v) => ({ query: `member=${enc(v['member'])}` }) },
+  createMyEnvironmentVariant: { make: () => ({ body: { variable: 'SWEEP_INTRUDER', name: 'intruder', value: 'sweep-intruder' } }) },
+  updateMyEnvironmentVariant: { make: () => ({ body: { expectedVersion: 1, name: 'intruder' } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
   transferOrg: { make: (v) => ({ body: { login: v['login'] } }) },
   deleteOrg: { make: (v) => ({ body: { confirm: v['slug'] } }) },
@@ -372,6 +385,16 @@ async function makeWorld(): Promise<World> {
     return post(`/api/v1/mcp/servers/${values['mcpServer']}/policies`, { tool: 'search', conditions: [], effect: 'DENY', message: `sweep ${tag}` }, 'createMcpArgumentPolicy', ['id']);
   });
   await make('secret', () => post('/api/v1/secrets', { name: `SWEEP_${tag.toUpperCase().replace(/[^A-Z0-9]/g, 'X')}`, value: `sweep-value-${tag}` }, 'createSecret', ['name']));
+  // A's environment variant, a value assigned to A, and A's own personal variant (environment.v1).
+  await make('environmentVariant', async () => {
+    const variable = `SWEEP_${tag.toUpperCase().replace(/[^A-Z0-9]/g, 'X')}`;
+    const id = await post('/api/v1/environment/variants', { variable, name: `sweep-${tag}`, value: `sweep-env-${tag}` }, 'createEnvironmentVariant', ['id']);
+    if (values['member']) await call(c, 'PUT', `/api/v1/environment/assignments/${values['member']}/${variable}`, { variantId: id });
+    return id;
+  });
+  await make('personalEnvironmentVariant', () =>
+    post('/api/v1/me/environment/variants', { variable: `SWEEP_MINE_${tag.toUpperCase().replace(/[^A-Z0-9]/g, 'X')}`, name: `sweep-${tag}`, value: `sweep-own-${tag}` }, 'createMyEnvironmentVariant', ['id']),
+  );
   await make('runner', () => post('/api/v1/runners', { name: `sweep-${tag}`, labels: [] }, 'registerRunner', ['id'], ['runner', 'id']));
   await make('cloudSession', () => post('/api/v1/cloud/sessions', { agent: 'claude', repo: 'https://github.com/acme/sweep' }, 'createCloudSession', ['id']));
   await make('artifact', () => post('/api/v1/artifacts', { title: `Sweep artifact ${tag}`, access: 'team', files: [{ path: 'index.md', content: `# sweep ${tag}` }] }, 'publishArtifact', ['id'], ['artifact', 'id']));
