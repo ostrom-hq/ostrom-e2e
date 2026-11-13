@@ -120,6 +120,11 @@ const SKIPPED: Record<string, string> = {
   'PUT /api/v1/me/notifications': "the caller's own notification preferences",
   'POST /api/v1/orgs': "a new organization for the caller: a second membership would change every later call's organization",
   'POST /api/v1/invitations/accept': 'takes an invitation by its mailed token, which only the invited person holds (E2E-ORG)',
+  // The instance's administration (admin.settings.v1): no organization in it, and the sweep's first account administers
+  // the instance, so a call would change the instance every later scenario runs on. Only a signed-in administrator of
+  // the instance passes, never a key (ostrom-server AdminRoutesPostgresTest).
+  'POST /api/v1/admin/instance-admins': "adds an administrator of the instance; nothing of an organization in it",
+  'PUT /api/v1/admin/settings/{}': "saves a settings section of the instance; nothing of an organization in it",
 };
 
 /** Leaks already written to the JOURNAL for their module's owner (key `caller | route | variant` → where). */
@@ -174,9 +179,6 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   pendingWorkflowSession: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['cloudSession'])}` }) },
   workflowsMcp: { refers: true, make: (v) => ({ query: `session=${enc(v['cloudSession'])}`, body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'deliver', arguments: { output: 'Sweep intruder delivery' } } } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
-  // The instance's administration (admin.settings.v1): only an administrator of the instance, never an organization's.
-  addInstanceAdmin: { make: () => ({ body: { email: email('sweep-intruder') } }) },
-  saveInstanceSettings: { make: () => ({ body: { version: 0, values: {}, secrets: {} } }) },
   transferOrg: { make: (v) => ({ body: { login: v['login'] } }) },
   deleteOrg: { make: (v) => ({ body: { confirm: v['slug'] } }) },
   inviteOrgMembers: { make: () => ({ body: { invites: [{ email: email('sweep-intruder'), role: 'admin' }] } }) },
