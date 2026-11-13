@@ -36,6 +36,9 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/artifacts/{id}': 'artifact',
   '/api/v1/artifacts/{}/members/{memberId}': 'member',
   '/api/v1/artifacts/{}/versions/{number}': 'artifactVersion',
+  '/api/v1/artifacts/uploads/{upload}': 'artifactUpload',
+  '/api/v1/artifacts/uploads/{}/blobs/{sha256}': 'blobSha256',
+  '/api/v1/artifacts/uploads/{}/blobs/{}/{n}': 'chunkIndex',
   '/api/v1/auth/sessions/{id}': 'authSession',
   '/api/v1/auth/{provider}': 'provider',
   '/api/v1/automations/{id}': 'automation',
@@ -89,6 +92,8 @@ const FIXED: Record<string, string> = {
   provider: 'github',
   filePath: 'index.md',
   artifactVersion: '1',
+  blobSha256: 'a'.repeat(64),
+  chunkIndex: '0',
   automationVersion: '1',
   inferenceRequest: '6f1c2b0e-9a4d-4c3e-8b7a-2d5e1f0a9c41',
 };
@@ -417,6 +422,8 @@ async function makeWorld(): Promise<World> {
   await make('runner', () => post('/api/v1/runners', { name: `sweep-${tag}`, labels: [] }, 'registerRunner', ['id'], ['runner', 'id']));
   await make('cloudSession', () => post('/api/v1/cloud/sessions', { agent: 'claude', repo: 'https://github.com/acme/sweep' }, 'createCloudSession', ['id']));
   await make('artifact', () => post('/api/v1/artifacts', { title: `Sweep artifact ${tag}`, access: 'team', files: [{ path: 'index.md', content: `# sweep ${tag}` }] }, 'publishArtifact', ['id'], ['artifact', 'id']));
+  // An upload of A's, its one chunk never sent: only the credential that opened it sends to it.
+  await make('artifactUpload', () => post('/api/v1/artifacts/uploads', { files: [{ sha256: 'a'.repeat(64), size: 1 }] }, 'createArtifactUpload', ['uploadId']));
   await make('account', () =>
     post(
       '/api/v1/accounts',
