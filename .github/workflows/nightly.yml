@@ -49,6 +49,8 @@ jobs:
             OSTROM_MAIL_DIR=/var/lib/ostrom/mail
             OSTROM_PUBLIC_URL=http://127.0.0.1:4600
             OSTROM_CONSOLE_URL=http://127.0.0.1:4600
+            # The scenarios sign people up through the fake GitHub, without invitation (ostrom-server#370).
+            OSTROM_SIGNUP=open
             OSTROM_TRUSTED_PROXIES=127.0.0.1/32
             OSTROM_GITHUB_WEB_URL=http://127.0.0.1:4610
             OSTROM_GITHUB_API_URL=http://127.0.0.1:4610
