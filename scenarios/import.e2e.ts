@@ -2,8 +2,9 @@
 // E2E-TC-003 and 004: a TeamCode team into Ostrom with the real `ostrom import teamcode`, against the real server, the
 // fake TeamCode team of ostrom-helm in MySQL (compose/demo/teamcode, helm#25) and a fake provider token endpoint
 // (src/fake-tokens.ts, the server's OSTROM_SHARING_CLAUDE_TOKEN_URL, ostrom-server#96). The plan, the import, the
-// accounts that wait while TeamCode runs, then the owner's cutover: accounts revived, one refused, exit codes, and the
-// audit event in the owner's name. Each part says why it is skipped until its pieces are there.
+// accounts that wait for their handover while TeamCode may still renew their tokens (TeamCode's « Refresh ownership »),
+// the access-only trial, then the owner's cutover: accounts revived, one refused, exit codes, and the audit event in
+// the owner's name. Each part says why it is skipped until its pieces are there.
 import { afterAll, describe, expect, it } from 'vitest';
 import { FakeTokens } from '../src/fake-tokens.ts';
 import { isServed } from '../src/probe.ts';
@@ -37,7 +38,7 @@ const ACCOUNT_2 = 'acct-a-max-2';
 /** The public client id of Claude Code, sent with every refresh (HttpOAuthRefresher). */
 const CLAUDE_CODE_CLIENT = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 
-type Account = { id: string; label: string; providerAccountId?: string; status: string };
+type Account = { id: string; label: string; providerAccountId?: string; status: string; refreshOwnership?: string };
 
 /** One scenario's team: the owner, their org, their console token, the CLI as them. */
 interface Team {
@@ -64,10 +65,10 @@ async function teamOf(who: string): Promise<Team> {
 
 /**
  * Ostrom's copies of the shared accounts lose their tokens, as when a refresh is refused (AccountTokens.retire): they
- * wait for a reconnection.
+ * wait for a reconnection. A refresh is Ostrom's only once an account is handed over: they are Ostrom's here.
  */
 function retire(t: Team): void {
-  admin(`UPDATE sharing_accounts SET status = 'RECONNECT_REQUIRED', version = version + 1 WHERE org_id = '${uuid(t.orgId)}'`);
+  admin(`UPDATE sharing_accounts SET status = 'RECONNECT_REQUIRED', ownership = 'OSTROM', version = version + 1 WHERE org_id = '${uuid(t.orgId)}'`);
 }
 
 async function accounts(t: Team): Promise<Account[]> {
@@ -91,7 +92,7 @@ describe('E2E-TC: TeamCode into Ostrom, with the real ostrom import teamcode', (
   const tokens = new FakeTokens();
   afterAll(() => tokens.stop());
 
-  it.skipIf(WHY !== '')(named('E2E-TC-003 the plan writes nothing, the import shares the accounts, and an account to reconnect waits for the cutover while TeamCode runs', WHY), async () => {
+  it.skipIf(WHY !== '')(named('E2E-TC-003 the plan writes nothing, the imported accounts wait for their handover while TeamCode may renew them, the trial serves access only', WHY), async () => {
     const t = await teamOf('tc-import');
     const plan = await t.run();
     expect(plan.code, shown(plan)).toBe(0);
@@ -101,20 +102,49 @@ describe('E2E-TC: TeamCode into Ostrom, with the real ostrom import teamcode', (
     expect(plan.stdout).toContain('Run the same command with --yes to import.');
     expect(await accounts(t), 'the plan writes nothing').toEqual([]);
 
+    // TeamCode may still renew their tokens: two renewers of one refresh token disconnect an account, so they wait
     const imported = await t.run('--yes');
     expect(imported.code, shown(imported)).toBe(0);
-    expect(imported.stdout).toMatch(/created {2}account {2}claude\/Claude Max 1\n/);
+    expect(imported.stdout).toMatch(/created {2}account {2}claude\/Claude Max 1 {2}\[pending handover\] \(TeamCode may still renew/);
+    expect(imported.stdout).toContain('! 2 shared accounts serve nothing until they are handed over');
     const shared = await accounts(t);
-    expect(shared.map((a) => [a.label, a.status])).toEqual([['Claude Max 1', 'ready'], ['Claude Max 2 (paused)', 'disabled']]);
+    expect(shared.map((a) => [a.label, a.status, a.refreshOwnership])).toEqual([
+      ['Claude Max 1', 'pending_handover', 'pending_handover'],
+      ['Claude Max 2 (paused)', 'disabled', 'pending_handover'],
+    ]);
 
-    // While TeamCode runs, an import never tests TeamCode's tokens: testing rotates them
-    retire(t);
+    // Imported again, a waiting account takes TeamCode's current tokens and keeps waiting
     const again = await t.run('--yes');
     expect(again.code, shown(again)).toBe(0);
-    expect(again.stdout).toMatch(/revive_at_cutover {2}account {2}claude\/Claude Max 1 \(/);
-    expect(again.stdout).toContain('2 to revive at the cutover.');
-    expect(again.stdout).toContain('! 2 shared accounts wait for the final pass once TeamCode stops: ostrom import teamcode --cutover');
-    expect((await accounts(t)).map((a) => a.status)).toEqual(['reconnect_required', 'reconnect_required']);
+    expect(again.stdout).toMatch(/updated {2}account {2}claude\/Claude Max 1 {2}\[pending handover\]/);
+    expect((await accounts(t)).map((a) => a.status)).toEqual(['pending_handover', 'disabled']);
+
+    // Once TeamCode no longer uses it, an admin hands one over: Ostrom renews it from then on
+    const first = shared[0] as Account;
+    const handed = await call(t.owner.caller, 'POST', `/api/v1/accounts/${first.id}/handover`);
+    expect(handed.status, JSON.stringify(handed.body)).toBe(200);
+    expect([handed.body['status'], handed.body['refreshOwnership']]).toEqual(['ready', 'ostrom']);
+
+    // The trial: the account still waiting serves TeamCode's access token, never renewed; Ostrom's is left alone
+    const trial = await t.run('--yes', '--access-only');
+    expect(trial.code, shown(trial)).toBe(0);
+    expect(trial.stdout).toMatch(/updated {2}account {2}claude\/Claude Max 2 \(paused\) {2}\[access only\]/);
+    expect(trial.stdout).toContain("! 1 shared account serves TeamCode's access token, never renewed");
+    expect((await accounts(t)).map((a) => [a.label, a.status, a.refreshOwnership])).toEqual([
+      ['Claude Max 1', 'ready', 'ostrom'],
+      ['Claude Max 2 (paused)', 'disabled', 'access_only'],
+    ]);
+    const both = await t.run('--cutover', '--access-only', '--confirm', 'cutover');
+    expect(both.code, shown(both)).toBe(64);
+    expect(both.stderr).toContain('choose either --cutover');
+
+    // While TeamCode runs, an import never tests the tokens of an account Ostrom renews: testing rotates them
+    admin(`UPDATE sharing_accounts SET status = 'RECONNECT_REQUIRED', version = version + 1 WHERE org_id = '${uuid(t.orgId)}' AND ownership = 'OSTROM'`);
+    const waiting = await t.run('--yes');
+    expect(waiting.code, shown(waiting)).toBe(0);
+    expect(waiting.stdout).toMatch(/revive_at_cutover {2}account {2}claude\/Claude Max 1 \(/);
+    expect(waiting.stdout).toContain('1 to revive at the cutover.');
+    expect(waiting.stdout).toContain('! 1 shared account waits for the final pass once TeamCode stops: ostrom import teamcode --cutover');
   });
 
   it.skipIf(CUTOVER_WHY !== '')(named("E2E-TC-004 the owner's cutover revives the waiting accounts with TeamCode's tokens, leaves a refused one waiting (2), and is audited in the owner's name", CUTOVER_WHY), async () => {

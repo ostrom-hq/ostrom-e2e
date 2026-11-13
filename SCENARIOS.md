@@ -2934,14 +2934,14 @@ Priorités : `jalon` = premier jalon (`ostrom claude` + porte qui bloque un push
 - Priorité : P2
 - Statut : bloqué : ostrom-server + ostrom-cli
 
-### E2E-TC-003 — Import d'une équipe TeamCode : plan, import, comptes en attente de la bascule
+### E2E-TC-003 — Import d'une équipe TeamCode : plan, import, comptes en attente du transfert, essai en accès seul
 
-- Étapes : La vraie CLI lit l'équipe TeamCode factice d'ostrom-helm (`compose/demo/teamcode`, helm#25) dans MySQL, avec un jeton de console de l'owner : `ostrom import teamcode` (le plan), puis `--yes`. Les copies Ostrom des comptes partagés perdent leurs jetons (comme un rafraîchissement refusé), puis `--yes` encore.
-- Attendu : Le plan n'écrit rien (aucun compte partagé) et dit le compte jamais terminé laissé de côté. L'import partage les deux comptes Claude, le compte désactivé dans TeamCode reste éteint. Tant que TeamCode tourne, un import ne teste aucun jeton : les comptes à reconnecter sont `revive_at_cutover`, et la CLI dit combien attendent le passage final. Code 0 à chaque étape.
+- Étapes : La vraie CLI lit l'équipe TeamCode factice d'ostrom-helm (`compose/demo/teamcode`, helm#25) dans MySQL, avec un jeton de console de l'owner : `ostrom import teamcode` (le plan), `--yes` deux fois, le transfert d'un compte (`POST /api/v1/accounts/{id}/handover`), `--yes --access-only`, `--cutover --access-only`, puis, le compte d'Ostrom ayant perdu ses jetons, `--yes` encore.
+- Attendu : Le plan n'écrit rien (aucun compte partagé) et dit le compte jamais terminé laissé de côté. L'import partage les deux comptes Claude en attente de transfert (`pending_handover`, TeamCode peut encore renouveler leurs jetons : ils ne servent rien), le compte désactivé dans TeamCode reste éteint, et la CLI dit qu'ils attendent leur transfert. Réimportés, ils prennent les jetons de TeamCode et attendent toujours. Transféré, un compte est `ready`, renouvelé par Ostrom. L'essai rend l'autre `access_only` et laisse celui d'Ostrom tel quel ; avec `--cutover`, 64. Tant que TeamCode tourne, un import ne teste aucun jeton d'un compte qu'Ostrom renouvelle : le compte à reconnecter est `revive_at_cutover`, et la CLI dit qu'il attend le passage final. Code 0 à chaque étape (TeamCode docs/capacity.md « Refresh ownership »).
 - Surfaces : CLI, serveur
-- Source : ostrom-server#28, #80 et #86 (RELAY) ; ostrom-cli#24, #55, #62 et #63 ; JOURNAL 30/10 15:10 RELAY
+- Source : ostrom-server#28, #80, #86 et #388 (RELAY) ; ostrom-cli#24, #55, #62, #63 et #140 ; parité TC-CAP-48 ; JOURNAL 30/10 15:10 RELAY
 - Priorité : P1
-- Statut : vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41484214036 (image ostrom-server@d084bb2c, ostrom-cli@479e5c1, ostrom-helm@4f03cd37), `scenarios/import.e2e.ts`
+- Statut : à rejouer après ostrom-server#388 et ostrom-cli#140 (précédent vert : https://github.com/ostrom-hq/ostrom-e2e/actions/runs/41484214036), `scenarios/import.e2e.ts`
 
 ### E2E-TC-004 — Bascule (cutover) de l'owner : comptes ranimés, refus, audit à son nom
 
