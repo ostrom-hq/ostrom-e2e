@@ -106,6 +106,7 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   listChecks: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['session'])}` }) },
   listNotifications: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['session'])}` }) },
   listWaits: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['session'])}` }) },
+  wakeWaits: { refers: true, make: (v) => ({ query: `session=${enc(v['session'])}`, body: { waitMillis: 0 } }) },
   listReceipts: { refers: true, make: (v) => ({ query: `subjectKind=session&subjectId=${enc(v['session'])}` }) },
   listDecisions: { refers: true, make: (v) => ({ query: `subjectKind=rule&subjectId=${enc(v['rule'])}` }) },
   getUsage: { refers: true, make: (v) => ({ query: `member=${enc(v['login'])}` }) },
