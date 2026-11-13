@@ -1091,14 +1091,23 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     const built = await call(a.c, 'POST', '/api/v1/workflows', workflow(child, 'Parc 022 child', 'accepted', { inputs: target }));
     expect(built.status, JSON.stringify(built.body)).toBe(201);
     const question = { title: 'Ship it?', fields: [{ id: 'note', type: 'text', label: 'Note' }], actions: [{ id: 'ship', label: 'Ship' }, { id: 'hold', label: 'Hold' }] };
+    // A run does not start on a person: a trigger comes first (the save refuses a wait as the start node).
     const nodes = [
+      { id: 'begin', kind: 'trigger', label: 'Begin' },
       { id: 'ask', kind: 'wait', label: 'Ask', approvers: [login], wait: question },
       { id: 'verdict', kind: 'check', label: 'Shipped?', condition: { step: 'ask', path: 'outcome', op: 'equals', value: 'ship' } },
       { id: 'call', kind: 'workflow', label: 'Build', workflowId: child, arguments: { target: '{{inputs.branch}}' } },
     ];
-    const edges = [{ from: 'ask', to: 'verdict', on: 'ship' }, { from: 'verdict', to: 'call', on: 'true' }];
+    // Every outcome of a node the server plays goes somewhere (the save refuses a workflow that leaves one out).
+    const edges = [
+      { from: 'begin', to: 'ask' },
+      { from: 'ask', to: 'verdict', on: 'ship' },
+      { from: 'ask', to: null, on: 'hold' },
+      { from: 'verdict', to: 'call', on: 'true' },
+      { from: 'verdict', to: null, on: 'false' },
+    ];
     const inputs = [{ id: 'branch', label: 'Branch', required: true }];
-    const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(parent, 'Parc 022 waits', 'accepted', { nodes, edges, start: 'ask', inputs }));
+    const made = await call(a.c, 'POST', '/api/v1/workflows', workflow(parent, 'Parc 022 waits', 'accepted', { nodes, edges, start: 'begin', inputs }));
     expect(made.status, JSON.stringify(made.body)).toBe(201);
     const start = async () => {
       const s = await call(a.c, 'POST', `/api/v1/workflows/${parent}/runs`, { inputs: { branch: 'main' } });
@@ -1110,8 +1119,8 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     // 1. The wait node asks its question of the reviewer, for the run; the run waits on it.
     const asked = await runUntil(a.c, id, (x) => x['status'] !== 'queued' && x['status'] !== 'running');
     expect(asked, JSON.stringify(asked)).toMatchObject({ status: 'waiting', currentNodeId: 'ask' });
-    const visit = (asked['visits'] as Record<string, unknown>[])[0];
-    expect(visit).toMatchObject({ seq: 1, nodeId: 'ask', kind: 'wait', status: 'waiting' });
+    const visit = (asked['visits'] as Record<string, unknown>[]).find((v) => v['nodeId'] === 'ask');
+    expect(visit).toMatchObject({ seq: 2, nodeId: 'ask', kind: 'wait', status: 'waiting' });
     const waitId = visit?.['waitId'] as string;
     const wait = await call(r, 'GET', `/api/v1/waits/${waitId}`);
     expect(wait.status, JSON.stringify(wait.body)).toBe(200);
@@ -1122,11 +1131,11 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     expect(answered.status, JSON.stringify(answered.body)).toBeLessThan(300);
     const ended = await runUntil(a.c, id, (x) => x['status'] !== 'waiting' && x['status'] !== 'running');
     expect(ended['status'], JSON.stringify(ended)).toBe('succeeded');
-    const [ask, verdict, call1] = ended['visits'] as Record<string, unknown>[];
+    const [, ask, verdict, call1] = ended['visits'] as Record<string, unknown>[];
     expect(ask).toMatchObject({ nodeId: 'ask', status: 'done', outcome: 'ship' });
     expect(JSON.parse(String(ask?.['output']))).toEqual({ note: 'go' });
-    expect(verdict).toMatchObject({ seq: 2, nodeId: 'verdict', kind: 'check', status: 'done', outcome: 'true' });
-    expect(call1).toMatchObject({ seq: 3, nodeId: 'call', kind: 'workflow', status: 'done', outcome: 'next' });
+    expect(verdict).toMatchObject({ seq: 3, nodeId: 'verdict', kind: 'check', status: 'done', outcome: 'true' });
+    expect(call1).toMatchObject({ seq: 4, nodeId: 'call', kind: 'workflow', status: 'done', outcome: 'next' });
     const childId = call1?.['childRunId'] as string;
     const sub = await call(a.c, 'GET', `/api/v1/runs/${childId}`);
     expect(sub.status, JSON.stringify(sub.body)).toBe(200);
@@ -1138,7 +1147,7 @@ describe('E2E-PARC: 4. workflows and automations', () => {
     // 3. Another run is cancelled while it waits: its wait is withdrawn.
     const other = await start();
     const held = await runUntil(a.c, other, (x) => x['status'] === 'waiting');
-    const otherWait = (held['visits'] as Record<string, unknown>[])[0]?.['waitId'] as string;
+    const otherWait = (held['visits'] as Record<string, unknown>[]).find((v) => v['nodeId'] === 'ask')?.['waitId'] as string;
     const cancelled = await call(a.c, 'POST', `/api/v1/runs/${other}/cancel`);
     expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
     const until = Date.now() + 60_000;
