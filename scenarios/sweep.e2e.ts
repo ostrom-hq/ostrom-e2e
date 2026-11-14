@@ -69,6 +69,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/launches/{launchId}': 'launch',
   '/api/v1/me/environment/variants/{id}': 'personalEnvironmentVariant',
   '/api/v1/me/mcp/servers/{name}': 'personalMcpServer',
+  '/api/v1/memory/{id}': 'memory',
   '/api/v1/mcp/servers/{name}': 'mcpServer',
   '/api/v1/mcp/servers/{}/assignments/{member}': 'member',
   '/api/v1/mcp/servers/{}/policies/{policyId}': 'mcpPolicy',
@@ -212,6 +213,10 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   deliverWorkflowSession: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], output: 'Sweep intruder delivery' } }) },
   pendingWorkflowSession: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['cloudSession'])}` }) },
   workflowsMcp: { refers: true, make: (v) => ({ query: `session=${enc(v['cloudSession'])}`, body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'deliver', arguments: { output: 'Sweep intruder delivery' } } } }) },
+  // The memory (memory.v1): a search must name its terms; B's entries are its own, A's never show.
+  searchMemory: { make: () => ({ query: 'q=sweep' }) },
+  createMemory: { make: () => ({ body: { scope: 'personal', title: 'Sweep intruder', summary: 'Sweep intruder', content: 'Sweep intruder' } }) },
+  updateMemory: { make: () => ({ body: { expectedVersion: 1, title: 'Sweep intruder', summary: 'Sweep intruder', content: 'Sweep intruder' } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
   // An organization's cloud profile (cloud.admin.v1). Clusters are the instance's, any organization's profile may name
   // one: B's names none, so an answer quoting A's cluster id is a leak.
@@ -461,6 +466,8 @@ async function makeWorld(): Promise<World> {
   await make('wait', () => post('/api/v1/waits', { question: `Sweep question ${tag}` }, 'createWait', ['id']));
   // An outgoing webhook (webhooks.v1) on a public host; it starts at the newest event, so the sweep sends it nothing.
   await make('webhook', () => post('/api/v1/webhooks', { url: `https://example.com/ostrom-sweep-${tag}`, types: ['cloud.wait.created'], description: `Sweep ${tag}` }, 'createWebhook', ['webhook', 'id']));
+  // A team memory entry (memory.v1), written by A in the console (its person): B never reads, changes or forgets it.
+  await make('memory', () => post('/api/v1/memory', { scope: 'team', title: `Sweep memory ${tag}`, summary: `Sweep ${tag}`, content: `Sweep memory content ${tag}`, tags: ['sweep'] }, 'createMemory', ['id']));
   await make('mcpServer', () => post('/api/v1/mcp/servers', { name: `sweep-${tag}`, url: 'https://mcp.example.test/mcp', transport: 'http', tools: ['search'] }, 'createMcpServer', ['name']));
   await make('mcpPolicy', async () => {
     if (!values['mcpServer']) throw new Error('no MCP server');
