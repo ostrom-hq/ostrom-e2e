@@ -7,7 +7,7 @@
 // personal token, CLI token, the elevated `osg_` token of `ostrom login --admin`, service key. A served route without a
 // case fails E2E-SWEEP-001, so a new route cannot be forgotten. A leak not in KNOWN fails its caller's scenario; a
 // known leak that stops happening too.
-import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
@@ -15,7 +15,7 @@ import { type Caller, headersOf } from '../src/isolation.ts';
 import { type Answer, type Case, type CaseClass, type Leak, fill, judge, leakKey, mergeServed, mimic, operations, parseServed, plan, reconcile, sample, servedInContract } from '../src/sweep.ts';
 import { SERVER_URL } from './env.ts';
 import { receiptIdIn } from './lib.ts';
-import { type Org, type Person, address, call, email, invite, orgOf, orgsUnavailable, profileOf, signIn, url } from './org.ts';
+import { type Org, type Person, address, call, email, invite, orgOf, orgsUnavailable, phoneKey, profileOf, signIn, url } from './org.ts';
 
 const SERVED_FILE = process.env['OSTROM_E2E_SERVED_ROUTES'] ?? '';
 const OPENAPI_FILE = process.env['OSTROM_E2E_OPENAPI'] ?? '';
@@ -394,8 +394,7 @@ async function makeWorld(): Promise<World> {
   });
   // A's phone for push (ostrom-server#196): the console's browser session holds notifications:write.
   // Its FCM registration token and the P-256 key the pushes are encrypted for (ostrom-server#475).
-  const pushKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
-  await make('pushDevice', () => post('/api/v1/push-devices', { pushToken: `sweep-fcm-token:${tag}-0123456789`, provider: 'fcm', platform: 'ios', publicKey: pushKey }, 'registerPushDevice', ['id']));
+  await make('pushDevice', () => post('/api/v1/push-devices', { pushToken: `sweep-fcm-token:${tag}-0123456789`, provider: 'fcm', platform: 'ios', publicKey: phoneKey() }, 'registerPushDevice', ['id']));
   const workflowId = `sweep-${tag}`;
   await make('workflow', () =>
     post(

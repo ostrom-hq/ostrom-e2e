@@ -4,7 +4,7 @@
 // the bench switches each step on by itself as the server pull requests land. Steps already covered by another family
 // (AUTH, LOGIN, YES, ISO, BILL, GATE) are not repeated here: the mapping is at the top of the PARC section of
 // SCENARIOS.md. Screens (web, app) are out of the bench's scope: each scenario proves the server route the screen reads.
-import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -13,7 +13,7 @@ import { invitationToken } from '../src/mail.ts';
 import { FakeTokens } from '../src/fake-tokens.ts';
 import { isServed } from '../src/probe.ts';
 import { FAKE_TOKENS_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
-import { type Org, type Person, call, email, invite, join, orgOf, orgsUnavailable, profileOf, signIn } from './org.ts';
+import { type Org, type Person, call, email, invite, join, orgOf, orgsUnavailable, phoneKey, profileOf, signIn } from './org.ts';
 
 const ORGS = await orgsUnavailable();
 const ID = randomUUID();
@@ -1449,8 +1449,6 @@ const W035 = (await needs(['POST', '/api/v1/import/teamcode'])) || ORG64;
 const W036 = (await needs(['POST', '/api/v1/auth/mobile/token'], ['GET', '/api/v1/approvals/queue'], ['GET', '/api/v1/approvals/{id}/view'], ['GET', '/api/v1/me/notifications'], ['PUT', '/api/v1/me/notifications'])) || ACTORS;
 const W037 = await needs(['POST', '/api/v1/push-devices'], ['DELETE', '/api/v1/push-devices/{id}']);
 const W046 = W013 || W037 || (await needs(['POST', '/api/v1/auth/logout']));
-/** A phone's P-256 public key, SubjectPublicKeyInfo DER in base64, as the app registers it with its FCM token. */
-const phoneKey = (): string => generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
 /** A phone as the app registers it: its FCM registration token and its key (ostrom-server#475). */
 const fcmPhone = (pushToken: string) => ({ pushToken, provider: 'fcm', platform: 'ios', publicKey: phoneKey() });
 
@@ -1594,6 +1592,7 @@ describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => 
     // An fcm phone without its key, or with something else than a P-256 key, is refused.
     expect((await call(a.c, 'POST', '/api/v1/push-devices', { pushToken, provider: 'fcm', platform: 'ios' })).status).toBe(400);
     expect((await call(a.c, 'POST', '/api/v1/push-devices', { ...phone, publicKey: 'bm90IGEga2V5' })).status).toBe(400);
+    expect((await call(a.c, 'POST', '/api/v1/push-devices', { ...phone, publicKey: phoneKey('P-384') })).status, 'a key of another curve').toBe(400);
     const b = await owner('parc-037-b');
     expect((await call(b.c, 'DELETE', `/api/v1/push-devices/${made.body['id'] as string}`)).status).toBeGreaterThanOrEqual(400);
     expect((await call(a.c, 'DELETE', `/api/v1/push-devices/${made.body['id'] as string}`)).status).toBeLessThan(300);
@@ -1662,6 +1661,6 @@ describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => 
     for (const token of ours) expect(mailed, 'the e-mail names no push token').not.toContain(token);
     const second = await ask('1');
     await mailWith(reviewerEmail, `/yes/${second}`, 30_000);
-    // Longer than T: two notices of the server's outbox are awaited.
-  }, 3 * T);
+    // Longer than T: two e-mails of the server's outbox are awaited, up to 30 s each.
+  }, 2 * T);
 });
