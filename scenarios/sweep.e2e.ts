@@ -48,6 +48,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/automations/{}/runs/{runId}': 'automationRun',
   '/api/v1/automations/{}/v/{version}': 'automationVersion',
   '/api/v1/cloud/sessions/{id}': 'cloudSession',
+  '/api/v1/cloud/sessions/{}/messages/{input}': 'cloudInput',
   '/api/v1/confirmations/{id}': 'confirmation',
   '/api/v1/devices/{id}': 'device',
   '/api/v1/environment/assignments/{member}': 'member',
@@ -116,6 +117,9 @@ const FIXED: Record<string, string> = {
   chunkIndex: '0',
   automationVersion: '1',
   inferenceRequest: '6f1c2b0e-9a4d-4c3e-8b7a-2d5e1f0a9c41',
+  // An input of a conversation session (runners.cloud.conversation.v1): the session decides, A's or a missing one, so
+  // the same input id in both calls.
+  cloudInput: '3d0f6c7a-5b1e-4f2a-9c8d-7e6b5a4f3c21',
   // The instance's settings sections are the instance's, not an organization's: the same section in both calls.
   settingsSection: 'mail',
   // The version label of A's skill (skills.v1).
