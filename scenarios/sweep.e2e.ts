@@ -186,6 +186,11 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   fetchRunnerGithubToken: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1 } }) },
   setCloudSessionGithubAccess: { make: () => ({ body: { access: 'shared' } }) },
   reportRunnerCheck: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1, check: { name: 'tests', outcome: 'passed' } } }) },
+  // A cloud session's delivery (TC-SKL-11, TC-HOK-9): its owner's skills and hooks, for its execution only.
+  fetchRunnerSkills: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1 } }) },
+  downloadRunnerSkill: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1, name: v['skill'], version: v['skillVersion'] } }) },
+  fetchRunnerHooks: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1 } }) },
+  downloadRunnerHook: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1, name: v['hook'], version: v['hookVersion'] } }) },
   // The session todo (todos.v1): every route names its session, in the query or the body.
   getSessionTodo: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['session'])}` }) },
   readTodoContext: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['session'])}` }) },
