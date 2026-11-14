@@ -150,6 +150,10 @@ const SKIPPED: Record<string, string> = {
   'PUT /api/v1/cloud/runtime': "saves the instance's cloud runtime; nothing of an organization in it",
   'POST /api/v1/cloud/clusters': 'connects a cluster to the instance; nothing of an organization in it',
   'PUT /api/v1/cloud/clusters/{}': "changes a cluster of the instance; nothing of an organization in it",
+  // The instance's GitHub App entered by hand (github.v1, TeamCode's GitHub App form): one App serves every
+  // organization, so a call would change the App every later scenario runs on, and a save checks it with GitHub, which
+  // the sweep's stack does not reach. A key in SKIPPED is only looked up: it is harmless until the route is served.
+  'PUT /api/v1/github/app/configuration': "saves the instance's GitHub App (checked with GitHub); nothing of an organization in it",
 };
 
 /** A PEM bundle the server only checks the shape of: the sweep's cluster is never called. */
