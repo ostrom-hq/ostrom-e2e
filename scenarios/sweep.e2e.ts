@@ -68,6 +68,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/inference/requests/{id}': 'inferenceRequest',
   '/api/v1/launches/{launchId}': 'launch',
   '/api/v1/me/environment/variants/{id}': 'personalEnvironmentVariant',
+  '/api/v1/me/mcp/servers/{name}': 'personalMcpServer',
   '/api/v1/mcp/servers/{name}': 'mcpServer',
   '/api/v1/mcp/servers/{}/assignments/{member}': 'member',
   '/api/v1/mcp/servers/{}/policies/{policyId}': 'mcpPolicy',
@@ -204,6 +205,9 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   listEnvironmentAssignments: { refers: true, make: (v) => ({ query: `member=${enc(v['member'])}` }) },
   createMyEnvironmentVariant: { make: () => ({ body: { variable: 'SWEEP_INTRUDER', name: 'intruder', value: 'sweep-intruder' } }) },
   updateMyEnvironmentVariant: { make: () => ({ body: { expectedVersion: 1, name: 'intruder' } }) },
+  // Personal MCP servers (mcp.personal.v1): the body of a remote server.
+  createMyMcpServer: { make: () => ({ body: { name: 'sweep-intruder', url: 'https://mcp.example.test/mcp', transport: 'http', tools: ['search'] } }) },
+  saveMyMcpServer: { make: () => ({ body: { name: 'sweep-intruder', url: 'https://mcp.example.test/mcp', transport: 'http', tools: ['search'] } }) },
   // The delivery of a workflow step by its session (workflows.deliver.v1): the cloud session an agent node runs in.
   deliverWorkflowSession: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], output: 'Sweep intruder delivery' } }) },
   pendingWorkflowSession: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['cloudSession'])}` }) },
@@ -475,6 +479,10 @@ async function makeWorld(): Promise<World> {
   });
   await make('personalEnvironmentVariant', () =>
     post('/api/v1/me/environment/variants', { variable: `SWEEP_MINE_${tag.toUpperCase().replace(/[^A-Z0-9]/g, 'X')}`, name: `sweep-${tag}`, value: `sweep-own-${tag}` }, 'createMyEnvironmentVariant', ['id']),
+  );
+  // A's own remote MCP server (mcp.personal.v1), assigned to A alone.
+  await make('personalMcpServer', () =>
+    post('/api/v1/me/mcp/servers', { name: `sweep-mine-${tag}`, url: 'https://mcp.example.test/mcp', transport: 'http', tools: ['search'] }, 'createMyMcpServer', ['name']),
   );
   await make('runner', () => post('/api/v1/runners', { name: `sweep-${tag}`, labels: [] }, 'registerRunner', ['id'], ['runner', 'id']));
   await make('cloudSession', () => post('/api/v1/cloud/sessions', { agent: 'claude', repo: 'https://github.com/acme/sweep' }, 'createCloudSession', ['id']));
