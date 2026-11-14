@@ -297,9 +297,10 @@ describe('E2E-PARC: 2. organization setup', () => {
     expect(made.status, JSON.stringify(made.body)).toBeLessThan(300);
     expect(made.body).toMatchObject({ name, transport: 'http', enabled: true });
     expect(itemsOf((await call(a.c, 'GET', '/api/v1/mcp/servers')).body).map((s) => s['name'])).toContain(name);
-    // A server stays enabled (`McpServerDto.enabled`: "Always true"); an edit changes its URL and bumps its version.
-    const edited = await call(a.c, 'PUT', `/api/v1/mcp/servers/${name}`, { name, url: 'https://mcp.example.test/v2', transport: 'http', version: made.body['version'] });
-    expect(edited.body, JSON.stringify(edited.body)).toMatchObject({ name, url: 'https://mcp.example.test/v2', enabled: true });
+    // A server stays enabled (`McpServerDto.enabled`: "Always true"); an edit changes its tools and bumps its version.
+    // Its URL never changes: its credentials never follow a new host (TeamCode f8d23496).
+    const edited = await call(a.c, 'PUT', `/api/v1/mcp/servers/${name}`, { name, url: 'https://mcp.example.test/mcp', transport: 'http', tools: ['search', 'fetch'], version: made.body['version'] });
+    expect(edited.body, JSON.stringify(edited.body)).toMatchObject({ name, url: 'https://mcp.example.test/mcp', enabled: true });
     expect(Number(edited.body['version'])).toBeGreaterThan(Number(made.body['version']));
     const calls = await call(a.c, 'GET', '/api/v1/mcp/calls');
     expect(calls.status).toBe(200);
