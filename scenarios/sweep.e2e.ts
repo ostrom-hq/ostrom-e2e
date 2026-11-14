@@ -229,6 +229,8 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   createMemory: { make: () => ({ body: { scope: 'personal', title: 'Sweep intruder', summary: 'Sweep intruder', content: 'Sweep intruder' } }) },
   updateMemory: { make: () => ({ body: { expectedVersion: 1, title: 'Sweep intruder', summary: 'Sweep intruder', content: 'Sweep intruder' } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
+  // The quota forecasts of one shared account (capacity.forecasts.v1): the account is named in the query.
+  getForecasts: { refers: true, make: (v) => ({ query: `account=${enc(v['account'])}` }) },
   // An organization's cloud profile (cloud.admin.v1). Clusters are the instance's, any organization's profile may name
   // one: B's names none, so an answer quoting A's cluster id is a leak.
   createCloudProfile: { make: () => ({ body: cloudProfile('none', 0) }) },
