@@ -70,6 +70,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/me/environment/variants/{id}': 'personalEnvironmentVariant',
   '/api/v1/me/mcp/servers/{name}': 'personalMcpServer',
   '/api/v1/memory/{id}': 'memory',
+  '/api/v1/memory/proposals/{id}': 'memory',
   '/api/v1/mcp/servers/{name}': 'mcpServer',
   '/api/v1/mcp/servers/{}/assignments/{member}': 'member',
   '/api/v1/mcp/servers/{}/policies/{policyId}': 'mcpPolicy',
