@@ -7,7 +7,7 @@
 // personal token, CLI token, the elevated `osg_` token of `ostrom login --admin`, service key. A served route without a
 // case fails E2E-SWEEP-001, so a new route cannot be forgotten. A leak not in KNOWN fails its caller's scenario; a
 // known leak that stops happening too.
-import { randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
@@ -393,7 +393,9 @@ async function makeWorld(): Promise<World> {
     return id;
   });
   // A's phone for push (ostrom-server#196): the console's browser session holds notifications:write.
-  await make('pushDevice', () => post('/api/v1/push-devices', { pushToken: `ExponentPushToken[sweep-${tag}]`, provider: 'expo', platform: 'ios' }, 'registerPushDevice', ['id']));
+  // Its FCM registration token and the P-256 key the pushes are encrypted for (ostrom-server#475).
+  const pushKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+  await make('pushDevice', () => post('/api/v1/push-devices', { pushToken: `sweep-fcm-token:${tag}-0123456789`, provider: 'fcm', platform: 'ios', publicKey: pushKey }, 'registerPushDevice', ['id']));
   const workflowId = `sweep-${tag}`;
   await make('workflow', () =>
     post(

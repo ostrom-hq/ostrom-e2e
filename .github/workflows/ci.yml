@@ -147,7 +147,6 @@ jobs:
             OSTROM_SHARING_CODEX_TOKEN_URL=http://127.0.0.1:4620/v1/oauth/token
             OSTROM_GATEWAY_ANTHROPIC_URL=http://127.0.0.1:4620
             OSTROM_GATEWAY_CODEX_URL=http://127.0.0.1:4620
-            OSTROM_EXPO_PUSH_URL=http://127.0.0.1:4621/--/api/v2/push/send
             OSTROM_ARTIFACTS_CONTENT_ORIGIN=http://localhost:4601
             # Cloud sessions for every organization of the bench, on the registered driver (the server only plans them):
             # no runner takes one here, so a workflow run's agent node waits on its session until the scenario ends it.
@@ -200,8 +199,6 @@ jobs:
           OSTROM_E2E_TEAMCODE_PASSWORD: teamcode-ro
           OSTROM_E2E_TEAMCODE_KEY_FILE: ${{ github.workspace }}/.ostrom/helm/compose/demo/teamcode/key.txt
           OSTROM_E2E_FAKE_TOKENS_PORT: "4620"
-          # E2E-PARC-046: the fake Expo push service the scenario starts, where the server's pushes go (step above).
-          OSTROM_E2E_FAKE_EXPO_PORT: "4621"
           # E2E-SWEEP: the routes to sweep and the operations they come from (step above).
           OSTROM_E2E_SERVED_ROUTES: ${{ runner.temp }}/served-routes.txt
           OSTROM_E2E_OPENAPI: ${{ runner.temp }}/openapi.json

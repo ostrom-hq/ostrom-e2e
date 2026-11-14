@@ -3741,21 +3741,21 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 
 ### E2E-PARC-037 — 6.7 Appareil de notification : enregistré, jeton jamais relu, retiré
 
-- Étapes : Le propriétaire enregistre un appareil (`POST /api/v1/push-devices`), une autre org tente de le supprimer, le propriétaire le supprime.
-- Attendu : 201 `{id, provider, platform, locale, createdAt}` sans le jeton push ; refus pour l'autre org ; suppression acceptée ; 401 sans identifiant.
+- Étapes : Le propriétaire enregistre un appareil avec son jeton FCM et sa clé publique P-256 (`POST /api/v1/push-devices`, `provider: fcm`, `publicKey`), puis sans clé, puis avec une clé qui n'en est pas une ; une autre org tente de le supprimer, le propriétaire le supprime.
+- Attendu : 201 `{id, provider, platform, locale, createdAt}` sans le jeton push ni la clé ; 400 sans clé ou avec une clé invalide ; refus pour l'autre org ; suppression acceptée ; 401 sans identifiant.
 - Surfaces : serveur
 - Source : `demo/PARCOURS.md` 6.7
 - Priorité : P1
 - Statut : vert : `scenarios/parcours.e2e.ts`, run https://github.com/ostrom-hq/ostrom-server/actions/runs/41618704932 (image `sha-e3244cc`, ostrom-server#196)
 
-### E2E-PARC-046 — 6.7 Une demande de oui part sur les téléphones vivants de l'approbateur et par e-mail, jamais ailleurs
+### E2E-PARC-046 — 6.7 Une demande de oui part par e-mail pendant que les téléphones FCM de l'approbateur sont enregistrés
 
-- Étapes : un propriétaire invite un relecteur (admin) ; le relecteur enregistre un téléphone dans l'org (`POST /api/v1/push-devices`), un deuxième depuis une autre session qu'il ferme (`POST /api/v1/auth/logout`), un troisième dans une autre org dont il est membre ; le propriétaire enregistre le sien. Une règle pose une porte sur un push vers main avec le relecteur pour approbateur ; un jeton `gates:ask` demande la porte. Puis le faux Expo refuse la requête suivante et une deuxième porte est demandée.
-- Attendu : le faux Expo (`src/fake-expo.ts`, port `OSTROM_E2E_FAKE_EXPO_PORT`, serveur lancé avec `OSTROM_EXPO_PUSH_URL`) reçoit un push pour le seul téléphone vivant du relecteur dans l'org de la porte, avec `data = {kind: "approval", approvalId}` de sa demande ; aucun pour le téléphone de la session fermée, celui de l'autre org, ni celui du propriétaire ; un e-mail au relecteur dans `OSTROM_MAIL_DIR` porte le lien `/yes/{approvalId}`. Expo en panne : la porte est en attente tout de suite, l'e-mail part, le push arrive à la relance (5 s) et le refus n'est compté qu'une fois.
+- Étapes : un propriétaire invite un relecteur (admin) ; le relecteur enregistre un téléphone FCM dans l'org (`POST /api/v1/push-devices`, jeton et clé), un deuxième depuis une autre session qu'il ferme (`POST /api/v1/auth/logout`), un troisième dans une autre org dont il est membre ; le propriétaire enregistre le sien. Une règle pose une porte sur un push vers main avec le relecteur pour approbateur ; un jeton `gates:ask` demande la porte, deux fois.
+- Attendu : chaque porte est en attente tout de suite ; un e-mail au relecteur dans `OSTROM_MAIL_DIR` porte le lien `/yes/{approvalId}` et ne nomme aucun jeton push. Le banc n'a pas de fournisseur push (Admin → Réglages → push à `off`) : rien ne part vers FCM, dont l'envoi chiffré, la lecture par org et les relances sont tenus par les tests du serveur (`ApprovalNotificationsPostgresTest`, `EncryptedPushTest`, ostrom-server#475). Le faux Expo est retiré avec Expo.
 - Surfaces : serveur (image), module `notifications`
 - Source : `demo/PARCOURS.md` 6.7 ; ostrom-server#228 (remplace #47)
 - Priorité : P1
-- Statut : codé : `scenarios/parcours.e2e.ts` (s'allume avec `OSTROM_E2E_FAKE_EXPO_PORT` : `e2e-journey.yml` du serveur et `ci.yml`)
+- Statut : codé : `scenarios/parcours.e2e.ts`
 
 
 ### E2E-PARC-041 — 2.11 Réglages de l'org : nom et fuseau changés par un admin ; un membre ou un approbateur ne peut pas, une autre org reçoit 404
