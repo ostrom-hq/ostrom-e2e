@@ -2,6 +2,7 @@
 // People and organizations of the scenarios, made through the server's own routes: e-mailed sign-in (the link is read
 // from OSTROM_MAIL_DIR), the current organization, invitations. Each helper says why it cannot run yet, so a scenario
 // that needs them stays skipped with the reason until the routes are on main.
+import { generateKeyPairSync } from 'node:crypto';
 import { type Caller, headersOf } from '../src/isolation.ts';
 import { invitationToken, signInToken } from '../src/mail.ts';
 import { firstServed, isServed } from '../src/probe.ts';
@@ -159,3 +160,11 @@ export const email = (who: string) => {
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   return `${who}-${id}@c${id}.e2e.ostrom.test`;
 };
+
+/**
+ * A phone's public key as the app registers it with its FCM token (ostrom-server#475): a P-256 key in
+ * SubjectPublicKeyInfo DER, base64. `curve` makes the key of another curve a server refuses.
+ */
+export function phoneKey(curve: 'P-256' | 'P-384' = 'P-256'): string {
+  return generateKeyPairSync('ec', { namedCurve: curve }).publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+}

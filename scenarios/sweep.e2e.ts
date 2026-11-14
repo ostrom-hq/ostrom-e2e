@@ -15,7 +15,7 @@ import { type Caller, headersOf } from '../src/isolation.ts';
 import { type Answer, type Case, type CaseClass, type Leak, fill, judge, leakKey, mergeServed, mimic, operations, parseServed, plan, reconcile, sample, servedInContract } from '../src/sweep.ts';
 import { SERVER_URL } from './env.ts';
 import { receiptIdIn } from './lib.ts';
-import { type Org, type Person, address, call, email, invite, orgOf, orgsUnavailable, profileOf, signIn, url } from './org.ts';
+import { type Org, type Person, address, call, email, invite, orgOf, orgsUnavailable, phoneKey, profileOf, signIn, url } from './org.ts';
 
 const SERVED_FILE = process.env['OSTROM_E2E_SERVED_ROUTES'] ?? '';
 const OPENAPI_FILE = process.env['OSTROM_E2E_OPENAPI'] ?? '';
@@ -393,7 +393,8 @@ async function makeWorld(): Promise<World> {
     return id;
   });
   // A's phone for push (ostrom-server#196): the console's browser session holds notifications:write.
-  await make('pushDevice', () => post('/api/v1/push-devices', { pushToken: `ExponentPushToken[sweep-${tag}]`, provider: 'expo', platform: 'ios' }, 'registerPushDevice', ['id']));
+  // Its FCM registration token and the P-256 key the pushes are encrypted for (ostrom-server#475).
+  await make('pushDevice', () => post('/api/v1/push-devices', { pushToken: `sweep-fcm-token:${tag}-0123456789`, provider: 'fcm', platform: 'ios', publicKey: phoneKey() }, 'registerPushDevice', ['id']));
   const workflowId = `sweep-${tag}`;
   await make('workflow', () =>
     post(

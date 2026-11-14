@@ -9,12 +9,11 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join as joinPath } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Caller } from '../src/isolation.ts';
-import { FakeExpo } from '../src/fake-expo.ts';
 import { invitationToken } from '../src/mail.ts';
 import { FakeTokens } from '../src/fake-tokens.ts';
 import { isServed } from '../src/probe.ts';
-import { FAKE_EXPO_PORT, FAKE_TOKENS_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
-import { type Org, type Person, call, email, invite, join, orgOf, orgsUnavailable, profileOf, signIn } from './org.ts';
+import { FAKE_TOKENS_PORT, MAIL_DIR, SERVER_URL } from './env.ts';
+import { type Org, type Person, call, email, invite, join, orgOf, orgsUnavailable, phoneKey, profileOf, signIn } from './org.ts';
 
 const ORGS = await orgsUnavailable();
 const ID = randomUUID();
@@ -1449,8 +1448,9 @@ const W034 = (await needs(['GET', '/api/v1/usage'], ['GET', '/api/v1/usage/summa
 const W035 = (await needs(['POST', '/api/v1/import/teamcode'])) || ORG64;
 const W036 = (await needs(['POST', '/api/v1/auth/mobile/token'], ['GET', '/api/v1/approvals/queue'], ['GET', '/api/v1/approvals/{id}/view'], ['GET', '/api/v1/me/notifications'], ['PUT', '/api/v1/me/notifications'])) || ACTORS;
 const W037 = await needs(['POST', '/api/v1/push-devices'], ['DELETE', '/api/v1/push-devices/{id}']);
-// The sending itself has no route to probe: the bench says where the fake Expo listens once the server points at it.
-const W046 = (FAKE_EXPO_PORT === 0 ? 'no OSTROM_E2E_FAKE_EXPO_PORT (fake Expo, ostrom-server#228)' : '') || W013 || W037 || (await needs(['POST', '/api/v1/auth/logout']));
+const W046 = W013 || W037 || (await needs(['POST', '/api/v1/auth/logout']));
+/** A phone as the app registers it: its FCM registration token and its key (ostrom-server#475). */
+const fcmPhone = (pushToken: string) => ({ pushToken, provider: 'fcm', platform: 'ios', publicKey: phoneKey() });
 
 describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => {
   it.skipIf(W031 !== '')(named('E2E-PARC-031 — 6.1 the sessions of a new org: an empty list, an unknown session 404, nothing for another org', W031), async () => {
@@ -1582,96 +1582,85 @@ describe('E2E-PARC: 6. sessions, cloud, activity, usage, import, mobile', () => 
 
   it.skipIf(W037 !== '')(named('E2E-PARC-037 — 6.7 a push device is registered, its token never read back, then removed', W037), async () => {
     const a = await owner('parc-037');
-    const pushToken = `ExponentPushToken[${randomUUID()}]`;
-    const made = await call(a.c, 'POST', '/api/v1/push-devices', { pushToken, provider: 'expo', platform: 'ios', locale: 'fr-FR' });
+    const pushToken = `fcm-token:${randomUUID()}`;
+    const phone = { ...fcmPhone(pushToken), locale: 'fr-FR' };
+    const made = await call(a.c, 'POST', '/api/v1/push-devices', phone);
     expect(made.status, JSON.stringify(made.body)).toBe(201);
-    expect(made.body).toMatchObject({ provider: 'expo', platform: 'ios', locale: 'fr-FR' });
+    expect(made.body).toMatchObject({ provider: 'fcm', platform: 'ios', locale: 'fr-FR' });
     expect(JSON.stringify(made.body)).not.toContain(pushToken);
+    expect(JSON.stringify(made.body), 'the key stays on the server').not.toContain(phone.publicKey);
+    // An fcm phone without its key, or with something else than a P-256 key, is refused.
+    expect((await call(a.c, 'POST', '/api/v1/push-devices', { pushToken, provider: 'fcm', platform: 'ios' })).status).toBe(400);
+    expect((await call(a.c, 'POST', '/api/v1/push-devices', { ...phone, publicKey: 'bm90IGEga2V5' })).status).toBe(400);
+    expect((await call(a.c, 'POST', '/api/v1/push-devices', { ...phone, publicKey: phoneKey('P-384') })).status, 'a key of another curve').toBe(400);
     const b = await owner('parc-037-b');
     expect((await call(b.c, 'DELETE', `/api/v1/push-devices/${made.body['id'] as string}`)).status).toBeGreaterThanOrEqual(400);
     expect((await call(a.c, 'DELETE', `/api/v1/push-devices/${made.body['id'] as string}`)).status).toBeLessThan(300);
-    await needsCredential('POST', '/api/v1/push-devices', { pushToken, provider: 'expo', platform: 'ios' });
+    await needsCredential('POST', '/api/v1/push-devices', fcmPhone(pushToken));
   }, T);
 
-  it.skipIf(W046 !== '')(named("E2E-PARC-046 — 6.7 a request for a yes reaches the approver's live phones of the org and their mailbox, no other phone, even when Expo fails", W046), async () => {
-    const expo = await new FakeExpo().start(FAKE_EXPO_PORT);
-    try {
-      const a = await owner('parc-038');
-      const reviewerEmail = email('parc-038-rev');
-      expect((await invite(a.person, a.org.id, [reviewerEmail], 'admin')).status).toBe(200);
-      const { person: reviewer, accepted } = await join(reviewerEmail);
-      expect(accepted.status).toBe(200);
-      const login = (await profileOf(reviewer.caller)).login;
-      const phone = (name: string) => `ExponentPushToken[parc-038-${name}-${randomUUID()}]`;
-      const register = async (c: Caller, pushToken: string) => {
-        const made = await call(c, 'POST', '/api/v1/push-devices', { pushToken, provider: 'expo', platform: 'ios' });
-        expect(made.status, JSON.stringify(made.body)).toBe(201);
-      };
-      // The reviewer's live phone in the gate's organization: the only one told.
-      const live = phone('live');
-      await register({ ...reviewer.caller, org: a.org.id }, live);
-      // A phone registered from another session of the reviewer, then signed out of: forgotten with the session.
-      const signedOut = phone('signed-out');
-      const other = await signIn(reviewerEmail);
-      await register({ ...other.caller, org: a.org.id }, signedOut);
-      expect((await call(other.caller, 'POST', '/api/v1/auth/logout')).status).toBeLessThan(300);
-      // The reviewer's phone in another organization they belong to: never read for this one's gates.
-      const b = await owner('parc-038-b');
-      expect((await invite(b.person, b.org.id, [reviewerEmail])).status).toBe(200);
-      const { person: inB, accepted: joinedB } = await join(reviewerEmail);
-      expect(joinedB.status).toBe(200);
-      const otherOrg = phone('other-org');
-      await register({ ...inB.caller, org: b.org.id }, otherOrg);
-      // The asker's own phone: the owner is no approver of the rule.
-      const owners = phone('owner');
-      await register(a.c, owners);
-      const ours = new Set([live, signedOut, otherOrg, owners]);
-
-      const repo = `acme/parc-${randomUUID().slice(0, 8)}`;
-      const made = await call(a.c, 'POST', '/api/v1/rules', {
-        statement: 'A push to main waits for a review', group: 'git', scope: [repo],
-        gate: { actions: [{ class: 'push-main', label: 'Push to main', patterns: [], repos: [repo] }], approvers: [login] },
-      });
+  it.skipIf(W046 !== '')(named("E2E-PARC-046 — 6.7 a request for a yes reaches the approver's mailbox while their FCM phones of the org are registered, the request waiting at once", W046), async () => {
+    const a = await owner('parc-038');
+    const reviewerEmail = email('parc-038-rev');
+    expect((await invite(a.person, a.org.id, [reviewerEmail], 'admin')).status).toBe(200);
+    const { person: reviewer, accepted } = await join(reviewerEmail);
+    expect(accepted.status).toBe(200);
+    const login = (await profileOf(reviewer.caller)).login;
+    const phone = (name: string) => `parc-038-${name}:${randomUUID()}`;
+    const register = async (c: Caller, pushToken: string) => {
+      const made = await call(c, 'POST', '/api/v1/push-devices', fcmPhone(pushToken));
       expect(made.status, JSON.stringify(made.body)).toBe(201);
-      const token = await call(a.c, 'POST', '/api/v1/tokens', { name: 'parc-038 asker', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
-      expect(token.status, JSON.stringify(token.body)).toBeLessThan(300);
-      const asker: Caller = { token: String(token.body['secret']), org: a.org.id };
-      /** Asks a push to main, answered at once (pending), and the reviewer's request for it. */
-      const ask = async (fill: string) => {
-        const sha = randomUUID().replaceAll('-', '').padEnd(40, fill).slice(0, 40);
-        const asked = await call(asker, 'POST', '/api/v1/gates', { repo, class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
-        expect(asked.status, JSON.stringify(asked.body)).toBeLessThan(300);
-        const gate = asked.body['gate'] as Record<string, unknown>;
-        expect(gate['status'], JSON.stringify(asked.body)).toBe('pending');
-        const pending = await call({ ...reviewer.caller, org: a.org.id }, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
-        const request = itemsOf(pending.body).find((x) => x['group'] === gate['id']);
-        expect(request, JSON.stringify({ gate: asked.body, pending: pending.body })).toBeDefined();
-        return String(request?.['id']);
-      };
+    };
+    // The reviewer's live phone in the gate's organization.
+    const live = phone('live');
+    await register({ ...reviewer.caller, org: a.org.id }, live);
+    // A phone registered from another session of the reviewer, then signed out of: forgotten with the session.
+    const signedOut = phone('signed-out');
+    const other = await signIn(reviewerEmail);
+    await register({ ...other.caller, org: a.org.id }, signedOut);
+    expect((await call(other.caller, 'POST', '/api/v1/auth/logout')).status).toBeLessThan(300);
+    // The reviewer's phone in another organization they belong to: never read for this one's gates.
+    const b = await owner('parc-038-b');
+    expect((await invite(b.person, b.org.id, [reviewerEmail])).status).toBe(200);
+    const { person: inB, accepted: joinedB } = await join(reviewerEmail);
+    expect(joinedB.status).toBe(200);
+    const otherOrg = phone('other-org');
+    await register({ ...inB.caller, org: b.org.id }, otherOrg);
+    // The asker's own phone: the owner is no approver of the rule.
+    const owners = phone('owner');
+    await register(a.c, owners);
+    const ours = new Set([live, signedOut, otherOrg, owners]);
 
-      const first = await ask('0');
-      const pushed = await expo.waitFor((m) => m.to === live, 30_000);
-      expect(pushed.data).toEqual({ kind: 'approval', approvalId: first });
-      // The lock screen shows the push to whoever holds the phone: the app's `requests` channel, and no word of the request.
-      expect(pushed.channelId).toBe('requests');
-      expect(`${pushed.title} ${pushed.body}`).not.toMatch(/acme|Push to main|ana/i);
-      const mailed = await mailWith(reviewerEmail, `/yes/${first}`, 30_000);
-      expect(mailed, 'the e-mail names no push token').not.toMatch(/ExponentPushToken/);
-      // The outbox sends a request's notices together: a moment more, and still no other phone of ours was told.
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
-      expect(expo.messages.filter((m) => m.to !== undefined && ours.has(m.to)).map((m) => m.to)).toEqual([live]);
+    const repo = `acme/parc-${randomUUID().slice(0, 8)}`;
+    const made = await call(a.c, 'POST', '/api/v1/rules', {
+      statement: 'A push to main waits for a review', group: 'git', scope: [repo],
+      gate: { actions: [{ class: 'push-main', label: 'Push to main', patterns: [], repos: [repo] }], approvers: [login] },
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const token = await call(a.c, 'POST', '/api/v1/tokens', { name: 'parc-038 asker', scopes: ['gates:ask', 'gates:read'], expiresInDays: 1 });
+    expect(token.status, JSON.stringify(token.body)).toBeLessThan(300);
+    const asker: Caller = { token: String(token.body['secret']), org: a.org.id };
+    /** Asks a push to main, answered at once (pending), and the reviewer's request for it. */
+    const ask = async (fill: string) => {
+      const sha = randomUUID().replaceAll('-', '').padEnd(40, fill).slice(0, 40);
+      const asked = await call(asker, 'POST', '/api/v1/gates', { repo, class: 'git.push', tool: 'Bash', command: 'git push origin main', push: { remote: 'origin', refs: [{ ref: 'refs/heads/main', sha }] } });
+      expect(asked.status, JSON.stringify(asked.body)).toBeLessThan(300);
+      const gate = asked.body['gate'] as Record<string, unknown>;
+      expect(gate['status'], JSON.stringify(asked.body)).toBe('pending');
+      const pending = await call({ ...reviewer.caller, org: a.org.id }, 'GET', '/api/v1/approvals?mine=true&status=pending&limit=50');
+      const request = itemsOf(pending.body).find((x) => x['group'] === gate['id']);
+      expect(request, JSON.stringify({ gate: asked.body, pending: pending.body })).toBeDefined();
+      return String(request?.['id']);
+    };
 
-      // Expo down: the request is still pending at once, the e-mail still goes, and the push arrives on a later try.
-      expo.refuseNext = 1;
-      const second = await ask('1');
-      await mailWith(reviewerEmail, `/yes/${second}`, 30_000);
-      const retried = await expo.waitFor((m) => m.to === live && m.data['approvalId'] === second, 60_000);
-      expect(retried.data).toEqual({ kind: 'approval', approvalId: second });
-      expect(expo.refused).toBe(1);
-      expect(expo.messages.filter((m) => m.to !== undefined && ours.has(m.to) && m.to !== live)).toEqual([]);
-    } finally {
-      await expo.stop();
-    }
-    // Longer than T: two notices and one retry of the server's outbox (5 s) are awaited.
-  }, 3 * T);
+    // The bench's instance has no push provider (Admin → Settings → push is off): the phones register and nothing
+    // leaves for FCM, whose delivery, per-org reading and retries the server's own tests hold
+    // (ApprovalNotificationsPostgresTest, EncryptedPushTest). The request waits at once and the e-mail goes.
+    const first = await ask('0');
+    const mailed = await mailWith(reviewerEmail, `/yes/${first}`, 30_000);
+    for (const token of ours) expect(mailed, 'the e-mail names no push token').not.toContain(token);
+    const second = await ask('1');
+    await mailWith(reviewerEmail, `/yes/${second}`, 30_000);
+    // Longer than T: two e-mails of the server's outbox are awaited, up to 30 s each.
+  }, 2 * T);
 });
