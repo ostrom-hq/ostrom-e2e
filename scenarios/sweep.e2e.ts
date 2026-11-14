@@ -222,6 +222,8 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   // one: B's names none, so an answer quoting A's cluster id is a leak.
   createCloudProfile: { make: () => ({ body: cloudProfile('none', 0) }) },
   updateCloudProfile: { make: () => ({ body: cloudProfile('none', 1) }) },
+  // An organization's cloud settings (TeamCode af1a5f7b): the first save names no previous one.
+  saveCloudSettings: { make: () => ({ body: { backgroundWorkMaxMinutes: 240 } }) },
   // A workstation's report names A's skill in its body (skills.v1).
   reportSkillInstallations: { refers: true, make: (v) => ({ body: { installations: [{ name: v['skill'], status: 'installed' }] } }) },
   transferOrg: { make: (v) => ({ body: { login: v['login'] } }) },
