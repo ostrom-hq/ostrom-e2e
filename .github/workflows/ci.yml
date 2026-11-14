@@ -134,7 +134,6 @@ jobs:
             OSTROM_GITHUB_API_URL=http://127.0.0.1:4610
             OSTROM_GITHUB_CLIENT_ID=Iv1.e2ebench
             OSTROM_GITHUB_CLIENT_SECRET=e2e-bench-fake-github
-            OSTROM_WEB_ORIGIN=http://127.0.0.1:4600
             OSTROM_GITHUB_API=http://127.0.0.1:4700
             OSTROM_GITHUB_WEB=http://127.0.0.1:4700
             OSTROM_GITHUB_APP_ID=1
