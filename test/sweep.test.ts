@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
-import { type Call, type Leak, type Operation, fill, judge, keyOf, leakKey, mergeServed, mimic, normalize, operations, paramPrefix, parseServed, plan, reconcile, resolve, sample, servedInContract } from '../src/sweep.ts';
+import { type Call, type Leak, type Operation, type Served, fill, judge, keyOf, leakKey, mimic, normalize, operations, paramPrefix, plan, reconcile, resolve, sample, servedIn, withPaths } from '../src/sweep.ts';
+
+/** `GET /a\nPOST /b` as the routes it names. */
+const parseServed = (text: string): Served[] =>
+  text.split('\n').map((line) => {
+    const [method, path] = line.split(' ') as [string, string];
+    return { method, key: keyOf(path) };
+  });
 
 describe('served routes', () => {
-  it('reads one route per line, without comments, URLs or doubles; a `!` route is served all the same', () => {
-    const text = ['# header', '', 'GET /api/v1/rules', 'GET /api/v1/rules/{}', '! PUT /api/v1/x/{id}', 'GET https://api.openai.com/auth', 'GET /api/v1/rules', 'nonsense'].join('\n');
-    expect(parseServed(text)).toEqual([
-      { method: 'GET', key: '/api/v1/rules' },
-      { method: 'GET', key: '/api/v1/rules/{}' },
-      { method: 'PUT', key: '/api/v1/x/{}' },
-    ]);
+  it('writes every path parameter as {}', () => {
     expect(keyOf('/a/{id}/{ticket}/{path}')).toBe('/a/{}/{}/{}');
   });
 });
@@ -60,23 +61,26 @@ describe('operations', () => {
     expect(operations(undefined)).toEqual([]);
   });
 
-  it('reads the routes the contract marks served, and merges served lists without doubles', () => {
+  it('serves every operation of a generated document, and adds the paths it hides without replacing its own', () => {
     const doc = {
       paths: {
-        '/api/v1/push-devices/{id}': { delete: { 'x-ostrom-status': 'served' }, get: { 'x-ostrom-status': 'planned' } },
+        '/api/v1/push-devices/{id}': { delete: {}, get: {} },
         '/api/v1/push-devices': { $ref: '#/x/devices' },
-        '/api/v1/ghost': { $ref: '#/nope' },
       },
-      x: { devices: { post: { 'x-ostrom-status': 'served' } } },
+      x: { devices: { post: {} } },
     };
-    expect(servedInContract(doc)).toEqual([{ method: 'DELETE', key: '/api/v1/push-devices/{}' }, { method: 'POST', key: '/api/v1/push-devices' }]);
-    expect(servedInContract(undefined)).toEqual([]);
-    const listed = parseServed('POST /api/v1/push-devices\nGET /health');
-    expect(mergeServed(listed, servedInContract(doc))).toEqual([
-      { method: 'POST', key: '/api/v1/push-devices' },
-      { method: 'GET', key: '/health' },
+    expect(servedIn(doc)).toEqual([
+      { method: 'GET', key: '/api/v1/push-devices/{}' },
       { method: 'DELETE', key: '/api/v1/push-devices/{}' },
+      { method: 'POST', key: '/api/v1/push-devices' },
     ]);
+    expect(servedIn(undefined)).toEqual([]);
+    const hidden = { get: { operationId: 'getPage', security: [] } };
+    const extended = withPaths(doc, { '/a/{id}': hidden, '/api/v1/push-devices': { get: {} } });
+    expect(extended['x']).toBe(doc.x);
+    expect(servedIn(extended)).toContainEqual({ method: 'GET', key: '/a/{}' });
+    expect(servedIn(extended)).not.toContainEqual({ method: 'GET', key: '/api/v1/push-devices' });
+    expect(servedIn(withPaths(undefined, { '/a/{id}': hidden }))).toEqual([{ method: 'GET', key: '/a/{}' }]);
   });
 });
 
