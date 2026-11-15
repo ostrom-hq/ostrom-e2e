@@ -104,6 +104,8 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/todos/session/items/{item}': 'todoItem',
   '/api/v1/todos/stop-hook/members/{memberId}': 'member',
   '/api/v1/tokens/{id}': 'token',
+  // A hold under review (capacity.usagereconciliation.v1): no route creates one, so a fixed id.
+  '/api/v1/usage/reservations/{id}': 'usageReservation',
   '/api/v1/waits/{id}': 'wait',
   '/api/v1/webhooks/{id}': 'webhook',
   '/api/v1/workflows/{id}': 'workflow',
@@ -124,6 +126,9 @@ const FIXED: Record<string, string> = {
   // A temporary daily budget's id (capacity.budgetoverrides.v1): the member named by login decides, A's or a missing
   // one, so the same override id in both calls.
   budgetOverride: '9b2e4c61-0d7a-4f3b-a8e5-1c6d2f7b3a90',
+  // A model call's hold under review (capacity.usagereconciliation.v1): only the gateway creates holds, so A has none
+  // to name; the same id in both calls, B's answer must match A's.
+  usageReservation: '5c8a1e3f-7b2d-4e6a-9f0c-3a1b8d4e2c67',
   // An input of a conversation session (runners.cloud.conversation.v1): the session decides, A's or a missing one, so
   // the same input id in both calls.
   cloudInput: '3d0f6c7a-5b1e-4f2a-9c8d-7e6b5a4f3c21',
