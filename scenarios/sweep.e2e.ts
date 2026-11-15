@@ -235,6 +235,11 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
   // The quota forecasts of one shared account (capacity.forecasts.v1): the account is named in the query.
   getForecasts: { refers: true, make: (v) => ({ query: `account=${enc(v['account'])}` }) },
+  // The capacity controller's advice (capacity.pacing.v1): a session's advice, its claim and its receipt name an agent
+  // session in their body; A's session id, in A's organization and in B's own, never reads nor settles A's advice.
+  getSessionDirective: { refers: true, make: (v) => ({ body: { sessionId: v['session'] } }) },
+  claimDirective: { refers: true, make: (v) => ({ body: { sessionId: v['session'], stage: 'received_by_cli' } }) },
+  acknowledgeDirective: { refers: true, make: (v) => ({ body: { id: 'sweep-intruder', stage: 'received_by_cli', sessionId: v['session'] } }) },
   // An organization's cloud profile (cloud.admin.v1). Clusters are the instance's, any organization's profile may name
   // one: B's names none, so an answer quoting A's cluster id is a leak.
   createCloudProfile: { make: () => ({ body: cloudProfile('none', 0) }) },
