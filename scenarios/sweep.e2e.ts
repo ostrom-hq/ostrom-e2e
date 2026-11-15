@@ -55,6 +55,11 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/cloud/runner/files/{id}': 'cloudFile',
   '/api/v1/confirmations/{id}': 'confirmation',
   '/api/v1/devices/{id}': 'device',
+  // The device daemon (runners.cloud.remote.daemon.v1): a folder A's device published, a session A started on it
+  // through its daemon, and a listing a member waits for (only a member's resumable read creates one: a fixed id).
+  '/api/v1/devices/{}/folders/{folderId}': 'deviceFolder',
+  '/api/v1/devices/current/daemon/sessions/{id}': 'daemonSession',
+  '/api/v1/devices/current/daemon/listings/{id}': 'daemonListing',
   '/api/v1/environment/assignments/{member}': 'member',
   '/api/v1/environment/assignments/{}/{variable}': 'environmentVariable',
   '/api/v1/environment/exclusions/{member}': 'member',
@@ -143,6 +148,10 @@ const FIXED: Record<string, string> = {
   // execution its message was delivered to downloads it; the execution named in the query decides, A's or a missing
   // one, so the same file id in both calls.
   cloudFile: '8e4b2d6f-1a3c-4e7b-9d5f-0c2a6b8e4f13',
+  // A listing of a device folder's conversations (runners.cloud.remote.daemon.v1): only a member waiting on their own
+  // device's resumable conversations creates one, for seconds, and only that device's daemon answers it; the caller's
+  // device decides, so the same listing id in both calls.
+  daemonListing: '2f7c9a4e-6b1d-4e8f-a3c5-0d9b7e1f4a62',
   // The instance's settings sections are the instance's, not an organization's: the same section in both calls.
   settingsSection: 'mail',
   // The version label of A's skill (skills.v1).
@@ -262,6 +271,10 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   createMemory: { make: () => ({ body: { scope: 'personal', title: 'Sweep intruder', summary: 'Sweep intruder', content: 'Sweep intruder' } }) },
   updateMemory: { make: () => ({ body: { expectedVersion: 1, title: 'Sweep intruder', summary: 'Sweep intruder', content: 'Sweep intruder' } }) },
   getArtifactFile: { make: () => ({ query: 'path=index.md' }) },
+  // The device daemon (runners.cloud.remote.daemon.v1): a poll that waits for nothing (a long poll would outlast the
+  // sweep's 15 s), a refusal with a valid reason code.
+  pollDeviceDaemon: { make: () => ({ body: { waitMillis: 0 } }) },
+  refuseDaemonOrder: { make: () => ({ body: { reason: 'sweep_intruder' } }) },
   // The quota forecasts of one shared account (capacity.forecasts.v1): the account is named in the query.
   getForecasts: { refers: true, make: (v) => ({ query: `account=${enc(v['account'])}` }) },
   // The capacity controller's advice (capacity.pacing.v1): a session's advice, its claim and its receipt name an agent
@@ -430,14 +443,33 @@ async function makeWorld(): Promise<World> {
   });
   await make('token', () => post('/api/v1/tokens', { name: `sweep a ${tag}`, scopes: ['profile:read'], expiresInDays: 1 }, 'createToken', ['token', 'id'], ['id']));
   await make('serviceKey', () => post('/api/v1/service-keys', { name: `sweep a ${tag}`, scopes: SERVICE_KEY_SCOPES }, 'createServiceKey', ['id']));
+  let deviceCaller: Caller | undefined;
   await make('device', async () => {
     const got = await deviceToken(c, { clientName: `sweep a ${tag}` });
     if (!got.token) throw new Error(got.why);
+    deviceCaller = { token: got.token, org: org.id, from: address() };
     const id = field(itemsOf((await call(c, 'GET', '/api/v1/devices')).body)[0], 'id');
     if (!id) throw new Error('no device listed');
     return id;
   });
   // B's rename (PATCH) and sign-out (DELETE) of this device, and B's GET of A's member devices, are cases of the sweep (devices.v1).
+  // Its daemon (runners.cloud.remote.daemon.v1): a folder it publishes with A's CLI login, a poll that puts it online,
+  // and a session A starts on it from the console, waiting for the daemon to host it. B never reads the folder nor
+  // refuses the session.
+  await make('deviceFolder', async () => {
+    if (!deviceCaller) throw new Error('no device');
+    const folderId = `sweep-${tag}`;
+    const r = await call(deviceCaller, 'PUT', '/api/v1/devices/current/folders', { folders: [{ id: folderId, name: `sweep-${tag}`, label: `~/git/sweep-${tag}` }] });
+    if (r.status >= 300) throw new Error(`PUT /api/v1/devices/current/folders → ${text(r)}`);
+    return folderId;
+  });
+  await make('daemonSession', async () => {
+    if (!deviceCaller || !values['deviceFolder']) throw new Error('no published folder');
+    const polled = await call(deviceCaller, 'POST', '/api/v1/devices/current/daemon/poll', { waitMillis: 0, version: '0.0.0' });
+    if (polled.status >= 300) throw new Error(`POST /api/v1/devices/current/daemon/poll → ${text(polled)}`);
+    const r = await call(c, 'POST', '/api/v1/cloud/sessions', { agent: 'claude', kind: 'remote', deviceId: values['device'], folderId: values['deviceFolder'] });
+    return made(r, ['id']);
+  });
   // A's phone for push (ostrom-server#196): the console's browser session holds notifications:write.
   // Its FCM registration token and the P-256 key the pushes are encrypted for (ostrom-server#475).
   await make('pushDevice', () => post('/api/v1/push-devices', { pushToken: `sweep-fcm-token:${tag}-0123456789`, provider: 'fcm', platform: 'ios', publicKey: phoneKey() }, 'registerPushDevice', ['id']));
