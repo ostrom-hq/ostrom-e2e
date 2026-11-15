@@ -36,8 +36,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/approvals/{id}': 'approval',
   '/api/v1/artifacts/{id}': 'artifact',
   '/api/v1/cloud/profiles/{id}': 'cloudProfile',
-  '/api/v1/artifacts/{}/members/{memberId}': 'member',
-  // The generated document names it `{login}` (the route's own name), though it takes a member id as above.
+  // The route's parameter is named `{login}`, though it takes a member id.
   '/api/v1/artifacts/{}/members/{login}': 'member',
   '/api/v1/artifacts/{}/versions/{number}': 'artifactVersion',
   '/api/v1/artifacts/uploads/{upload}': 'artifactUpload',

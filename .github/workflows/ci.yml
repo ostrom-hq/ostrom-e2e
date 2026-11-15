@@ -168,7 +168,7 @@ jobs:
         env:
           OSTROM_URL: ${{ steps.server.outputs.url }}
         run: |
-          curl -fsS --retry 3 "$OSTROM_URL/api/openapi.json" -o "$RUNNER_TEMP/openapi.json"
+          curl -fsS --retry 3 --retry-connrefused "$OSTROM_URL/api/openapi.json" -o "$RUNNER_TEMP/openapi.json"
           jq -e '.paths | length > 0' "$RUNNER_TEMP/openapi.json"
       - name: Scenarios
         env:

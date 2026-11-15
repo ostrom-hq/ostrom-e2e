@@ -3880,7 +3880,7 @@ Chaque étape de la carte `demo/PARCOURS.md` (1.1 à 6.7) a son scénario contre
 - Surfaces : serveur (image), identité, organisations, chaque module
 - Source : consigne de l'orchestrateur du 02/11 (deuxième audit de sécurité) ; `src/sweep.ts` ; le document OpenAPI généré du serveur testé (depuis le 15/11, à la place de `api/openapi.yaml` et `served-routes.txt` d'ostrom-core)
 - Priorité : P1
-- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite) ; les routes que le contrat marque servies s'y ajoutent depuis le 03/11 (après `DELETE /push-devices/{id}`, vu seulement après la fusion de server#196). Joué aussi sur chaque PR d'ostrom-server contre l'image qu'elle construit (job `ci-e2e`).
+- Statut : codé : `scenarios/sweep.e2e.ts`, vert sur le run 41541422573 (e2e#34, 0 fuite) ; depuis le 15/11 (e2e#131), les routes et leurs opérations viennent du document généré du serveur testé (484 cas sur le run 43745796924). Joué aussi sur chaque PR d'ostrom-server contre l'image qu'elle construit (job `ci-e2e`).
 
 ### E2E-SWEEP-002 — Une session navigateur de B n'obtient rien de A, sur chaque route servie
 
