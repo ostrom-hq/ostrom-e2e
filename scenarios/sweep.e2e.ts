@@ -36,8 +36,6 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/approvals/{id}': 'approval',
   '/api/v1/artifacts/{id}': 'artifact',
   '/api/v1/cloud/profiles/{id}': 'cloudProfile',
-  // `{login}` until ostrom-server names the parameter `{memberId}` (it takes a member id); then the first key goes.
-  '/api/v1/artifacts/{}/members/{login}': 'member',
   '/api/v1/artifacts/{}/members/{memberId}': 'member',
   '/api/v1/artifacts/{}/versions/{number}': 'artifactVersion',
   '/api/v1/artifacts/uploads/{upload}': 'artifactUpload',
