@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// The isolation sweep, generated from the contract: every route the server serves (ostrom-core's
-// api/contract/served-routes.txt, plus what scripts/served-routes.py reads in the server under test) gets a case from
+// The isolation sweep, generated from the contract: every route the server serves (every operation of the OpenAPI
+// document the server under test generates from its own routes, ostrom-core docs/decisions/0001) gets a case from
 // its OpenAPI operation. A member of organization B calls it on A's resources: A's real ids, `Ostrom-Org: A`. The
 // answer must be the one a missing resource gets (same status, same body), never a success on A's ids, never a server
 // error, never anything of A. A served route without a case fails the sweep: a new route cannot be forgotten.
@@ -13,26 +13,6 @@ export interface Served {
 
 /** `/api/v1/rules/{id}` → `/api/v1/rules/{}`. */
 export const keyOf = (path: string): string => path.replace(/\{[^}]+\}/g, '{}');
-
-/**
- * The routes of a served-routes list: one `METHOD /path` per line; `#` comments, blank lines and anything that is not
- * a path (a URL the source scan picked up) are left out; a leading `!` (a route served in another shape than the
- * contract's) is dropped, the route is served all the same. Each route once, in order.
- */
-export function parseServed(text: string): Served[] {
-  const seen = new Set<string>();
-  const out: Served[] = [];
-  for (const raw of text.split('\n')) {
-    const m = /^!?\s*([A-Z]+)\s+(\/\S*)\s*$/.exec(raw.trim());
-    if (!m) continue;
-    const route = { method: m[1] as string, key: keyOf(m[2] as string) };
-    const label = `${route.method} ${route.key}`;
-    if (seen.has(label)) continue;
-    seen.add(label);
-    out.push(route);
-  }
-  return out;
-}
 
 type Json = Record<string, unknown>;
 
@@ -69,7 +49,7 @@ export function resolve(doc: unknown, node: unknown): unknown {
 
 const METHODS = ['get', 'put', 'post', 'patch', 'delete'] as const;
 
-/** Every operation of an OpenAPI document, served or planned (the served list says which the server answers). */
+/** Every operation of an OpenAPI document. */
 export function operations(doc: unknown): Operation[] {
   const out: Operation[] = [];
   const paths = ((doc as Json | undefined)?.['paths'] ?? {}) as Json;
@@ -98,30 +78,20 @@ export function operations(doc: unknown): Operation[] {
 }
 
 /**
- * The routes the contract itself marks served (`x-ostrom-status: served`): swept even when the served list and the scan
- * of the server under test miss one, so that a route served by the contract cannot go without a case.
+ * The routes of a generated OpenAPI document: the server generates it from the routes it mounts, so every operation in
+ * it is served.
  */
-export function servedInContract(doc: unknown): Served[] {
-  const out: Served[] = [];
-  const paths = ((doc as Json | undefined)?.['paths'] ?? {}) as Json;
-  for (const [path, rawItem] of Object.entries(paths)) {
-    const item = (resolve(doc, rawItem) ?? {}) as Json;
-    for (const method of METHODS) {
-      if ((item[method] as Json | undefined)?.['x-ostrom-status'] === 'served') out.push({ method: method.toUpperCase(), key: keyOf(path) });
-    }
-  }
-  return out;
+export function servedIn(doc: unknown): Served[] {
+  return operations(doc).map((op) => ({ method: op.method, key: op.key }));
 }
 
-/** Several lists of served routes as one: each route once, in the order first seen. */
-export function mergeServed(...lists: readonly (readonly Served[])[]): Served[] {
-  const seen = new Set<string>();
-  return lists.flat().filter((r) => {
-    const label = `${r.method} ${r.key}`;
-    if (seen.has(label)) return false;
-    seen.add(label);
-    return true;
-  });
+/**
+ * [doc] with [extra] paths added: the routes the server serves but hides from its document (the artifact pages of the
+ * content origin), described here as the sweep needs them. A path the document already has is kept as it is.
+ */
+export function withPaths(doc: unknown, extra: Readonly<Record<string, unknown>>): Json {
+  const base = (doc ?? {}) as Json;
+  return { ...base, paths: { ...extra, ...((base['paths'] ?? {}) as Json) } };
 }
 
 /**

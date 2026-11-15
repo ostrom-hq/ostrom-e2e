@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // E2E-SWEEP : isolation between organizations, generated from the contract (second security audit, consigne du 02/11).
-// Every route the server serves (ostrom-core's served-routes.txt, what scripts/served-routes.py reads in the server
-// under test, and every operation the contract marks `served`) gets a case from its OpenAPI operation (src/sweep.ts). A
+// Every route the server serves (every operation of the OpenAPI document the server under test generates from its own
+// routes, and the artifact pages it hides from it, HIDDEN) gets a case from its OpenAPI operation (src/sweep.ts). A
 // member of organization B calls each one on A's resources, A's real ids and `Ostrom-Org: A`, and again with B's own
 // organization named; each answer is set beside the one a missing resource gets. Five kinds of caller: browser session,
 // personal token, CLI token, the elevated `osg_` token of `ostrom login --admin`, service key. A served route without a
@@ -12,12 +12,11 @@ import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
 import { type Caller, headersOf } from '../src/isolation.ts';
-import { type Answer, type Case, type CaseClass, type Leak, fill, judge, leakKey, mergeServed, mimic, operations, parseServed, plan, reconcile, sample, servedInContract } from '../src/sweep.ts';
+import { type Answer, type Case, type CaseClass, type Leak, fill, judge, leakKey, mimic, operations, plan, reconcile, sample, servedIn, withPaths } from '../src/sweep.ts';
 import { SERVER_URL } from './env.ts';
 import { receiptIdIn } from './lib.ts';
 import { type Org, type Person, address, call, email, invite, orgOf, orgsUnavailable, phoneKey, profileOf, signIn, url } from './org.ts';
 
-const SERVED_FILE = process.env['OSTROM_E2E_SERVED_ROUTES'] ?? '';
 const OPENAPI_FILE = process.env['OSTROM_E2E_OPENAPI'] ?? '';
 const T = 900_000;
 
@@ -37,7 +36,8 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/approvals/{id}': 'approval',
   '/api/v1/artifacts/{id}': 'artifact',
   '/api/v1/cloud/profiles/{id}': 'cloudProfile',
-  '/api/v1/artifacts/{}/members/{memberId}': 'member',
+  // The route's parameter is named `{login}`, though it takes a member id.
+  '/api/v1/artifacts/{}/members/{login}': 'member',
   '/api/v1/artifacts/{}/versions/{number}': 'artifactVersion',
   '/api/v1/artifacts/uploads/{upload}': 'artifactUpload',
   '/api/v1/artifacts/uploads/{}/blobs/{sha256}': 'blobSha256',
@@ -321,12 +321,21 @@ interface Contract {
 }
 
 /** Why the contract cannot be read, or ''; in the CI it is always given (a missing file fails E2E-SWEEP-001). */
-const CONTRACT_MISSING = SERVED_FILE === '' || OPENAPI_FILE === '' ? 'no OSTROM_E2E_SERVED_ROUTES or OSTROM_E2E_OPENAPI' : '';
+const CONTRACT_MISSING = OPENAPI_FILE === '' ? 'no OSTROM_E2E_OPENAPI' : '';
+
+/**
+ * The routes the server serves but hides from its generated document: the artifact pages of the isolated content
+ * origin (no `/api/v1` route, as TeamCode's), public, each taking a secret only its holder has (CAPABILITIES).
+ */
+const HIDDEN: Record<string, unknown> = {
+  '/a/{id}/{ticket}/{path}': { get: { operationId: 'getArtifactContent', security: [] } },
+  '/l/{slug}/{path}': { get: { operationId: 'getArtifactLinkContent', security: [] } },
+};
 
 function contract(): Contract {
-  const doc: unknown = JSON.parse(readFileSync(OPENAPI_FILE, 'utf8'));
-  // The served list and the scan of the server, then every operation the contract marks served (a route the scan missed).
-  const served = mergeServed(parseServed(readFileSync(SERVED_FILE, 'utf8')), servedInContract(doc));
+  // The document of the server under test (`GET /api/openapi.json`): every operation in it is served.
+  const doc = withPaths(JSON.parse(readFileSync(OPENAPI_FILE, 'utf8')), HIDDEN);
+  const served = servedIn(doc);
   return { doc, ...plan(served, operations(doc), PARAM_KINDS, SKIPPED, new Set(Object.keys(FIXED))) };
 }
 
@@ -806,7 +815,7 @@ const format = (l: Leak) => `${leakKey(l)} → ${l.status}: ${l.reasons.join('; 
 
 describe('E2E-SWEEP: isolation between organizations, generated from the contract', () => {
   it.skipIf(CONTRACT_MISSING !== '' && process.env['CI'] === undefined)(named('E2E-SWEEP-001 every served route has a case', CONTRACT_MISSING && process.env['CI'] === undefined ? CONTRACT_MISSING : ''), () => {
-    expect(CONTRACT_MISSING, 'the CI gives the contract of ostrom-core and the routes of the server under test').toBe('');
+    expect(CONTRACT_MISSING, 'the CI gives the OpenAPI document of the server under test').toBe('');
     const { cases, uncovered } = contract();
     const by = (k: CaseClass) => cases.filter((c) => c.kind === k).length;
     console.info(`E2E-SWEEP-001: ${cases.length} cases (${by('strict')} on A's ids, ${by('org')} in an organization, ${by('own')} on the caller's account, ${by('public')} public, ${by('skipped')} not called)`);
