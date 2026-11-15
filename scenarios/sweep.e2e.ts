@@ -51,6 +51,8 @@ const PARAM_KINDS: Record<string, string> = {
   // A transfer of a session to another member (runners.cloud.transfer.v1): a fixed id, see FIXED.
   '/api/v1/cloud/transfers/{id}': 'cloudTransfer',
   '/api/v1/cloud/sessions/{}/messages/{input}': 'cloudInput',
+  // A file a message carries to the runner (runners.cloud.files.v1): a fixed id, the execution decides, see FIXED.
+  '/api/v1/cloud/runner/files/{id}': 'cloudFile',
   '/api/v1/confirmations/{id}': 'confirmation',
   '/api/v1/devices/{id}': 'device',
   '/api/v1/environment/assignments/{member}': 'member',
@@ -137,6 +139,10 @@ const FIXED: Record<string, string> = {
   // the same answer for B, so the same id in both calls.
   cloudTransfer: '6a1f3d82-4c9e-4b7a-8e25-9d0c7b1a3f54',
   cloudInput: '3d0f6c7a-5b1e-4f2a-9c8d-7e6b5a4f3c21',
+  // A file sent to a session (runners.cloud.files.v1): only a member's upload creates one and only the runner of the
+  // execution its message was delivered to downloads it; the execution named in the query decides, A's or a missing
+  // one, so the same file id in both calls.
+  cloudFile: '8e4b2d6f-1a3c-4e7b-9d5f-0c2a6b8e4f13',
   // The instance's settings sections are the instance's, not an organization's: the same section in both calls.
   settingsSection: 'mail',
   // The version label of A's skill (skills.v1).
@@ -212,6 +218,10 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   fetchRunnerGithubToken: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1 } }) },
   // The execution's inference credential (runners.cloud.inference.v1): only the runner of A's execution gets it.
   issueRunnerInference: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1 } }) },
+  // Files sent to a session (runners.cloud.files.v1): an upload names its file in the query (its bytes are the raw
+  // body, none here: the session decides first), a runner's download names A's execution in its query.
+  uploadCloudFile: { make: () => ({ query: 'name=sweep.txt' }) },
+  cloudRunnerFile: { refers: true, make: (v) => ({ query: `sessionId=${enc(v['cloudSession'])}&epoch=1` }) },
   setCloudSessionGithubAccess: { make: () => ({ body: { access: 'shared' } }) },
   reportRunnerCheck: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1, check: { name: 'tests', outcome: 'passed' } } }) },
   // A cloud session's delivery (TC-SKL-11, TC-HOK-9): its owner's skills and hooks, for its execution only.
