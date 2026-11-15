@@ -80,6 +80,9 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/me/skills/{name}': 'mySkill',
   '/api/v1/members/{memberId}': 'member',
   '/api/v1/members/{memberId}/devices': 'member',
+  // A member's temporary daily budgets (capacity.budgetoverrides.v1): the member by login, the override by id.
+  '/api/v1/members/{login}': 'login',
+  '/api/v1/members/{}/budget-overrides/{id}': 'budgetOverride',
   '/api/v1/orgs/{org}': 'org',
   '/api/v1/orgs/{orgId}': 'org',
   '/api/v1/orgs/{}/invitations/{id}': 'invitation',
@@ -118,6 +121,9 @@ const FIXED: Record<string, string> = {
   chunkIndex: '0',
   automationVersion: '1',
   inferenceRequest: '6f1c2b0e-9a4d-4c3e-8b7a-2d5e1f0a9c41',
+  // A temporary daily budget's id (capacity.budgetoverrides.v1): the member named by login decides, A's or a missing
+  // one, so the same override id in both calls.
+  budgetOverride: '9b2e4c61-0d7a-4f3b-a8e5-1c6d2f7b3a90',
   // An input of a conversation session (runners.cloud.conversation.v1): the session decides, A's or a missing one, so
   // the same input id in both calls.
   cloudInput: '3d0f6c7a-5b1e-4f2a-9c8d-7e6b5a4f3c21',
