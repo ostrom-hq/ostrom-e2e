@@ -79,6 +79,7 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/mcp/{server}': 'mcpServer',
   '/api/v1/me/skills/{name}': 'mySkill',
   '/api/v1/members/{memberId}': 'member',
+  '/api/v1/members/{memberId}/devices': 'member',
   '/api/v1/orgs/{org}': 'org',
   '/api/v1/orgs/{orgId}': 'org',
   '/api/v1/orgs/{}/invitations/{id}': 'invitation',
@@ -408,6 +409,7 @@ async function makeWorld(): Promise<World> {
     if (!id) throw new Error('no device listed');
     return id;
   });
+  // B's rename (PATCH) and sign-out (DELETE) of this device, and B's GET of A's member devices, are cases of the sweep (devices.v1).
   // A's phone for push (ostrom-server#196): the console's browser session holds notifications:write.
   // Its FCM registration token and the P-256 key the pushes are encrypted for (ostrom-server#475).
   await make('pushDevice', () => post('/api/v1/push-devices', { pushToken: `sweep-fcm-token:${tag}-0123456789`, provider: 'fcm', platform: 'ios', publicKey: phoneKey() }, 'registerPushDevice', ['id']));
