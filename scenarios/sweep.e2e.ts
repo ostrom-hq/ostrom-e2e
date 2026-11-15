@@ -48,6 +48,8 @@ const PARAM_KINDS: Record<string, string> = {
   '/api/v1/automations/{}/runs/{runId}': 'automationRun',
   '/api/v1/automations/{}/v/{version}': 'automationVersion',
   '/api/v1/cloud/sessions/{id}': 'cloudSession',
+  // A transfer of a session to another member (runners.cloud.transfer.v1): a fixed id, see FIXED.
+  '/api/v1/cloud/transfers/{id}': 'cloudTransfer',
   '/api/v1/cloud/sessions/{}/messages/{input}': 'cloudInput',
   '/api/v1/confirmations/{id}': 'confirmation',
   '/api/v1/devices/{id}': 'device',
@@ -131,6 +133,9 @@ const FIXED: Record<string, string> = {
   usageReservation: '5c8a1e3f-7b2d-4e6a-9f0c-3a1b8d4e2c67',
   // An input of a conversation session (runners.cloud.conversation.v1): the session decides, A's or a missing one, so
   // the same input id in both calls.
+  // A transfer of a session (runners.cloud.transfer.v1): the caller must be a party of it, A's or a missing one is
+  // the same answer for B, so the same id in both calls.
+  cloudTransfer: '6a1f3d82-4c9e-4b7a-8e25-9d0c7b1a3f54',
   cloudInput: '3d0f6c7a-5b1e-4f2a-9c8d-7e6b5a4f3c21',
   // The instance's settings sections are the instance's, not an organization's: the same section in both calls.
   settingsSection: 'mail',
