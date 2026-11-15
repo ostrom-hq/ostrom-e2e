@@ -210,6 +210,8 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   cloudRunnerHeartbeat: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1 } }) },
   openRunnerLaunch: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1 } }) },
   fetchRunnerGithubToken: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1 } }) },
+  // The execution's inference credential (runners.cloud.inference.v1): only the runner of A's execution gets it.
+  issueRunnerInference: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1 } }) },
   setCloudSessionGithubAccess: { make: () => ({ body: { access: 'shared' } }) },
   reportRunnerCheck: { refers: true, make: (v) => ({ body: { sessionId: v['cloudSession'], epoch: 1, check: { name: 'tests', outcome: 'passed' } } }) },
   // A cloud session's delivery (TC-SKL-11, TC-HOK-9): its owner's skills and hooks, for its execution only.
