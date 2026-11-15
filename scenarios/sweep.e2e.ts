@@ -257,6 +257,10 @@ const REQUESTS: Record<string, { refers?: boolean; make: (v: Values) => { query?
   updateEnvironmentVariant: { make: () => ({ body: { expectedVersion: 1, name: 'intruder' } }) },
   assignEnvironmentVariant: { refers: true, make: (v) => ({ body: { variantId: v['environmentVariant'] } }) },
   listEnvironmentAssignments: { refers: true, make: (v) => ({ query: `member=${enc(v['member'])}` }) },
+  // A member's profiles (runners.cloud.profiles.member.v1) and TeamCode's owner of a session list
+  // (runners.cloud.sessions.owner.v1): both name A's member in their query.
+  listCloudProfiles: { refers: true, make: (v) => ({ query: `member=${enc(v['member'])}` }) },
+  listCloudSessions: { refers: true, make: (v) => ({ query: `owner=${enc(v['member'])}` }) },
   createMyEnvironmentVariant: { make: () => ({ body: { variable: 'SWEEP_INTRUDER', name: 'intruder', value: 'sweep-intruder' } }) },
   updateMyEnvironmentVariant: { make: () => ({ body: { expectedVersion: 1, name: 'intruder' } }) },
   // Personal MCP servers (mcp.personal.v1): the body of a remote server.
